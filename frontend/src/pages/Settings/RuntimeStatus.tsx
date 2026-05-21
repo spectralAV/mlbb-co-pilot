@@ -25,7 +25,7 @@ export function RuntimeStatus() {
       <button className="btn" onClick={load}>Refresh</button>
     </div>
     {error && <p className="text-red-300">{error}</p>}
-    <div className="grid grid-cols-3 gap-3">
+    <div className="grid gap-3 sm:grid-cols-3">
       <div className="rounded-lg bg-white/5 p-3"><b>Exists</b><div>{status?.exists ? "Yes" : "No"}</div></div>
       <div className="rounded-lg bg-white/5 p-3"><b>Heroes</b><div>{status?.heroCount ?? 0}</div></div>
       <div className="rounded-lg bg-white/5 p-3"><b>Updated</b><div className="truncate">{status?.updatedAt ?? "Never"}</div></div>

@@ -27,7 +27,7 @@ export function DataSync() {
       <p className="text-sm text-slate-400">Refresh heroes, roles, lanes, relations, meta stats, and patch feed from official MLBB web data sources.</p>
     </div>
     <label className="block text-sm">GMS authorization token<input className="input mt-2 w-full" type="password" value={authorization} onChange={(e) => setAuthorization(e.target.value)} placeholder="Paste fresh authorization header value" /></label>
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid gap-3 sm:grid-cols-2">
       <label className="block text-sm">Rank bracket<input className="input mt-2 w-full" value={rank} onChange={(e) => setRank(e.target.value)} /></label>
       <label className="block text-sm">Match type<input className="input mt-2 w-full" type="number" value={matchType} onChange={(e) => setMatchType(Number(e.target.value))} /></label>
     </div>

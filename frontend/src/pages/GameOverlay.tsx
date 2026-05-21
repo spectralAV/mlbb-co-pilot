@@ -10,12 +10,12 @@ export function GameOverlay() {
   const coaching = useMemo(() => getLiveCoaching(state, risk), [state, risk]);
   const goldRisk = risk.lanes.gold.risk;
 
-  return <main className="min-h-screen bg-transparent p-5 text-white">
-    <section className="mx-auto max-w-5xl rounded-2xl border border-white/10 bg-slate-950/95 p-5 shadow-2xl">
+  return <main className="min-h-screen bg-transparent p-2 text-white sm:p-5">
+    <section className="mx-auto max-w-5xl rounded-lg border border-white/10 bg-slate-950/95 p-3 shadow-2xl sm:p-5">
       <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-12">
         <div className="md:col-span-5">
           <div className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-300">OBS Compact Overlay</div>
-          <div className="mt-2 text-4xl font-black text-white">NEXT: {coaching.mainAction}</div>
+          <div className="mt-2 text-2xl font-black leading-tight text-white sm:text-4xl">NEXT: {coaching.mainAction}</div>
           <div className="mt-2 text-slate-300">{coaching.reason}</div>
         </div>
         <div className="grid grid-cols-2 gap-2 md:col-span-3">
@@ -26,7 +26,7 @@ export function GameOverlay() {
         </div>
         <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-4 md:col-span-4">
           <div className="text-xs font-bold uppercase tracking-widest text-red-300">Risk</div>
-          <div className="mt-2 text-2xl font-black">{coaching.warnings[0] ?? "No urgent warning."}</div>
+          <div className="mt-2 text-xl font-black sm:text-2xl">{coaching.warnings[0] ?? "No urgent warning."}</div>
         </div>
       </div>
     </section>

@@ -80,14 +80,14 @@ export function Calibration() {
       <h2 className="text-3xl font-black">OBS Region Calibration</h2>
       <p className="text-slate-400">Draw normalized 20:9 regions for draft picks, bans, minimap, scoreboard, and item areas.</p>
     </div>
-    <div className="flex flex-wrap items-center gap-2">
-      <select className="input" value={key} onChange={(event) => setKey(event.target.value)}>{regionOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-      <button className="btn" onClick={save} disabled={!selected}>Save Region</button>
-      <button className="btn" onClick={() => clear(key)}>Clear Selected</button>
-      <button className="btn" onClick={() => clear("all")}>Clear All Lists</button>
+    <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+      <select className="input w-full sm:w-auto" value={key} onChange={(event) => setKey(event.target.value)}>{regionOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+      <button className="btn w-full sm:w-auto" onClick={save} disabled={!selected}>Save Region</button>
+      <button className="btn w-full sm:w-auto" onClick={() => clear(key)}>Clear Selected</button>
+      <button className="btn w-full sm:w-auto" onClick={() => clear("all")}>Clear All Lists</button>
     </div>
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <div ref={boxRef} className="relative aspect-[20/9] overflow-hidden rounded-lg border border-sky-300/30 bg-[#03060c]" onPointerDown={(event) => { const p = pointer(event); setStart(p); setCurrent(p); }} onPointerMove={(event) => { if (start) setCurrent(pointer(event)); }} onPointerUp={(event) => finish(pointer(event))}>
+      <div ref={boxRef} className="relative aspect-[20/9] touch-none select-none overflow-hidden rounded-lg border border-sky-300/30 bg-[#03060c]" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); const p = pointer(event); setStart(p); setCurrent(p); }} onPointerMove={(event) => { if (start) setCurrent(pointer(event)); }} onPointerUp={(event) => finish(pointer(event))}>
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] bg-[size:40px_40px]" />
         <div className="absolute left-[1.5%] top-[61.5%] h-[36%] w-[21.5%] rounded border border-violet-300/40 bg-violet-500/10" />
         {savedRects().map(({ key: savedKey, region }, index) => <div key={`${savedKey}-${index}`} title={savedKey} className="absolute border-2 border-sky-300 bg-sky-400/10" style={{ left: `${region[0] * 100}%`, top: `${region[1] * 100}%`, width: `${region[2] * 100}%`, height: `${region[3] * 100}%` }} />)}

@@ -17,7 +17,7 @@ export function CoachingFeed({ coaching, compact = false }: { coaching: LiveCoac
           {(coaching.warnings.length ? coaching.warnings : ["No urgent warning."]).slice(0, 3).map((warning) => <li key={warning}>{warning}</li>)}
         </ul>
       </div>
-      {!compact && <div className="grid grid-cols-3 gap-2"><RiskBadge risk="low">Farm</RiskBadge><RiskBadge risk="medium">Gank</RiskBadge><RiskBadge risk="high">Objective</RiskBadge></div>}
+      {!compact && <div className="grid gap-2 sm:grid-cols-3"><RiskBadge risk="low">Farm</RiskBadge><RiskBadge risk="medium">Gank</RiskBadge><RiskBadge risk="high">Objective</RiskBadge></div>}
     </div>
   </GamePanel>;
 }

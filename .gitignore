@@ -24,3 +24,4 @@ backups/
 data/cache/*.json
 !data/cache/.gitkeep
 data/game-sessions/
+repo-patches/

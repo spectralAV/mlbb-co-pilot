@@ -23,7 +23,7 @@ const events: Array<{ label: string; type: GameEvent["type"]; zone?: MapZoneId }
 export function QuickEventPad({ state, onEvent }: { state: GameState; onEvent: (event: GameEvent) => void }) {
   return <GamePanel title="Quick Events" icon={Radio}>
     <div className="grid grid-cols-2 gap-2">
-      {events.map((event) => <button key={event.label} className="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2 text-left text-xs font-semibold text-slate-200 transition hover:bg-white/10" onClick={() => onEvent({
+      {events.map((event) => <button key={event.label} className="min-h-12 rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2 text-left text-xs font-semibold text-slate-200 transition hover:bg-white/10 active:bg-white/15" onClick={() => onEvent({
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         matchTime: formatMatchTime(state.matchTimeSeconds),
