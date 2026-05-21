@@ -103,6 +103,24 @@ Confirmed-lane lobby example:
 powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_lanes_confirmed -Queue solo -Role unknown -IconState multi_role -SelectedRoles mid,roam
 ```
 
+## Vector Recognition
+
+Build lane-icon vectors from the large Choose Lane icons. Clean confirmed-lane banner icons are also used as compact scale/frame exemplars by default:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\build-lane-icon-vector-templates.ps1
+```
+
+Use `-BigOnly` when you want to test only the large pre-confirmation icon vectors.
+
+Then compare compact confirmed-lane banner icons against those canonical vectors:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\recognize-confirmed-lane-icons.ps1 -CropDir .\data\recognition-samples\crops\ranked_lanes_confirmed\solo\unknown\20260521-185115
+```
+
+The generated `lane-icon-vector-templates.json` file is ignored by Git because it contains machine-local sample paths.
+
 ## Workflow
 
 1. Open the target MLBB screen on the device.
