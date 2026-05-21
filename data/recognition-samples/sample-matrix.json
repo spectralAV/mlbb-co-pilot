@@ -4,7 +4,7 @@
   "screens": {
     "ranked_lobby": {
       "queues": ["solo", "duo", "trio", "five_man"],
-      "roles": ["unknown"],
+      "roles": ["jungle", "exp", "gold", "mid", "roam", "unknown"],
       "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "party_slot_0_leader_banner", "party_slot_1_card", "party_slot_2_card", "party_slot_3_card", "party_slot_4_card", "party_avatar_areas", "party_role_icon_areas", "queue_slots_full", "queue_slot_1", "queue_slot_2", "queue_slot_3", "queue_slot_4", "start_game_button"]
     },
     "draft_role_select": {
@@ -18,7 +18,30 @@
       "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
     }
   },
+  "queueRules": {
+    "solo": {
+      "selectedRoleCount": 1,
+      "selectedRoleRegions": ["player_role_icon", "party_role_icon_areas_00"],
+      "partySlotsExpected": 1,
+      "notes": "Solo queue only has one player-selected role state: your own banner/slot 0."
+    },
+    "duo": {
+      "selectedRoleCount": 2,
+      "selectedRoleRegions": ["party_role_icon_areas_00", "party_role_icon_areas_01"],
+      "partySlotsExpected": 2
+    },
+    "trio": {
+      "selectedRoleCount": 3,
+      "selectedRoleRegions": ["party_role_icon_areas_00", "party_role_icon_areas_01", "party_role_icon_areas_02"],
+      "partySlotsExpected": 3
+    },
+    "five_man": {
+      "selectedRoleCount": 5,
+      "selectedRoleRegions": ["party_role_icon_areas_00", "party_role_icon_areas_01", "party_role_icon_areas_02", "party_role_icon_areas_03", "party_role_icon_areas_04"],
+      "partySlotsExpected": 5
+    }
+  },
   "iconStates": ["swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown"],
-  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role unknown -IconState swap",
+  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role jungle -IconState role_jungle",
   "privacy": "Raw screenshots and crops are ignored by Git because they may include personal avatars, names, flags, friends, and account state."
 }

@@ -56,10 +56,17 @@ Suggested minimum per combination: 5 screenshots.
 Party size matters because this screen can contain multiple player cards at once:
 
 - slot 0 is your left-side leader banner
-- slots 1-4 are the central teammate cards/placeholders
+- in solo, only slot 0 can have your selected role
+- slots 1-4 are central teammate cards/placeholders
 - in duo, expect slot 0 + one filled teammate slot
 - in trio, expect slot 0 + two filled teammate slots
 - in five-man, expect all five slots populated
+
+Solo samples should be captured as one role at a time:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role jungle -IconState role_jungle
+```
 
 ## Workflow
 

@@ -9,6 +9,7 @@
     "Screen is the Ranked Mythic 10-Ban lobby, not draft.",
     "Player banner is the left vertical card.",
     "Queue slots are the central teammate/role placeholder cards.",
+    "For solo queue, only slot 0 / player_role_icon can represent the selected role.",
     "Use normalized regions so captures survive small resolution changes."
   ],
   "regions": {
