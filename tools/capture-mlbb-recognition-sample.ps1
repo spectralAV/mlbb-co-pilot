@@ -5,11 +5,13 @@ param(
   [ValidateSet("solo", "duo", "trio", "five_man", "unknown")]
   [string]$Queue = "unknown",
 
-  [ValidateSet("jungle", "exp", "gold", "mid", "roam", "flex", "unknown")]
+  [ValidateSet("jungle", "exp", "gold", "mid", "roam", "unknown")]
   [string]$Role = "unknown",
 
-  [ValidateSet("swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "role_flex", "unknown")]
+  [ValidateSet("single_role", "multi_role", "flex_all", "swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown")]
   [string]$IconState = "unknown",
+
+  [string]$SelectedRoles = "",
 
   [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path
 )
@@ -18,6 +20,11 @@ $ErrorActionPreference = "Stop"
 
 $adb = Get-Command adb -ErrorAction Stop
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$selectedRoleList = @($SelectedRoles -split "," | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+if ($IconState -eq "flex_all") {
+  $selectedRoleList = @("exp", "jungle", "mid", "roam", "gold")
+}
+
 $rawDir = Join-Path $ProjectRoot "data\recognition-samples\raw"
 $cropDir = Join-Path $ProjectRoot "data\recognition-samples\crops\$Screen\$Queue\$Role\$stamp"
 $mapFile = switch ($Screen) {
@@ -88,6 +95,7 @@ $manifest = [ordered]@{
   queue = $Queue
   role = $Role
   iconState = $IconState
+  selectedRoles = $selectedRoleList
   capturedAt = (Get-Date).ToString("o")
   rawPath = $rawPath
   cropDir = $cropDir

@@ -9,26 +9,28 @@
     },
     "ranked_choose_lane": {
       "queues": ["solo", "duo", "trio", "five_man"],
-      "roles": ["exp", "jungle", "mid", "roam", "gold", "flex"],
+      "roles": ["exp", "jungle", "mid", "roam", "gold"],
+      "selectionModes": ["single_role", "multi_role", "flex_all"],
+      "flexAllRoles": ["exp", "jungle", "mid", "roam", "gold"],
       "regions": ["choose_lane_panel", "choose_lane_title", "lane_cards", "lane_icons", "lane_checkmarks", "estimated_wait", "confirm_button"]
     },
     "draft_role_select": {
       "queues": ["solo", "duo", "trio", "five_man"],
-      "roles": ["jungle", "exp", "gold", "mid", "roam", "flex"],
+      "roles": ["jungle", "exp", "gold", "mid", "roam"],
       "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
     },
     "draft_pick": {
       "queues": ["solo", "duo", "trio", "five_man"],
-      "roles": ["jungle", "exp", "gold", "mid", "roam", "flex"],
+      "roles": ["jungle", "exp", "gold", "mid", "roam"],
       "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
     }
   },
   "queueRules": {
     "solo": {
-      "selectedRoleCount": 1,
+      "selectedRoleCount": "1_to_5_prematch",
       "selectedRoleRegions": ["player_role_icon", "party_role_icon_areas_00"],
       "partySlotsExpected": 1,
-      "notes": "Solo queue only has one player-selected role state: your own banner/slot 0."
+      "notes": "Solo prematch lane choice can include up to five accepted roles. Flex Pro means all five accepted. Match assignment later resolves to one actual role; Roam-only remains Roam-only."
     },
     "duo": {
       "selectedRoleCount": 2,
@@ -46,7 +48,12 @@
       "partySlotsExpected": 5
     }
   },
-  "iconStates": ["swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "role_flex", "unknown"],
-  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role exp -IconState role_exp",
+  "assignmentRules": {
+    "actualRoles": ["exp", "jungle", "mid", "roam", "gold"],
+    "flexProMeaning": "Accept all five prematch roles; not a sixth role.",
+    "postMatchAssignment": "After matchmaking, the player is assigned one actual role. Roam-only selection remains Roam-only."
+  },
+  "iconStates": ["single_role", "multi_role", "flex_all", "swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown"],
+  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role unknown -IconState flex_all",
   "privacy": "Raw screenshots and crops are ignored by Git because they may include personal avatars, names, flags, friends, and account state."
 }

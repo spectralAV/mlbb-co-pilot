@@ -17,6 +17,8 @@ Image samples are ignored by Git because they can contain personal avatars, frie
 - `gold_card`
 - `flex_card`
 
+`flex_card` is a prematch shortcut, not a sixth role. It means the player accepts all five actual roles.
+
 Important regions:
 
 - `player_banner_full`
@@ -47,7 +49,6 @@ And role labels:
 - `gold`
 - `mid`
 - `roam`
-- `flex`
 - `unknown`
 
 And dynamic icon states:
@@ -59,8 +60,15 @@ And dynamic icon states:
 - `role_gold`
 - `role_mid`
 - `role_roam`
-- `role_flex`
 - `unknown`
+
+Prematch role selection rules:
+
+- actual roles are `exp`, `jungle`, `mid`, `roam`, and `gold`
+- the Choose Lane screen can select up to five accepted roles before matchmaking
+- `Flex Pro` means all five actual roles are accepted
+- after matchmaking, the player receives one actual role
+- if only `roam` is selected, matchmaking keeps the player roam-only
 
 Suggested minimum per combination: 5 screenshots.
 
@@ -73,10 +81,17 @@ Party size matters because this screen can contain multiple player cards at once
 - in trio, expect slot 0 + two filled teammate slots
 - in five-man, expect all five slots populated
 
-Solo samples should be captured as one role at a time:
+Solo prematch samples should record the selected role set:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role jungle -IconState role_jungle
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role unknown -IconState multi_role -SelectedRoles exp,jungle,mid
+```
+
+Roam-only and Flex Pro examples:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role roam -IconState single_role -SelectedRoles roam
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role unknown -IconState flex_all
 ```
 
 ## Workflow

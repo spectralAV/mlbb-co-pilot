@@ -8,7 +8,9 @@
   "notes": [
     "Screen is the Ranked Mythic 10-Ban Choose Lane overlay.",
     "This is not the lobby banner layout and must not use ranked_lobby crops.",
-    "Solo queue lane choice is one selected role among Exp, Jungle, Mid, Roam, Gold, and Flex Pro.",
+    "Prematch lane choice can select up to five actual roles: Exp, Jungle, Mid, Roam, and Gold.",
+    "Flex Pro is not a sixth gameplay role; it means accepting all five prematch roles.",
+    "After matchmaking, the assigned match role is one of the five actual roles; selecting only Roam keeps the player Roam-only.",
     "Use the selected checkmarks at the bottom of cards to detect chosen/unconfirmed role states."
   ],
   "regions": {
@@ -70,7 +72,9 @@
   },
   "labels": {
     "queueSizes": ["solo", "duo", "trio", "five_man"],
-    "roles": ["exp", "jungle", "mid", "roam", "gold", "flex", "unknown"],
+    "roles": ["exp", "jungle", "mid", "roam", "gold", "unknown"],
+    "selectionModes": ["single_role", "multi_role", "flex_all"],
+    "flexAllRoles": ["exp", "jungle", "mid", "roam", "gold"],
     "screens": ["ranked_choose_lane"]
   }
 }
