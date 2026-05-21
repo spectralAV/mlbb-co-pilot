@@ -14,6 +14,12 @@
       "flexAllRoles": ["exp", "jungle", "mid", "roam", "gold"],
       "regions": ["choose_lane_panel", "choose_lane_title", "lane_cards", "lane_icons", "lane_checkmarks", "selection_prompt", "needed_lane_tip", "estimated_wait", "confirm_button"]
     },
+    "ranked_lanes_confirmed": {
+      "queues": ["solo", "duo", "trio", "five_man"],
+      "roles": ["exp", "jungle", "mid", "roam", "gold"],
+      "selectionModes": ["single_role", "multi_role", "flex_all"],
+      "regions": ["player_banner_full", "accepted_lane_icons_full", "accepted_lane_icons", "queue_slots_full", "friends_panel"]
+    },
     "draft_role_select": {
       "queues": ["solo", "duo", "trio", "five_man"],
       "roles": ["jungle", "exp", "gold", "mid", "roam"],

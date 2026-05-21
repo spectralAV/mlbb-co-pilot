@@ -19,6 +19,8 @@ Image samples are ignored by Git because they can contain personal avatars, frie
 
 `flex_card` is a prematch shortcut, not a sixth role. It means the player accepts all five actual roles.
 
+`region-map-ranked-lanes-confirmed-2856x1280.json` maps the ranked prematch lobby after lane preferences are confirmed. In that state, accepted lanes appear as compact icons on the player banner, for example two icons for `mid,roam`.
+
 Important regions:
 
 - `player_banner_full`
@@ -93,6 +95,12 @@ Roam-only and Flex Pro examples:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role roam -IconState single_role -SelectedRoles roam
 powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role unknown -IconState flex_all
+```
+
+Confirmed-lane lobby example:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_lanes_confirmed -Queue solo -Role unknown -IconState multi_role -SelectedRoles mid,roam
 ```
 
 ## Workflow

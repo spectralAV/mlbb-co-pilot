@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("ranked_lobby", "classic_lobby", "ranked_choose_lane", "draft_role_select", "draft_pick", "post_match")]
+  [ValidateSet("ranked_lobby", "classic_lobby", "ranked_choose_lane", "ranked_lanes_confirmed", "draft_role_select", "draft_pick", "post_match")]
   [string]$Screen = "ranked_lobby",
 
   [ValidateSet("solo", "duo", "trio", "five_man", "unknown")]
@@ -29,6 +29,7 @@ $rawDir = Join-Path $ProjectRoot "data\recognition-samples\raw"
 $cropDir = Join-Path $ProjectRoot "data\recognition-samples\crops\$Screen\$Queue\$Role\$stamp"
 $mapFile = switch ($Screen) {
   "ranked_choose_lane" { "region-map-ranked-choose-lane-2856x1280.json" }
+  "ranked_lanes_confirmed" { "region-map-ranked-lanes-confirmed-2856x1280.json" }
   default { "region-map-ranked-lobby-2856x1280.json" }
 }
 $mapPath = Join-Path $ProjectRoot "data\recognition-samples\$mapFile"
