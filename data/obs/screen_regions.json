@@ -1,0 +1,15 @@
+{
+  "comment": "Coordinates are normalized [x,y,w,h] 0..1 relative to the OBS source screenshot.",
+  "ally_bans_norm": [],
+  "enemy_bans_norm": [],
+  "ally_picks_norm": [],
+  "enemy_picks_norm": [],
+  "minimap_norm": [
+    0.015,
+    0.615,
+    0.215,
+    0.36
+  ],
+  "scoreboard_norm": [],
+  "items_norm": []
+}

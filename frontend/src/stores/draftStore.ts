@@ -1,0 +1,5 @@
+import { create } from "zustand";
+export type Hero={id:number;name:string;roles:string[];lanes:string[];specialties:string[];icon?:string;semantic_tags?:string[];weaknesses?:string[];strengths?:string[]};
+type DraftStore={allyPicks:number[];enemyPicks:number[];allyBans:number[];enemyBans:number[];selectedLane?:string;selectedRole?:string;laneOrientation:"blue_gold_top"|"blue_gold_bottom";setLane:(lane?:string)=>void;togglePick:(side:"ally"|"enemy", heroId:number)=>void;clear:()=>void};
+function toggle(list:number[],id:number,max=5){ if(list.includes(id)) return list.filter(x=>x!==id); if(list.length>=max) return list; return [...list,id]; }
+export const useDraftStore=create<DraftStore>((set)=>({allyPicks:[],enemyPicks:[],allyBans:[],enemyBans:[],laneOrientation:"blue_gold_bottom",setLane:(lane)=>set({selectedLane:lane}),togglePick:(side,heroId)=>set(s=>side==="ally"?{allyPicks:toggle(s.allyPicks,heroId)}:{enemyPicks:toggle(s.enemyPicks,heroId)}),clear:()=>set({allyPicks:[],enemyPicks:[],allyBans:[],enemyBans:[]})}));

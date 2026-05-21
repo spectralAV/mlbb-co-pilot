@@ -1,0 +1,9 @@
+{
+  "host": "localhost",
+  "port": 4455,
+  "password": "",
+  "sourceName": "MLBB_SOURCE",
+  "captureRatio": "20:9",
+  "screenshotWidth": 1600,
+  "screenshotHeight": 720
+}
