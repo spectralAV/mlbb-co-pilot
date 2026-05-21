@@ -8,6 +8,9 @@ param(
   [ValidateSet("jungle", "exp", "gold", "mid", "roam", "unknown")]
   [string]$Role = "unknown",
 
+  [ValidateSet("swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown")]
+  [string]$IconState = "unknown",
+
   [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path
 )
 
@@ -21,7 +24,7 @@ $mapPath = Join-Path $ProjectRoot "data\recognition-samples\region-map-ranked-lo
 
 New-Item -ItemType Directory -Force -Path $rawDir, $cropDir | Out-Null
 
-$rawPath = Join-Path $rawDir "$Screen-$Queue-$Role-$stamp.png"
+$rawPath = Join-Path $rawDir "$Screen-$Queue-$Role-$IconState-$stamp.png"
 & $adb.Source shell screencap -p /sdcard/mlbb-copilot-recognition.png
 & $adb.Source pull /sdcard/mlbb-copilot-recognition.png $rawPath | Out-Null
 & $adb.Source shell rm /sdcard/mlbb-copilot-recognition.png
@@ -80,6 +83,7 @@ $manifest = [ordered]@{
   screen = $Screen
   queue = $Queue
   role = $Role
+  iconState = $IconState
   capturedAt = (Get-Date).ToString("o")
   rawPath = $rawPath
   cropDir = $cropDir

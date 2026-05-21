@@ -18,6 +18,7 @@
       "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
     }
   },
-  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role unknown",
+  "iconStates": ["swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown"],
+  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role unknown -IconState swap",
   "privacy": "Raw screenshots and crops are ignored by Git because they may include personal avatars, names, flags, friends, and account state."
 }

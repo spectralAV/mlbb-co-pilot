@@ -40,6 +40,17 @@ And role labels:
 - `roam`
 - `unknown`
 
+And dynamic icon states:
+
+- `swap`
+- `fill`
+- `role_jungle`
+- `role_exp`
+- `role_gold`
+- `role_mid`
+- `role_roam`
+- `unknown`
+
 Suggested minimum per combination: 5 screenshots.
 
 Party size matters because this screen can contain multiple player cards at once:
@@ -54,5 +65,11 @@ Party size matters because this screen can contain multiple player cards at once
 
 1. Open the target MLBB screen on the device.
 2. Run `tools/capture-mlbb-recognition-sample.ps1`.
-3. Pass queue/role labels in the filename/folder.
+3. Pass queue, role, and icon-state labels in the filename/manifest.
 4. Review crops before using them for recognition.
+
+Example:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role unknown -IconState swap
+```
