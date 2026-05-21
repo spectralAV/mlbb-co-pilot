@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { getCoachState } from "../api/client";
-import { BattlefieldMap } from "../components/game/BattlefieldMap";
 
 function initials(name?: string) {
   if (!name || name === "-") return "?";
@@ -64,7 +63,7 @@ export function OverlayPreview() {
         <aside className="grid min-h-0 gap-3 md:grid-cols-3 xl:flex xl:flex-col">
           <div className="card p-3 sm:p-4"><h2 className="mb-3 font-black uppercase">Bans</h2><TokenList title="Ally Bans" items={rec.ally_bans ?? []} /><div className="mt-4"><TokenList title="Enemy Bans" items={rec.enemy_bans ?? []} red /></div></div>
           <div className="card p-3 sm:p-4"><h2 className="mb-3 font-black uppercase">Map Awareness</h2><div className="flex justify-between"><span>Visible Enemies</span><b>{map.visible_enemies?.length ?? 0}</b></div><div className="mt-2 flex justify-between"><span>Missing</span><b className="text-red-300">{map.missing_enemy_count ?? 5}</b></div><div className="mt-3 space-y-2 text-sm text-slate-200">{(map.callouts ?? ["Start OBS realtime for map callouts."]).slice(0, 3).map((line: string) => <div key={line}>• {line}</div>)}</div></div>
-          <div className="card min-h-0 p-3 sm:p-4 xl:flex-1"><h2 className="mb-3 font-black uppercase">Minimap</h2><BattlefieldMap compact /></div>
+          <div className="card min-h-0 p-3 sm:p-4 xl:flex-1"><h2 className="mb-3 font-black uppercase">Minimap</h2><div className="relative h-44 overflow-hidden rounded-lg border border-sky-300/30 bg-[linear-gradient(135deg,rgba(40,184,255,.15)_0_35%,transparent_35%_100%),linear-gradient(315deg,rgba(255,71,96,.15)_0_35%,transparent_35%_100%),rgba(8,17,35,.95)] xl:h-52"><div className="absolute left-16 top-14 h-3 w-3 rounded-full bg-sky-400 shadow-[0_0_12px_#38bdf8]" /><div className="absolute right-16 top-14 h-3 w-3 rounded-full bg-red-400 shadow-[0_0_12px_#f87171]" /><div className="absolute left-44 top-28 h-3 w-3 rounded-full bg-violet-400 shadow-[0_0_12px_#c084fc]" /></div></div>
         </aside>
 
         <section className="flex min-h-0 flex-col gap-3">
