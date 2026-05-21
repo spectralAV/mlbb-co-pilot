@@ -1,0 +1,76 @@
+{
+  "name": "ranked_choose_lane_overlay",
+  "sourceResolution": {
+    "width": 2856,
+    "height": 1280
+  },
+  "coordinateMode": "normalized_xywh",
+  "notes": [
+    "Screen is the Ranked Mythic 10-Ban Choose Lane overlay.",
+    "This is not the lobby banner layout and must not use ranked_lobby crops.",
+    "Solo queue lane choice is one selected role among Exp, Jungle, Mid, Roam, Gold, and Flex Pro.",
+    "Use the selected checkmarks at the bottom of cards to detect chosen/unconfirmed role states."
+  ],
+  "regions": {
+    "choose_lane_panel": [0.000, 0.142, 1.000, 0.624],
+    "choose_lane_title": [0.450, 0.074, 0.137, 0.047],
+    "exp_card": [0.125, 0.194, 0.112, 0.447],
+    "jungle_card": [0.255, 0.194, 0.111, 0.447],
+    "mid_card": [0.383, 0.194, 0.112, 0.447],
+    "roam_card": [0.512, 0.194, 0.110, 0.447],
+    "gold_card": [0.641, 0.194, 0.111, 0.447],
+    "flex_card": [0.769, 0.194, 0.111, 0.447],
+    "exp_icon": [0.153, 0.289, 0.058, 0.129],
+    "jungle_icon": [0.282, 0.289, 0.058, 0.129],
+    "mid_icon": [0.412, 0.289, 0.057, 0.129],
+    "roam_icon": [0.540, 0.289, 0.058, 0.129],
+    "gold_icon": [0.668, 0.289, 0.058, 0.129],
+    "flex_icon": [0.798, 0.289, 0.058, 0.129],
+    "exp_label": [0.153, 0.422, 0.059, 0.043],
+    "jungle_label": [0.282, 0.422, 0.058, 0.043],
+    "mid_label": [0.412, 0.422, 0.057, 0.043],
+    "roam_label": [0.540, 0.422, 0.058, 0.043],
+    "gold_label": [0.668, 0.422, 0.058, 0.043],
+    "flex_label": [0.798, 0.422, 0.058, 0.043],
+    "exp_checkmark": [0.169, 0.575, 0.031, 0.058],
+    "jungle_checkmark": [0.298, 0.575, 0.031, 0.058],
+    "mid_checkmark": [0.428, 0.575, 0.031, 0.058],
+    "roam_checkmark": [0.556, 0.575, 0.031, 0.058],
+    "gold_checkmark": [0.685, 0.575, 0.031, 0.058],
+    "flex_checkmark": [0.814, 0.575, 0.031, 0.058],
+    "estimated_wait": [0.456, 0.681, 0.115, 0.041],
+    "confirm_button": [0.439, 0.792, 0.121, 0.058],
+    "start_game_button_underlay": [0.294, 0.790, 0.157, 0.068]
+  },
+  "regionGroups": {
+    "lane_cards": [
+      [0.125, 0.194, 0.112, 0.447],
+      [0.255, 0.194, 0.111, 0.447],
+      [0.383, 0.194, 0.112, 0.447],
+      [0.512, 0.194, 0.110, 0.447],
+      [0.641, 0.194, 0.111, 0.447],
+      [0.769, 0.194, 0.111, 0.447]
+    ],
+    "lane_icons": [
+      [0.153, 0.289, 0.058, 0.129],
+      [0.282, 0.289, 0.058, 0.129],
+      [0.412, 0.289, 0.057, 0.129],
+      [0.540, 0.289, 0.058, 0.129],
+      [0.668, 0.289, 0.058, 0.129],
+      [0.798, 0.289, 0.058, 0.129]
+    ],
+    "lane_checkmarks": [
+      [0.169, 0.575, 0.031, 0.058],
+      [0.298, 0.575, 0.031, 0.058],
+      [0.428, 0.575, 0.031, 0.058],
+      [0.556, 0.575, 0.031, 0.058],
+      [0.685, 0.575, 0.031, 0.058],
+      [0.814, 0.575, 0.031, 0.058]
+    ]
+  },
+  "labels": {
+    "queueSizes": ["solo", "duo", "trio", "five_man"],
+    "roles": ["exp", "jungle", "mid", "roam", "gold", "flex", "unknown"],
+    "screens": ["ranked_choose_lane"]
+  }
+}

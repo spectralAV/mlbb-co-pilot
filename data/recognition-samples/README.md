@@ -8,6 +8,15 @@ Image samples are ignored by Git because they can contain personal avatars, frie
 
 `region-map-ranked-lobby-2856x1280.json` maps the Ranked lobby avatar banner and queue slot regions from a `2856x1280` capture.
 
+`region-map-ranked-choose-lane-2856x1280.json` maps the Ranked Choose Lane overlay. That screen is different from the lobby banner layout and includes six large cards:
+
+- `exp_card`
+- `jungle_card`
+- `mid_card`
+- `roam_card`
+- `gold_card`
+- `flex_card`
+
 Important regions:
 
 - `player_banner_full`
@@ -38,6 +47,7 @@ And role labels:
 - `gold`
 - `mid`
 - `roam`
+- `flex`
 - `unknown`
 
 And dynamic icon states:
@@ -49,6 +59,7 @@ And dynamic icon states:
 - `role_gold`
 - `role_mid`
 - `role_roam`
+- `role_flex`
 - `unknown`
 
 Suggested minimum per combination: 5 screenshots.
@@ -65,7 +76,7 @@ Party size matters because this screen can contain multiple player cards at once
 Solo samples should be captured as one role at a time:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role jungle -IconState role_jungle
+powershell -ExecutionPolicy Bypass -File .\tools\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role jungle -IconState role_jungle
 ```
 
 ## Workflow

@@ -1,14 +1,14 @@
 param(
-  [ValidateSet("ranked_lobby", "classic_lobby", "draft_role_select", "draft_pick", "post_match")]
+  [ValidateSet("ranked_lobby", "classic_lobby", "ranked_choose_lane", "draft_role_select", "draft_pick", "post_match")]
   [string]$Screen = "ranked_lobby",
 
   [ValidateSet("solo", "duo", "trio", "five_man", "unknown")]
   [string]$Queue = "unknown",
 
-  [ValidateSet("jungle", "exp", "gold", "mid", "roam", "unknown")]
+  [ValidateSet("jungle", "exp", "gold", "mid", "roam", "flex", "unknown")]
   [string]$Role = "unknown",
 
-  [ValidateSet("swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown")]
+  [ValidateSet("swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "role_flex", "unknown")]
   [string]$IconState = "unknown",
 
   [string]$ProjectRoot = (Resolve-Path "$PSScriptRoot\..").Path
@@ -20,7 +20,11 @@ $adb = Get-Command adb -ErrorAction Stop
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $rawDir = Join-Path $ProjectRoot "data\recognition-samples\raw"
 $cropDir = Join-Path $ProjectRoot "data\recognition-samples\crops\$Screen\$Queue\$Role\$stamp"
-$mapPath = Join-Path $ProjectRoot "data\recognition-samples\region-map-ranked-lobby-2856x1280.json"
+$mapFile = switch ($Screen) {
+  "ranked_choose_lane" { "region-map-ranked-choose-lane-2856x1280.json" }
+  default { "region-map-ranked-lobby-2856x1280.json" }
+}
+$mapPath = Join-Path $ProjectRoot "data\recognition-samples\$mapFile"
 
 New-Item -ItemType Directory -Force -Path $rawDir, $cropDir | Out-Null
 
