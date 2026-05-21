@@ -65,6 +65,7 @@ And dynamic icon states:
 Prematch role selection rules:
 
 - actual roles are `exp`, `jungle`, `mid`, `roam`, and `gold`
+- `no_selection` means no lane is selected yet and the screen can show `Please select 2-5 lanes.`
 - the Choose Lane screen can select up to five accepted roles before matchmaking
 - `Flex Pro` means all five actual roles are accepted
 - after matchmaking, the player receives one actual role

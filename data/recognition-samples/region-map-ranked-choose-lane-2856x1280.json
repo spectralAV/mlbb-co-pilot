@@ -40,6 +40,8 @@
     "roam_checkmark": [0.556, 0.575, 0.031, 0.058],
     "gold_checkmark": [0.685, 0.575, 0.031, 0.058],
     "flex_checkmark": [0.814, 0.575, 0.031, 0.058],
+    "selection_prompt": [0.438, 0.660, 0.220, 0.055],
+    "needed_lane_tip": [0.506, 0.003, 0.126, 0.135],
     "estimated_wait": [0.456, 0.681, 0.115, 0.041],
     "confirm_button": [0.439, 0.792, 0.121, 0.058],
     "start_game_button_underlay": [0.294, 0.790, 0.157, 0.068]
@@ -73,7 +75,7 @@
   "labels": {
     "queueSizes": ["solo", "duo", "trio", "five_man"],
     "roles": ["exp", "jungle", "mid", "roam", "gold", "unknown"],
-    "selectionModes": ["single_role", "multi_role", "flex_all"],
+    "selectionModes": ["no_selection", "single_role", "multi_role", "flex_all"],
     "flexAllRoles": ["exp", "jungle", "mid", "roam", "gold"],
     "screens": ["ranked_choose_lane"]
   }

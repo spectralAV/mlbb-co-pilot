@@ -10,9 +10,9 @@
     "ranked_choose_lane": {
       "queues": ["solo", "duo", "trio", "five_man"],
       "roles": ["exp", "jungle", "mid", "roam", "gold"],
-      "selectionModes": ["single_role", "multi_role", "flex_all"],
+      "selectionModes": ["no_selection", "single_role", "multi_role", "flex_all"],
       "flexAllRoles": ["exp", "jungle", "mid", "roam", "gold"],
-      "regions": ["choose_lane_panel", "choose_lane_title", "lane_cards", "lane_icons", "lane_checkmarks", "estimated_wait", "confirm_button"]
+      "regions": ["choose_lane_panel", "choose_lane_title", "lane_cards", "lane_icons", "lane_checkmarks", "selection_prompt", "needed_lane_tip", "estimated_wait", "confirm_button"]
     },
     "draft_role_select": {
       "queues": ["solo", "duo", "trio", "five_man"],
@@ -53,7 +53,7 @@
     "flexProMeaning": "Accept all five prematch roles; not a sixth role.",
     "postMatchAssignment": "After matchmaking, the player is assigned one actual role. Roam-only selection remains Roam-only."
   },
-  "iconStates": ["single_role", "multi_role", "flex_all", "swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown"],
+  "iconStates": ["no_selection", "single_role", "multi_role", "flex_all", "swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown"],
   "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_choose_lane -Queue solo -Role unknown -IconState flex_all",
   "privacy": "Raw screenshots and crops are ignored by Git because they may include personal avatars, names, flags, friends, and account state."
 }

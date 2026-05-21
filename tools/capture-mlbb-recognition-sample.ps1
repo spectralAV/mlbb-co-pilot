@@ -8,7 +8,7 @@ param(
   [ValidateSet("jungle", "exp", "gold", "mid", "roam", "unknown")]
   [string]$Role = "unknown",
 
-  [ValidateSet("single_role", "multi_role", "flex_all", "swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown")]
+  [ValidateSet("no_selection", "single_role", "multi_role", "flex_all", "swap", "fill", "role_jungle", "role_exp", "role_gold", "role_mid", "role_roam", "unknown")]
   [string]$IconState = "unknown",
 
   [string]$SelectedRoles = "",
