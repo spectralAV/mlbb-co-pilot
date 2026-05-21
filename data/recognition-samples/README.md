@@ -21,6 +21,15 @@ Image samples are ignored by Git because they can contain personal avatars, frie
 
 `region-map-ranked-lanes-confirmed-2856x1280.json` maps the ranked prematch lobby after lane preferences are confirmed. In that state, accepted lanes appear as compact icons on the player banner, for example two icons for `mid,roam`.
 
+## Minimap References
+
+Treat the MLBB minimap as two recognition layers:
+
+- base minimap layout: the clean map without hero/objective/placeholders
+- marker layer: the same map with role placeholders, hero dots, objectives, camps, turrets, and other runtime markers
+
+Do not use these references as a reason to repaint the app UI yet. They are source geometry for future minimap calibration, segmentation, and marker recognition.
+
 Important regions:
 
 - `player_banner_full`
