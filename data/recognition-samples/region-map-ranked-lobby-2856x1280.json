@@ -1,0 +1,35 @@
+{
+  "name": "ranked_lobby_avatar_banner_roles",
+  "sourceResolution": {
+    "width": 2856,
+    "height": 1280
+  },
+  "coordinateMode": "normalized_xywh",
+  "notes": [
+    "Screen is the Ranked Mythic 10-Ban lobby, not draft.",
+    "Player banner is the left vertical card.",
+    "Queue slots are the central teammate/role placeholder cards.",
+    "Use normalized regions so captures survive small resolution changes."
+  ],
+  "regions": {
+    "player_banner_full": [0.108, 0.145, 0.112, 0.665],
+    "player_avatar_frame": [0.135, 0.226, 0.052, 0.117],
+    "player_name": [0.132, 0.344, 0.062, 0.045],
+    "player_rank_badge": [0.133, 0.409, 0.058, 0.102],
+    "player_rank_text": [0.142, 0.512, 0.051, 0.061],
+    "player_role_icon": [0.149, 0.585, 0.024, 0.049],
+    "queue_slots_full": [0.222, 0.154, 0.423, 0.408],
+    "queue_slot_1": [0.222, 0.160, 0.092, 0.392],
+    "queue_slot_2": [0.332, 0.160, 0.092, 0.392],
+    "queue_slot_3": [0.441, 0.160, 0.092, 0.392],
+    "queue_slot_4": [0.551, 0.160, 0.092, 0.392],
+    "start_game_button": [0.288, 0.801, 0.253, 0.080],
+    "friends_panel": [0.724, 0.096, 0.238, 0.793],
+    "friends_tab_row": [0.725, 0.096, 0.235, 0.112]
+  },
+  "labels": {
+    "queueSizes": ["solo", "duo", "trio", "five_man"],
+    "roles": ["jungle", "exp", "gold", "mid", "roam", "unknown"],
+    "screens": ["ranked_lobby", "classic_lobby", "draft_role_select", "draft_pick", "post_match"]
+  }
+}

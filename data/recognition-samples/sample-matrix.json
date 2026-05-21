@@ -1,0 +1,23 @@
+{
+  "goal": "Collect enough MLBB lobby/draft UI samples for avatar banner, queue slots, and role-selection recognition.",
+  "minimumPerCombination": 5,
+  "screens": {
+    "ranked_lobby": {
+      "queues": ["solo", "duo", "trio", "five_man"],
+      "roles": ["unknown"],
+      "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full", "queue_slot_1", "queue_slot_2", "queue_slot_3", "queue_slot_4", "start_game_button"]
+    },
+    "draft_role_select": {
+      "queues": ["solo", "duo", "trio", "five_man"],
+      "roles": ["jungle", "exp", "gold", "mid", "roam"],
+      "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
+    },
+    "draft_pick": {
+      "queues": ["solo", "duo", "trio", "five_man"],
+      "roles": ["jungle", "exp", "gold", "mid", "roam"],
+      "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
+    }
+  },
+  "captureCommand": "powershell -ExecutionPolicy Bypass -File .\\tools\\capture-mlbb-recognition-sample.ps1 -Screen ranked_lobby -Queue solo -Role unknown",
+  "privacy": "Raw screenshots and crops are ignored by Git because they may include personal avatars, names, flags, friends, and account state."
+}
