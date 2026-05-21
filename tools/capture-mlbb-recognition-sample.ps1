@@ -30,24 +30,45 @@ Add-Type -AssemblyName System.Drawing
 $map = Get-Content -LiteralPath $mapPath -Raw | ConvertFrom-Json
 $image = [System.Drawing.Image]::FromFile($rawPath)
 
+function Save-Crop {
+  param(
+    [System.Drawing.Image]$Image,
+    [object]$Region,
+    [string]$Path
+  )
+
+  $x = [Math]::Max(0, [int]([double]$Region[0] * $Image.Width))
+  $y = [Math]::Max(0, [int]([double]$Region[1] * $Image.Height))
+  $w = [Math]::Min($Image.Width - $x, [int]([double]$Region[2] * $Image.Width))
+  $h = [Math]::Min($Image.Height - $y, [int]([double]$Region[3] * $Image.Height))
+  if ($w -le 0 -or $h -le 0) { return }
+
+  $bitmap = New-Object System.Drawing.Bitmap($w, $h)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.DrawImage($Image, 0, 0, (New-Object System.Drawing.Rectangle($x, $y, $w, $h)), [System.Drawing.GraphicsUnit]::Pixel)
+    $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+}
+
 try {
   foreach ($property in $map.regions.PSObject.Properties) {
     $name = $property.Name
     $r = $property.Value
-    $x = [Math]::Max(0, [int]([double]$r[0] * $image.Width))
-    $y = [Math]::Max(0, [int]([double]$r[1] * $image.Height))
-    $w = [Math]::Min($image.Width - $x, [int]([double]$r[2] * $image.Width))
-    $h = [Math]::Min($image.Height - $y, [int]([double]$r[3] * $image.Height))
-    if ($w -le 0 -or $h -le 0) { continue }
+    Save-Crop -Image $image -Region $r -Path (Join-Path $cropDir "$name.png")
+  }
 
-    $bitmap = New-Object System.Drawing.Bitmap($w, $h)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    try {
-      $graphics.DrawImage($image, 0, 0, (New-Object System.Drawing.Rectangle($x, $y, $w, $h)), [System.Drawing.GraphicsUnit]::Pixel)
-      $bitmap.Save((Join-Path $cropDir "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-    } finally {
-      $graphics.Dispose()
-      $bitmap.Dispose()
+  if ($map.PSObject.Properties.Name -contains "regionGroups") {
+    foreach ($groupProperty in $map.regionGroups.PSObject.Properties) {
+      $groupName = $groupProperty.Name
+      $index = 0
+      foreach ($region in $groupProperty.Value) {
+        Save-Crop -Image $image -Region $region -Path (Join-Path $cropDir ("{0}_{1:D2}.png" -f $groupName, $index))
+        $index++
+      }
     }
   }
 } finally {

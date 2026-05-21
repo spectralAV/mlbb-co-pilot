@@ -13,6 +13,11 @@ Important regions:
 - `player_banner_full`
 - `player_avatar_frame`
 - `player_role_icon`
+- `party_slot_0_leader_banner`
+- `party_slot_1_card` through `party_slot_4_card`
+- `party_slot_1_avatar_area` through `party_slot_4_avatar_area`
+- `party_slot_1_lower_role_area` through `party_slot_4_lower_role_area`
+- region groups: `party_cards`, `party_avatar_areas`, `party_role_icon_areas`
 - `queue_slots_full`
 - `queue_slot_1` through `queue_slot_4`
 - `start_game_button`
@@ -36,6 +41,14 @@ And role labels:
 - `unknown`
 
 Suggested minimum per combination: 5 screenshots.
+
+Party size matters because this screen can contain multiple player cards at once:
+
+- slot 0 is your left-side leader banner
+- slots 1-4 are the central teammate cards/placeholders
+- in duo, expect slot 0 + one filled teammate slot
+- in trio, expect slot 0 + two filled teammate slots
+- in five-man, expect all five slots populated
 
 ## Workflow
 

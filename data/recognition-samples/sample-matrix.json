@@ -5,7 +5,7 @@
     "ranked_lobby": {
       "queues": ["solo", "duo", "trio", "five_man"],
       "roles": ["unknown"],
-      "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full", "queue_slot_1", "queue_slot_2", "queue_slot_3", "queue_slot_4", "start_game_button"]
+      "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "party_slot_0_leader_banner", "party_slot_1_card", "party_slot_2_card", "party_slot_3_card", "party_slot_4_card", "party_avatar_areas", "party_role_icon_areas", "queue_slots_full", "queue_slot_1", "queue_slot_2", "queue_slot_3", "queue_slot_4", "start_game_button"]
     },
     "draft_role_select": {
       "queues": ["solo", "duo", "trio", "five_man"],
