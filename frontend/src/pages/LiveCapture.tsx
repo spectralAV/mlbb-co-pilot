@@ -6,7 +6,7 @@ type Region = { key: RegionKey; label: string; rect: [number, number, number, nu
 type RegionMetrics = { mean: number; contrast: number; changed: number; active: boolean };
 type NativeCrop = { time: number; key: RegionKey; width: number; height: number; bitmap: ImageBitmap };
 type FrameSummary = { time: number; sourceWidth: number; sourceHeight: number; regions: Record<RegionKey, RegionMetrics> };
-type CaptureSource = "adb" | "window" | "scrcpy" | "obs";
+type CaptureSource = "adb" | "window" | "scrcpy" | "ndi" | "obs";
 
 const regions: Region[] = [
   { key: "equipment_window", label: "Equipment Window", rect: [0.58, 0.08, 0.38, 0.78] },
@@ -26,6 +26,7 @@ const captureSources: Array<{
 }> = [
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
   { id: "scrcpy", title: "Backend scrcpy", state: "planned", detail: "Native video decoder path for realtime phone capture." },
+  { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly LAN video source for backend decoding." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
   { id: "obs", title: "OBS / Camera", state: "optional", detail: "Optional desktop/streaming setup, not required." }
 ];
@@ -143,6 +144,10 @@ export function LiveCapture() {
     }
     if (selectedSource === "scrcpy") {
       setError("Backend scrcpy stream decoder is the recommended realtime phone path, but it is not connected yet.");
+      return;
+    }
+    if (selectedSource === "ndi") {
+      setError("NDI stream input is planned for iPhone/iPad users, but the backend decoder is not connected yet.");
       return;
     }
     setError("OBS/camera capture is optional and not connected yet. Use ADB Phone now, or backend scrcpy once the decoder is connected.");
@@ -299,7 +304,7 @@ export function LiveCapture() {
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {captureSources.map((source) => {
         const active = selectedSource === source.id;
-        const Icon = source.id === "adb" ? Smartphone : source.id === "window" ? MonitorUp : source.id === "obs" ? Tv : Database;
+        const Icon = source.id === "adb" ? Smartphone : source.id === "window" ? MonitorUp : source.id === "obs" || source.id === "ndi" ? Tv : Database;
         return <button key={source.id} type="button" onClick={() => setSelectedSource(source.id)} disabled={running} className={`min-h-32 rounded-lg border p-4 text-left transition active:scale-[0.99] ${active ? "border-violet-300 bg-violet-500/20" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
           <div className="flex items-center justify-between gap-3">
             <Icon className={active ? "h-5 w-5 text-violet-200" : "h-5 w-5 text-cyan-300"} />
@@ -358,7 +363,7 @@ export function LiveCapture() {
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Phone ADB, backend scrcpy, browser window share, and OBS/camera are separate capture paths. Pick the one that matches the setup.</p>
+          <p className="mt-2 text-sm text-slate-300">Phone ADB, backend scrcpy, NDI, browser window share, and OBS/camera are separate capture paths. Pick the one that matches the setup.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
         </div>
       </aside>
