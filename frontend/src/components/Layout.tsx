@@ -1,7 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { Activity, BarChart3, Boxes, Bot, Compass, Crosshair, Database, Gamepad2, Map, Monitor, Radar, Settings, SlidersHorizontal } from "lucide-react";
+import { CaptureRuntimeHost } from "./CaptureRuntimeHost";
 const links=[["/","Dashboard",Activity],["/draft","Draft Room",Crosshair],["/game","Game",Gamepad2],["/analysis","Analysis",BarChart3],["/build","Build Lab",Boxes],["/map","Tactical Map",Map],["/map-trainer","Map Trainer",Compass],["/capture","Live Capture",Radar],["/overlay-preview","OBS Overlay",Monitor],["/calibration","Calibration",SlidersHorizontal],["/modules","Modules",Bot],["/settings","Settings",Settings]] as const;
 export function Layout(){return <div className="min-h-screen lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
+  <CaptureRuntimeHost/>
   <aside className="hidden border-r border-white/10 bg-black/30 p-4 lg:block lg:h-screen lg:sticky lg:top-0">
     <div className="mb-6 flex items-center gap-3"><Database className="text-violet-400"/><div><h1 className="text-xl font-black">MLBB Co-Pilot</h1><p className="text-xs text-slate-400">Semantic Tactical Runtime</p></div></div>
     <nav className="space-y-2">{links.map(([to,label,Icon])=><NavLink key={to} to={to} className={({isActive})=>`flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 ${isActive?"bg-violet-600":"hover:bg-white/10"}`}><Icon size={18}/><span>{label}</span></NavLink>)}</nav>
