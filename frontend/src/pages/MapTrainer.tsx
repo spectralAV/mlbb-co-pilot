@@ -1,9 +1,10 @@
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Brush, MousePointer2, Save, Trash2 } from "lucide-react";
+import { Brain, Brush, Crosshair, ImageDown, MousePointer2, Save, Trash2 } from "lucide-react";
 import { getMapZones, saveMapZones } from "../api/client";
 
 type Point = [number, number];
 type DrawMode = "polygon" | "freehand";
+type TrainerSection = "tactical" | "minimap-ai";
 type Zone = {
   id: string;
   name: string;
@@ -14,7 +15,10 @@ type Zone = {
   connectedZones?: string[];
 };
 
+const tacticalMapReference = "/assets/map/mlbb-tactical-map-reference.png";
+const minimapRoi = { x: 0.01, y: 0.02, w: 0.17, h: 0.28 };
 const zoneTypes = ["broken-wall", "bush", "river", "objective", "jungle", "lane", "danger", "vision", "semantic"];
+const minimapLabels = ["ally-hero", "enemy-hero", "objective", "turret", "jungle-camp", "lane-minion", "dangerous-grass", "broken-wall", "flying-cloud", "expanding-river"];
 const colors: Record<string, { stroke: string; fill: string }> = {
   "broken-wall": { stroke: "#22c55e", fill: "rgba(34,197,94,.18)" },
   bush: { stroke: "#84cc16", fill: "rgba(132,204,22,.18)" },
@@ -40,8 +44,10 @@ function smoothFreehand(points: Point[]) {
 
 export function MapTrainer() {
   const frameUrlRef = useRef("");
+  const minimapUrlRef = useRef("");
   const boardRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
+  const [section, setSection] = useState<TrainerSection>("tactical");
   const [zones, setZones] = useState<Zone[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<Point[]>([]);
@@ -50,12 +56,19 @@ export function MapTrainer() {
   const [type, setType] = useState("broken-wall");
   const [dangerWeight, setDangerWeight] = useState(0.6);
   const [frameUrl, setFrameUrl] = useState("");
-  const [frameSize, setFrameSize] = useState({ width: 20, height: 9 });
+  const [frameSize, setFrameSize] = useState({ width: 2856, height: 1280 });
+  const [minimapUrl, setMinimapUrl] = useState("");
+  const [minimapSize, setMinimapSize] = useState({ width: 512, height: 512 });
+  const [minimapLabel, setMinimapLabel] = useState("ally-hero");
+  const [minimapSamples, setMinimapSamples] = useState<Array<{ id: string; label: string; width: number; height: number }>>([]);
   const selected = zones.find((zone) => zone.id === selectedId);
 
   useEffect(() => {
     void loadZones();
-    return () => { if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current); };
+    return () => {
+      if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
+      if (minimapUrlRef.current) URL.revokeObjectURL(minimapUrlRef.current);
+    };
   }, []);
 
   async function loadZones() {
@@ -63,7 +76,7 @@ export function MapTrainer() {
     setZones(result.data ?? []);
   }
 
-  async function loadCaptureFrame() {
+  async function loadTacticalCaptureFrame() {
     const response = await fetch(`/api/capture/frame?t=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) return;
     const blob = await response.blob();
@@ -74,6 +87,30 @@ export function MapTrainer() {
     const url = URL.createObjectURL(blob);
     frameUrlRef.current = url;
     setFrameUrl(url);
+  }
+
+  async function loadMinimapFrame() {
+    const response = await fetch(`/api/capture/frame?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const sx = Math.round(bitmap.width * minimapRoi.x);
+    const sy = Math.round(bitmap.height * minimapRoi.y);
+    const sw = Math.round(bitmap.width * minimapRoi.w);
+    const sh = Math.round(bitmap.height * minimapRoi.h);
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext("2d");
+    ctx?.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+    bitmap.close();
+    const crop = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!crop) return;
+    if (minimapUrlRef.current) URL.revokeObjectURL(minimapUrlRef.current);
+    const url = URL.createObjectURL(crop);
+    minimapUrlRef.current = url;
+    setMinimapUrl(url);
+    setMinimapSize({ width: sw, height: sh });
   }
 
   function pointFromEvent(event: PointerEvent): Point {
@@ -132,6 +169,14 @@ export function MapTrainer() {
     setZones(result.data ?? zones);
   }
 
+  function addMinimapSample() {
+    if (!minimapUrl) return;
+    setMinimapSamples((items) => [
+      { id: `${minimapLabel}-${Date.now()}`, label: minimapLabel, width: minimapSize.width, height: minimapSize.height },
+      ...items
+    ]);
+  }
+
   function editZone(zone: Zone) {
     setSelectedId(zone.id);
     setName(zone.name);
@@ -155,18 +200,28 @@ export function MapTrainer() {
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h2 className="text-3xl font-black">Map Trainer</h2>
-        <p className="text-slate-400">Editable semantic zones with polygon and freehand drawing over real captured game data.</p>
+        <p className="text-slate-400">Separate tactical-map zone editing from minimap AI recognition training.</p>
       </div>
-      <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
-        <button className="btn" onClick={loadCaptureFrame}>Load Capture Frame</button>
-        <button className="btn inline-flex items-center justify-center gap-2" onClick={persist}><Save className="h-4 w-4" />Save Zones</button>
+      <div className="grid w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-white/5 p-1 sm:w-auto">
+        <button className={`min-h-11 rounded-lg px-3 py-2 text-sm font-bold ${section === "tactical" ? "bg-violet-500 text-white" : "text-slate-300"}`} onClick={() => setSection("tactical")}><Crosshair className="mr-2 inline h-4 w-4" />Tactical Map</button>
+        <button className={`min-h-11 rounded-lg px-3 py-2 text-sm font-bold ${section === "minimap-ai" ? "bg-violet-500 text-white" : "text-slate-300"}`} onClick={() => setSection("minimap-ai")}><Brain className="mr-2 inline h-4 w-4" />Minimap AI</button>
       </div>
     </div>
 
-    <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_380px]">
+    {section === "tactical" ? <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_380px]">
       <section className="card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 p-3">
+          <div>
+            <h3 className="font-bold">Tactical Map Zones</h3>
+            <p className="text-xs text-slate-400">Draw semantic regions on the full tactical reference, not the minimap crop.</p>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn inline-flex items-center gap-2" onClick={loadTacticalCaptureFrame}><ImageDown className="h-4 w-4" />Live Frame</button>
+            <button className="btn inline-flex items-center gap-2" onClick={persist}><Save className="h-4 w-4" />Save Zones</button>
+          </div>
+        </div>
         <div ref={boardRef} className="relative touch-none select-none bg-[#020711]" style={{ aspectRatio: `${frameSize.width} / ${frameSize.height}` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
-          {frameUrl && <img src={frameUrl} alt="" className="absolute inset-0 h-full w-full object-fill opacity-90" draggable={false} />}
+          <img src={frameUrl || tacticalMapReference} alt="" className="absolute inset-0 h-full w-full object-fill opacity-95" draggable={false} />
           <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
             {zones.map((zone) => {
               const color = colors[zone.type] ?? colors.semantic;
@@ -175,7 +230,7 @@ export function MapTrainer() {
             {draft.length > 1 && <path d={toPath(draft)} fill={draftColor.fill} stroke={draftColor.stroke} strokeDasharray={mode === "polygon" ? "2 1.5" : undefined} strokeWidth={0.9} vectorEffect="non-scaling-stroke" />}
             {draft.map(([x, y], index) => <circle key={`${x}-${y}-${index}`} cx={x * 100} cy={y * 100} r={0.55} fill={draftColor.stroke} vectorEffect="non-scaling-stroke" />)}
           </svg>
-          <div className="absolute left-3 top-3 rounded-lg bg-black/60 px-3 py-2 text-xs text-slate-200">{frameUrl ? `${frameSize.width}x${frameSize.height}` : "Load a capture frame to draw against real map data"}</div>
+          <div className="absolute left-3 top-3 rounded-lg bg-black/60 px-3 py-2 text-xs text-slate-200">{frameUrl ? `${frameSize.width}x${frameSize.height}` : "Full tactical map reference"}</div>
         </div>
       </section>
 
@@ -211,6 +266,55 @@ export function MapTrainer() {
           </div>
         </div>
       </aside>
-    </div>
+    </div> : <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_380px]">
+      <section className="card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 p-3">
+          <div>
+            <h3 className="font-bold">Minimap AI Training</h3>
+            <p className="text-xs text-slate-400">Crop the live minimap, label samples, then project detections onto the tactical map runtime.</p>
+          </div>
+          <button className="btn inline-flex items-center gap-2" onClick={loadMinimapFrame}><ImageDown className="h-4 w-4" />Pull Minimap Frame</button>
+        </div>
+        <div className="grid gap-4 p-4 lg:grid-cols-[minmax(260px,520px)_1fr]">
+          <div>
+            <div className="relative aspect-square overflow-hidden rounded-xl border border-cyan-300/20 bg-black">
+              {minimapUrl ? <img className="h-full w-full object-fill" src={minimapUrl} alt="" draggable={false} /> : <div className="grid h-full place-items-center p-6 text-center text-sm text-slate-400">Pull a native capture frame to crop the minimap ROI for AI samples.</div>}
+              <div className="absolute left-3 top-3 rounded-lg bg-black/65 px-3 py-2 text-xs text-slate-200">{minimapUrl ? `${minimapSize.width}x${minimapSize.height}` : "minimap ROI"}</div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <select className="input w-full" value={minimapLabel} onChange={(event) => setMinimapLabel(event.target.value)}>{minimapLabels.map((item) => <option key={item}>{item}</option>)}</select>
+              <button className="btn" onClick={addMinimapSample} disabled={!minimapUrl}>Add Sample</button>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <h4 className="font-bold">AI Recognition Targets</h4>
+              <div className="mt-3 flex flex-wrap gap-2">{minimapLabels.map((item) => <button key={item} className={`chip ${minimapLabel === item ? "border-cyan-300 bg-cyan-500/20 text-cyan-100" : ""}`} onClick={() => setMinimapLabel(item)}>{item}</button>)}</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <h4 className="font-bold">Projection Path</h4>
+              <div className="mt-3 grid gap-2 text-sm text-slate-300">
+                <div className="rounded-lg bg-black/25 p-3">1. Detect marker/icon in minimap coordinates.</div>
+                <div className="rounded-lg bg-black/25 p-3">2. Normalize to square minimap x/y.</div>
+                <div className="rounded-lg bg-black/25 p-3">3. Warp through minimap-to-tactical projection.</div>
+                <div className="rounded-lg bg-black/25 p-3">4. Resolve tactical semantic zone and coaching event.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside className="card p-4">
+        <h3 className="font-bold">Minimap Samples</h3>
+        <p className="mt-1 text-xs text-slate-400">These are AI dataset entries, separate from tactical semantic zones.</p>
+        <div className="touch-scroll mt-3 max-h-[66vh] overflow-auto pr-1">
+          {minimapSamples.length === 0 && <div className="rounded-lg bg-white/5 p-3 text-sm text-slate-400">No minimap samples in this browser session yet.</div>}
+          {minimapSamples.map((sample) => <div className="mb-2 rounded-lg border border-white/10 bg-white/5 p-3" key={sample.id}>
+            <div className="font-bold">{sample.label}</div>
+            <div className="mt-1 text-xs text-slate-400">{sample.width}x{sample.height} minimap crop</div>
+          </div>)}
+        </div>
+      </aside>
+    </div>}
   </div>;
 }
