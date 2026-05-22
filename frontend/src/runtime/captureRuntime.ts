@@ -167,14 +167,17 @@ async function startScrcpyCapture() {
   useCaptureRuntimeStore.setState({ error: "" });
   try {
     const canDecode = "VideoDecoder" in window && "EncodedVideoChunk" in window;
-    const result = await startScrcpy({ maxFps: 60, videoBitRate: 16000000, background: true, decoder: "h264" });
-    if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
     resetBuffers();
     useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 }, adbPreviewUrl: "" });
     startAgeTimer();
     if (canDecode) {
-      startScrcpyH264Decode();
+      await stopScrcpy().catch(() => {});
+      await startScrcpyH264Decode();
+      const result = await startScrcpy({ maxFps: 60, videoBitRate: 16000000, background: true, decoder: "h264" });
+      if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
     } else {
+      const result = await startScrcpy({ maxFps: 60, videoBitRate: 16000000, background: true, decoder: "h264" });
+      if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
       runtime.adbActive = true;
       useCaptureRuntimeStore.setState({ error: "WebCodecs is unavailable in this browser, using ADB preview fallback." });
       void pollAdbFrame();
@@ -217,6 +220,17 @@ function startScrcpyH264Decode() {
   const socket = new WebSocket(`${protocol}://${window.location.host}/ws/capture/scrcpy-h264`);
   runtime.h264Socket = socket;
   socket.binaryType = "arraybuffer";
+  const opened = new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("Timed out opening scrcpy H.264 WebSocket.")), 3000);
+    socket.addEventListener("open", () => {
+      window.clearTimeout(timer);
+      resolve();
+    }, { once: true });
+    socket.addEventListener("error", () => {
+      window.clearTimeout(timer);
+      reject(new Error("scrcpy H.264 WebSocket failed before startup."));
+    }, { once: true });
+  });
   socket.onmessage = (event) => {
     if (typeof event.data === "string") return handleScrcpyMessage(event.data);
     const meta = runtime.h264PendingMeta.shift();
@@ -229,6 +243,7 @@ function startScrcpyH264Decode() {
   socket.onclose = () => {
     if (useCaptureRuntimeStore.getState().sourceMode === "scrcpy") useCaptureRuntimeStore.setState({ error: "scrcpy H.264 stream closed." });
   };
+  return opened;
 }
 
 function handleScrcpyMessage(data: string) {
@@ -308,10 +323,39 @@ function processRawNal(nal: Uint8Array) {
     runtime.h264ParameterSets = [...runtime.h264ParameterSets.filter((item) => (item[nalPayloadOffset(item)] & 0x1f) !== nalType), nal];
   }
   const isVcl = nalType === 1 || nalType === 5;
-  if (isVcl && runtime.h264AuHasVcl) flushRawAccessUnit();
+  if (isVcl && runtime.h264AuHasVcl && firstMbInSlice(nal, offset) === 0) flushRawAccessUnit();
   runtime.h264AuNals.push(nal);
   if (isVcl) runtime.h264AuHasVcl = true;
   if (nalType === 5) runtime.h264AuKey = true;
+}
+
+function firstMbInSlice(nal: Uint8Array, nalOffset: number) {
+  const rbsp: number[] = [];
+  let zeros = 0;
+  for (let i = nalOffset + 1; i < nal.length; i += 1) {
+    const value = nal[i];
+    if (zeros >= 2 && value === 3) {
+      zeros = 0;
+      continue;
+    }
+    rbsp.push(value);
+    zeros = value === 0 ? zeros + 1 : 0;
+  }
+  let bit = 0;
+  let leadingZeroBits = 0;
+  while (bit < rbsp.length * 8) {
+    const value = (rbsp[bit >> 3] >> (7 - (bit & 7))) & 1;
+    bit += 1;
+    if (value) break;
+    leadingZeroBits += 1;
+  }
+  let codeNum = (1 << leadingZeroBits) - 1;
+  for (let i = 0; i < leadingZeroBits; i += 1) {
+    const value = (rbsp[bit >> 3] >> (7 - (bit & 7))) & 1;
+    bit += 1;
+    codeNum += value << (leadingZeroBits - 1 - i);
+  }
+  return codeNum;
 }
 
 function flushRawAccessUnit() {
