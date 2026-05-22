@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleStop, Database, Gauge, MonitorUp, ScanLine } from "lucide-react";
+import { CircleStop, Database, Gauge, MonitorUp, ScanLine, Smartphone } from "lucide-react";
 
 type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" | "minimap";
 type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
@@ -54,6 +54,9 @@ function sampleRegion(ctx: CanvasRenderingContext2D, width: number, height: numb
 export function LiveCapture() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const adbPreviewUrlRef = useRef("");
+  const adbTimerRef = useRef<number | null>(null);
+  const adbActiveRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const frameBufferRef = useRef<FrameSummary[]>([]);
   const nativeCropBufferRef = useRef<NativeCrop[]>([]);
@@ -61,6 +64,7 @@ export function LiveCapture() {
   const frameTimesRef = useRef<number[]>([]);
   const rafRef = useRef<number | null>(null);
   const [running, setRunning] = useState(false);
+  const [sourceMode, setSourceMode] = useState<"idle" | "browser" | "adb">("idle");
   const [fps, setFps] = useState(0);
   const [buffered, setBuffered] = useState(0);
   const [nativeCrops, setNativeCrops] = useState(0);
@@ -68,17 +72,25 @@ export function LiveCapture() {
   const [lastFrameAge, setLastFrameAge] = useState<number | null>(null);
   const [metrics, setMetrics] = useState<Record<RegionKey, RegionMetrics>>(emptyMetrics());
   const [error, setError] = useState("");
+  const [adbPreviewUrl, setAdbPreviewUrl] = useState("");
 
   useEffect(() => () => stopCapture(), []);
 
   function stopCapture() {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    if (adbTimerRef.current != null) window.clearTimeout(adbTimerRef.current);
     rafRef.current = null;
+    adbTimerRef.current = null;
+    adbActiveRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    if (adbPreviewUrlRef.current) URL.revokeObjectURL(adbPreviewUrlRef.current);
+    adbPreviewUrlRef.current = "";
+    setAdbPreviewUrl("");
     nativeCropBufferRef.current.splice(0).forEach((crop) => crop.bitmap.close());
     setNativeCrops(0);
     setRunning(false);
+    setSourceMode("idle");
   }
 
   async function startCapture() {
@@ -97,11 +109,25 @@ export function LiveCapture() {
       nativeCropBufferRef.current.splice(0).forEach((crop) => crop.bitmap.close());
       previousRef.current = emptyMetrics();
       frameTimesRef.current = [];
+      setSourceMode("browser");
       setRunning(true);
       scheduleFrame();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not start screen capture.");
+      const message = caught instanceof Error ? caught.message : "Could not start screen capture.";
+      setError(`${message}. Use ADB Native in this in-app browser, or open the app in Chrome/Edge for window capture.`);
     }
+  }
+
+  async function startAdbCapture() {
+    setError("");
+    frameBufferRef.current = [];
+    nativeCropBufferRef.current.splice(0).forEach((crop) => crop.bitmap.close());
+    previousRef.current = emptyMetrics();
+    frameTimesRef.current = [];
+    setSourceMode("adb");
+    adbActiveRef.current = true;
+    setRunning(true);
+    void pollAdbFrame();
   }
 
   function scheduleFrame() {
@@ -133,7 +159,12 @@ export function LiveCapture() {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, width, height);
+    analyzeCanvas(canvas, width, height);
+  }
 
+  function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
     const next = emptyMetrics();
     for (const region of regions) next[region.key] = sampleRegion(ctx, width, height, region, previousRef.current[region.key]);
     previousRef.current = next;
@@ -153,6 +184,41 @@ export function LiveCapture() {
     setNativeCrops(nativeCropBufferRef.current.length);
     setFps(frameTimes.length);
     setLastFrameAge(0);
+  }
+
+  async function pollAdbFrame() {
+    if (!adbActiveRef.current) return;
+    const started = performance.now();
+    try {
+      const response = await fetch(`/api/capture/frame?t=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      if (adbPreviewUrlRef.current) URL.revokeObjectURL(adbPreviewUrlRef.current);
+      const objectUrl = URL.createObjectURL(blob);
+      adbPreviewUrlRef.current = objectUrl;
+      setAdbPreviewUrl(objectUrl);
+      const bitmap = await createImageBitmap(blob);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const width = bitmap.width;
+        const height = bitmap.height;
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+          setSourceSize({ width, height });
+        }
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx?.drawImage(bitmap, 0, 0);
+        analyzeCanvas(canvas, width, height);
+      }
+      bitmap.close();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "ADB native frame capture failed.");
+    } finally {
+      if (!adbActiveRef.current) return;
+      const delay = Math.max(120, 450 - (performance.now() - started));
+      adbTimerRef.current = window.setTimeout(() => void pollAdbFrame(), delay);
+    }
   }
 
   function queueNativeWindowCrops(canvas: HTMLCanvasElement, width: number, height: number, time: number, next: Record<RegionKey, RegionMetrics>) {
@@ -192,7 +258,8 @@ export function LiveCapture() {
         <p className="text-slate-400">Realtime screen/window capture with a rolling frame buffer for short MLBB equipment and attributes popups.</p>
       </div>
       <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
-        <button className="btn inline-flex items-center justify-center gap-2" onClick={startCapture} disabled={running}><MonitorUp className="h-4 w-4" />Start</button>
+        <button className="btn inline-flex items-center justify-center gap-2" onClick={startCapture} disabled={running}><MonitorUp className="h-4 w-4" />Window</button>
+        <button className="btn inline-flex items-center justify-center gap-2" onClick={startAdbCapture} disabled={running}><Smartphone className="h-4 w-4" />ADB Native</button>
         <button className="min-h-11 rounded-lg bg-white/10 px-4 py-2 font-semibold active:bg-white/20" onClick={stopCapture} disabled={!running}><CircleStop className="mr-2 inline h-4 w-4" />Stop</button>
       </div>
     </div>
@@ -202,7 +269,7 @@ export function LiveCapture() {
     <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
       <section className="card overflow-hidden">
         <div className="relative aspect-[20/9] bg-black">
-          <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />
+          {sourceMode === "adb" && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
@@ -210,7 +277,7 @@ export function LiveCapture() {
               <span className={`absolute left-1 top-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-emerald-400 text-slate-950" : "bg-black/60 text-sky-100"}`}>{region.label}</span>
             </div>;
           })}
-          {!running && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-center text-sm text-slate-300"><div className="max-w-sm px-4">Start capture and choose the scrcpy or OBS window. The app samples video frames locally in this browser tab.</div></div>}
+          {!running && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-center text-sm text-slate-300"><div className="max-w-sm px-4">Use Window capture in a normal browser, or ADB Native in this in-app browser. ADB Native uses true phone pixels but is slower than video capture.</div></div>}
         </div>
       </section>
 
@@ -221,7 +288,7 @@ export function LiveCapture() {
             <div className="rounded-lg bg-white/5 p-3"><div className="text-slate-400">FPS</div><div className="text-2xl font-black">{fps}</div></div>
             <div className="rounded-lg bg-white/5 p-3"><div className="text-slate-400">Buffer</div><div className="text-2xl font-black">{buffered}/{maxBufferedFrames}</div></div>
             <div className="rounded-lg bg-white/5 p-3"><div className="text-slate-400">Latency</div><div className="text-2xl font-black">{lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`}</div></div>
-            <div className="rounded-lg bg-white/5 p-3"><div className="text-slate-400">Mode</div><div className="text-2xl font-black">{running ? "Live" : "Idle"}</div></div>
+            <div className="rounded-lg bg-white/5 p-3"><div className="text-slate-400">Mode</div><div className="text-2xl font-black">{sourceMode === "adb" ? "ADB" : running ? "Live" : "Idle"}</div></div>
             <div className="col-span-2 rounded-lg bg-white/5 p-3"><div className="text-slate-400">Native Source</div><div className="text-2xl font-black">{sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"}</div></div>
             <div className="col-span-2 rounded-lg bg-white/5 p-3"><div className="text-slate-400">Native ROI Crops</div><div className="text-2xl font-black">{nativeCrops}/{maxNativeCrops}</div></div>
           </div>
@@ -246,7 +313,7 @@ export function LiveCapture() {
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Use browser/OBS video frames for realtime CV. Frames and ROI crops stay at native source resolution; ADB screenshots stay for manual samples only.</p>
+          <p className="mt-2 text-sm text-slate-300">Window capture is the fast path. ADB Native is a permission-safe fallback that preserves phone resolution for detail samples.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
         </div>
       </aside>

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSource.js";
 import {
   addObsRegion,
   clearObsRegions,
@@ -33,6 +34,20 @@ export async function obsCoachRoutes(app: FastifyInstance) {
   app.post("/api/obs/start", async () => ({ ok: true, realtime: setObsRealtime(true), message: "OBS realtime flag enabled. Capture adapter is still manual/prepared." }));
   app.post("/api/obs/stop", async () => ({ ok: true, realtime: setObsRealtime(false), message: "OBS realtime stopped." }));
   app.get("/api/obs/frame", async (_req, reply) => reply.code(404).send({ ok: false, error: "No OBS frame source is connected yet." }));
+  app.get("/api/capture/status", async () => getAdbCaptureStatus());
+  app.get("/api/capture/frame", async (_req, reply) => {
+    try {
+      const frame = await captureAdbPngFrame();
+      reply
+        .header("cache-control", "no-store")
+        .header("x-captured-at", frame.capturedAt)
+        .header("x-capture-elapsed-ms", String(frame.elapsedMs))
+        .type("image/png")
+        .send(frame.buffer);
+    } catch (error) {
+      reply.code(503).send({ ok: false, error: error instanceof Error ? error.message : "ADB frame capture failed." });
+    }
+  });
 
   app.get("/api/obs/regions", async () => getObsRegions());
   app.post("/api/obs/regions", async (req) => ({ ok: true, regions: await saveObsRegions(req.body) }));
