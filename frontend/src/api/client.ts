@@ -21,6 +21,8 @@ export const getMapProjection = () => apiGet<any>("/api/map/projection");
 export const saveMapProjection = (projection: unknown) => apiPost<any>("/api/map/projection", { projection });
 export const projectMinimapPoint = (x: number, y: number) => apiPost<any>("/api/map/project-minimap-point", { x, y });
 export const getHeroRecognitionManifest = () => apiGet<any>("/api/vision/heroes/manifest");
+export const getLatestDraftRecognition = () => apiGet<any>("/api/vision/draft/latest");
+export const ingestDraftRecognition = (state: unknown) => apiPost<any>("/api/vision/draft/recognition", state);
 export async function applyPatchZip(file: File) {
   const body = new FormData();
   body.append("patch", file);

@@ -18,6 +18,7 @@ import { analyzeBuild } from "./engines/buildEngine.js";
 import { eventBus } from "./event-bus/eventBus.js";
 import { getMapRuntimeManifest, getMinimapProjection, getZones, mapPointToZone, projectMinimapPoint, saveMinimapProjection, saveZones } from "./map-runtime/mapRuntime.js";
 import { installModule, listModules, sdkDescription } from "./module-runtime/moduleRuntime.js";
+import { getLatestDraftRecognition, ingestDraftRecognition } from "./vision/draftRecognition.js";
 import { getHeroRecognitionManifest, heroRecognitionScenes } from "./vision/heroRecognition.js";
 
 const app = Fastify({ logger: true });
@@ -50,6 +51,8 @@ app.post("/api/build/analyze", async (req) => { const body=req.body as any; retu
 app.get("/api/registry/overview", async () => ({ success:true, data: await semanticRegistry.overview() }));
 app.get("/api/vision/heroes/manifest", async () => ({ success:true, data: await getHeroRecognitionManifest() }));
 app.get("/api/vision/scenes", async () => ({ success:true, data: heroRecognitionScenes }));
+app.get("/api/vision/draft/latest", async () => ({ success:true, data:getLatestDraftRecognition() }));
+app.post("/api/vision/draft/recognition", async (req) => ({ success:true, data:await ingestDraftRecognition(req.body as any) }));
 
 app.get("/api/map/runtime", async () => ({ success:true, manifest:getMapRuntimeManifest(), zones:getZones(), projection:getMinimapProjection() }));
 app.get("/api/map/zones", async () => ({ success:true, data:getZones() }));
