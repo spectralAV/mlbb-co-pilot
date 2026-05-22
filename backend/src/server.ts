@@ -16,7 +16,7 @@ import { updateRoutes } from "./routes/updateRoutes.js";
 import { analyzeDraft } from "./engines/draftEngine.js";
 import { analyzeBuild } from "./engines/buildEngine.js";
 import { eventBus } from "./event-bus/eventBus.js";
-import { getMapRuntimeManifest, getZones, mapPointToZone, saveZones } from "./map-runtime/mapRuntime.js";
+import { getMapRuntimeManifest, getMinimapProjection, getZones, mapPointToZone, projectMinimapPoint, saveMinimapProjection, saveZones } from "./map-runtime/mapRuntime.js";
 import { installModule, listModules, sdkDescription } from "./module-runtime/moduleRuntime.js";
 
 const app = Fastify({ logger: true });
@@ -48,10 +48,13 @@ app.post("/api/draft/counters", async (req) => { const body=req.body as any; ret
 app.post("/api/build/analyze", async (req) => { const body=req.body as any; return {success:true,data: await analyzeBuild(body.heroId, body.enemyHeroIds??[])}; });
 app.get("/api/registry/overview", async () => ({ success:true, data: await semanticRegistry.overview() }));
 
-app.get("/api/map/runtime", async () => ({ success:true, manifest:getMapRuntimeManifest(), zones:getZones() }));
+app.get("/api/map/runtime", async () => ({ success:true, manifest:getMapRuntimeManifest(), zones:getZones(), projection:getMinimapProjection() }));
 app.get("/api/map/zones", async () => ({ success:true, data:getZones() }));
 app.post("/api/map/zones", async (req) => ({ success:true, data:saveZones((req.body as any)?.zones ?? req.body) }));
 app.post("/api/map/resolve-zone", async (req) => { const body=req.body as any; return { success:true, data: mapPointToZone(body.x,body.y) }; });
+app.get("/api/map/projection", async () => ({ success:true, data:getMinimapProjection() }));
+app.post("/api/map/projection", async (req) => ({ success:true, data:saveMinimapProjection((req.body as any)?.projection ?? req.body) }));
+app.post("/api/map/project-minimap-point", async (req) => { const body=req.body as any; return { success:true, data:projectMinimapPoint(body.x, body.y) }; });
 app.post("/api/map/train/upload", async () => ({ success:true, message:"Map training upload shell ready." }));
 app.post("/api/map/train/align", async () => ({ success:true, message:"Alignment shell ready." }));
 app.post("/api/map/export", async () => ({ success:true, manifest:getMapRuntimeManifest() }));

@@ -11,9 +11,30 @@ export type MapZone = {
   connectedZones?: string[];
 };
 
+type Point = [number, number];
+
+export type MinimapProjection = {
+  mode: "bilinear_quad";
+  source: "minimap-normalized-square";
+  target: "tactical-map-normalized-rhombus";
+  minimapCorners: {
+    topLeft: Point;
+    topRight: Point;
+    bottomRight: Point;
+    bottomLeft: Point;
+  };
+  tacticalCorners: {
+    topLeft: Point;
+    topRight: Point;
+    bottomRight: Point;
+    bottomLeft: Point;
+  };
+};
+
 const ROOT = path.resolve(process.cwd(), "..");
 const MAP_DIR = path.join(ROOT, "data", "map");
 const ZONES_FILE = path.join(MAP_DIR, "map_zones.json");
+const PROJECTION_FILE = path.join(MAP_DIR, "minimap_projection.json");
 
 const defaultZones: MapZone[] = [
   { id: "mid-river", name: "Mid River", type: "river", polygon: [[0.40, 0.44], [0.60, 0.44], [0.60, 0.56], [0.40, 0.56]], dangerWeight: 0.7, connectedZones: ["turtle-zone", "lord-zone"] },
@@ -21,8 +42,36 @@ const defaultZones: MapZone[] = [
   { id: "lord-zone", name: "Lord Zone", type: "objective", polygon: [[0.22, 0.22], [0.42, 0.22], [0.42, 0.42], [0.22, 0.42]], dangerWeight: 0.9, connectedZones: ["mid-river"] }
 ];
 
+const defaultProjection: MinimapProjection = {
+  mode: "bilinear_quad",
+  source: "minimap-normalized-square",
+  target: "tactical-map-normalized-rhombus",
+  minimapCorners: {
+    topLeft: [0, 0],
+    topRight: [1, 0],
+    bottomRight: [1, 1],
+    bottomLeft: [0, 1]
+  },
+  tacticalCorners: {
+    topLeft: [0.18, 0.08],
+    topRight: [0.80, 0.10],
+    bottomRight: [0.88, 0.88],
+    bottomLeft: [0.12, 0.86]
+  }
+};
+
 function ensureMapDir() {
   fs.mkdirSync(MAP_DIR, { recursive: true });
+}
+
+function clamp01(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizePoint(point: unknown, fallback: Point): Point {
+  if (!Array.isArray(point) || point.length < 2) return fallback;
+  return [clamp01(Number(point[0])), clamp01(Number(point[1]))];
 }
 
 function normalizeZone(zone: any, index: number): MapZone | null {
@@ -61,11 +110,85 @@ export function saveZones(zones: unknown) {
 
 export function getMapRuntimeManifest() {
   const zones = getZones();
-  return { name: "MLBB Co-Pilot Map Runtime", version: "0.1", coordinateSystem: "normalized-0-1", zones: zones.length };
+  const projection = getMinimapProjection();
+  return {
+    name: "MLBB Co-Pilot Map Runtime",
+    version: "0.1",
+    coordinateSystem: "normalized-0-1",
+    zones: zones.length,
+    projectionMode: projection.mode,
+    projectionTarget: projection.target
+  };
 }
 
 export function mapPointToZone(x: number, y: number) {
   return getZones().find((zone) => pointInPoly([x, y], zone.polygon)) ?? null;
+}
+
+export function getMinimapProjection(): MinimapProjection {
+  try {
+    return normalizeProjection(JSON.parse(fs.readFileSync(PROJECTION_FILE, "utf8")));
+  } catch {}
+  return defaultProjection;
+}
+
+export function saveMinimapProjection(projection: unknown) {
+  const next = normalizeProjection(projection);
+  ensureMapDir();
+  fs.writeFileSync(PROJECTION_FILE, JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+export function projectMinimapPoint(x: number, y: number, projection = getMinimapProjection()) {
+  const u = clamp01(Number(x));
+  const v = clamp01(Number(y));
+  const { topLeft, topRight, bottomRight, bottomLeft } = projection.tacticalCorners;
+
+  const top: Point = [
+    lerp(topLeft[0], topRight[0], u),
+    lerp(topLeft[1], topRight[1], u)
+  ];
+  const bottom: Point = [
+    lerp(bottomLeft[0], bottomRight[0], u),
+    lerp(bottomLeft[1], bottomRight[1], u)
+  ];
+
+  const tactical: Point = [
+    clamp01(lerp(top[0], bottom[0], v)),
+    clamp01(lerp(top[1], bottom[1], v))
+  ];
+
+  return {
+    minimap: [u, v] as Point,
+    tactical,
+    zone: mapPointToZone(tactical[0], tactical[1])
+  };
+}
+
+function normalizeProjection(projection: any): MinimapProjection {
+  const sourceCorners = projection?.minimapCorners ?? {};
+  const targetCorners = projection?.tacticalCorners ?? {};
+  return {
+    mode: "bilinear_quad",
+    source: "minimap-normalized-square",
+    target: "tactical-map-normalized-rhombus",
+    minimapCorners: {
+      topLeft: normalizePoint(sourceCorners.topLeft, defaultProjection.minimapCorners.topLeft),
+      topRight: normalizePoint(sourceCorners.topRight, defaultProjection.minimapCorners.topRight),
+      bottomRight: normalizePoint(sourceCorners.bottomRight, defaultProjection.minimapCorners.bottomRight),
+      bottomLeft: normalizePoint(sourceCorners.bottomLeft, defaultProjection.minimapCorners.bottomLeft)
+    },
+    tacticalCorners: {
+      topLeft: normalizePoint(targetCorners.topLeft, defaultProjection.tacticalCorners.topLeft),
+      topRight: normalizePoint(targetCorners.topRight, defaultProjection.tacticalCorners.topRight),
+      bottomRight: normalizePoint(targetCorners.bottomRight, defaultProjection.tacticalCorners.bottomRight),
+      bottomLeft: normalizePoint(targetCorners.bottomLeft, defaultProjection.tacticalCorners.bottomLeft)
+    }
+  };
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
 }
 
 function pointInPoly(point: number[], poly: number[][]) {

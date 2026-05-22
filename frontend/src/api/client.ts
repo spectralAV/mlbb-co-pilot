@@ -17,6 +17,9 @@ export const getObsConfig = () => apiGet<any>("/api/obs/config");
 export const saveObsConfig = (config: unknown) => apiPost<any>("/api/obs/config", config);
 export const getMapZones = () => apiGet<any>("/api/map/zones");
 export const saveMapZones = (zones: unknown) => apiPost<any>("/api/map/zones", { zones });
+export const getMapProjection = () => apiGet<any>("/api/map/projection");
+export const saveMapProjection = (projection: unknown) => apiPost<any>("/api/map/projection", { projection });
+export const projectMinimapPoint = (x: number, y: number) => apiPost<any>("/api/map/project-minimap-point", { x, y });
 export async function applyPatchZip(file: File) {
   const body = new FormData();
   body.append("patch", file);
