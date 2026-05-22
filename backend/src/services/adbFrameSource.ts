@@ -15,7 +15,7 @@ function candidateAdbPaths() {
   ].filter(Boolean) as string[];
 }
 
-async function resolveAdb() {
+export async function resolveAdb() {
   for (const candidate of candidateAdbPaths()) {
     if (candidate === "adb") return candidate;
     if (fs.existsSync(candidate)) return candidate;

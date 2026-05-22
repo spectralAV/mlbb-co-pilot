@@ -8,6 +8,7 @@ export type CaptureSource = "adb" | "window" | "scrcpy" | "ndi" | "capture_card"
 export type SourceMode = "idle" | "browser" | "adb" | "scrcpy";
 type NativeCrop = { time: number; key: RegionKey; width: number; height: number; bitmap: ImageBitmap };
 type FrameSummary = { time: number; sourceWidth: number; sourceHeight: number; regions: Record<RegionKey, RegionMetrics> };
+type ScrcpyFrameMeta = { type: "scrcpy_frame"; config?: boolean; key?: boolean; ptsUs?: number; size?: number };
 
 export const regions: Region[] = [
   { key: "equipment_window", label: "Equipment Window", rect: [0.58, 0.08, 0.38, 0.78] },
@@ -26,7 +27,7 @@ export const captureSources: Array<{
   detail: string;
 }> = [
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
-  { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Background Android mirror with native ADB preview frames until direct stream decoding is connected." },
+  { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Direct H.264 stream decoded with WebCodecs; falls back to ADB frames if needed." },
   { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly network video source for backend decoding." },
   { id: "capture_card", title: "Capture Card", state: "planned", detail: "HDMI/USB video input for phones, tablets, or external devices." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
@@ -77,9 +78,21 @@ export const useCaptureRuntimeStore = create<CaptureRuntimeState>((set) => ({
 const runtime = {
   video: null as HTMLVideoElement | null,
   canvas: null as HTMLCanvasElement | null,
+  previewCanvas: null as HTMLCanvasElement | null,
   adbPreviewUrl: "",
   adbTimer: null as number | null,
   adbActive: false,
+  h264Socket: null as WebSocket | null,
+  h264Decoder: null as any,
+  h264Configured: false,
+  h264ReadyForKey: true,
+  h264ConfigPayload: null as Uint8Array | null,
+  h264PendingMeta: [] as ScrcpyFrameMeta[],
+  h264RawBuffer: new Uint8Array(0),
+  h264AuNals: [] as Uint8Array[],
+  h264AuHasVcl: false,
+  h264AuKey: false,
+  h264ParameterSets: [] as Uint8Array[],
   stream: null as MediaStream | null,
   frameBuffer: [] as FrameSummary[],
   nativeCropBuffer: [] as NativeCrop[],
@@ -98,13 +111,30 @@ export function attachCaptureRuntime(video: HTMLVideoElement | null, canvas: HTM
   }
 }
 
+export function attachScrcpyPreviewCanvas(canvas: HTMLCanvasElement | null) {
+  runtime.previewCanvas = canvas;
+}
+
 export function stopCaptureRuntime() {
   if (runtime.raf != null) cancelAnimationFrame(runtime.raf);
   if (runtime.adbTimer != null) window.clearTimeout(runtime.adbTimer);
   if (runtime.ageTimer != null) window.clearInterval(runtime.ageTimer);
+  runtime.h264Socket?.close();
+  runtime.h264Decoder?.close?.();
   runtime.raf = null;
   runtime.adbTimer = null;
   runtime.ageTimer = null;
+  runtime.h264Socket = null;
+  runtime.h264Decoder = null;
+  runtime.h264Configured = false;
+  runtime.h264ReadyForKey = true;
+  runtime.h264ConfigPayload = null;
+  runtime.h264PendingMeta = [];
+  runtime.h264RawBuffer = new Uint8Array(0);
+  runtime.h264AuNals = [];
+  runtime.h264AuHasVcl = false;
+  runtime.h264AuKey = false;
+  runtime.h264ParameterSets = [];
   runtime.adbActive = false;
   runtime.stream?.getTracks().forEach((track) => track.stop());
   runtime.stream = null;
@@ -136,16 +166,224 @@ export function startSelectedCaptureRuntime() {
 async function startScrcpyCapture() {
   useCaptureRuntimeStore.setState({ error: "" });
   try {
-    const result = await startScrcpy({ maxFps: 60, videoBitRate: "16M", background: true });
+    const canDecode = "VideoDecoder" in window && "EncodedVideoChunk" in window;
+    const result = await startScrcpy({ maxFps: 60, videoBitRate: 16000000, background: true, decoder: "h264" });
     if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
     resetBuffers();
-    runtime.adbActive = true;
-    useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 } });
+    useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 }, adbPreviewUrl: "" });
     startAgeTimer();
-    void pollAdbFrame();
+    if (canDecode) {
+      startScrcpyH264Decode();
+    } else {
+      runtime.adbActive = true;
+      useCaptureRuntimeStore.setState({ error: "WebCodecs is unavailable in this browser, using ADB preview fallback." });
+      void pollAdbFrame();
+    }
   } catch (caught) {
     useCaptureRuntimeStore.setState({ error: caught instanceof Error ? caught.message : "Could not start scrcpy." });
   }
+}
+
+function startScrcpyH264Decode() {
+  runtime.h264Socket?.close();
+  runtime.h264Decoder?.close?.();
+  runtime.h264PendingMeta = [];
+  runtime.h264ConfigPayload = null;
+  runtime.h264RawBuffer = new Uint8Array(0);
+  runtime.h264AuNals = [];
+  runtime.h264AuHasVcl = false;
+  runtime.h264AuKey = false;
+  runtime.h264ParameterSets = [];
+  runtime.h264ReadyForKey = true;
+  runtime.h264Configured = false;
+  runtime.h264Decoder = new (window as any).VideoDecoder({
+    output: drawDecodedFrame,
+    error: (error: Error) => {
+      useCaptureRuntimeStore.setState({ error: `H.264 decoder error: ${error.message}` });
+    }
+  });
+  try {
+    runtime.h264Decoder.configure({
+      codec: "avc1.42E01F",
+      optimizeForLatency: true,
+      avc: { format: "annexb" }
+    });
+  } catch {
+    runtime.h264Decoder.configure({ codec: "avc1.42E01F", optimizeForLatency: true });
+  }
+  runtime.h264Configured = true;
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${protocol}://${window.location.host}/ws/capture/scrcpy-h264`);
+  runtime.h264Socket = socket;
+  socket.binaryType = "arraybuffer";
+  socket.onmessage = (event) => {
+    if (typeof event.data === "string") return handleScrcpyMessage(event.data);
+    const meta = runtime.h264PendingMeta.shift();
+    if (!meta) return appendRawH264Bytes(new Uint8Array(event.data));
+    decodeScrcpyPayload(new Uint8Array(event.data), meta);
+  };
+  socket.onerror = () => {
+    useCaptureRuntimeStore.setState({ error: "scrcpy H.264 WebSocket failed; stop and restart capture if the phone stream changed." });
+  };
+  socket.onclose = () => {
+    if (useCaptureRuntimeStore.getState().sourceMode === "scrcpy") useCaptureRuntimeStore.setState({ error: "scrcpy H.264 stream closed." });
+  };
+}
+
+function handleScrcpyMessage(data: string) {
+  try {
+    const message = JSON.parse(data);
+    if (message.type === "scrcpy_frame") runtime.h264PendingMeta.push(message);
+    if (message.type === "scrcpy_stream_meta" && message.width && message.height) {
+      useCaptureRuntimeStore.setState({ sourceSize: { width: Number(message.width), height: Number(message.height) } });
+    }
+    if (message.type === "scrcpy_error") useCaptureRuntimeStore.setState({ error: message.message ?? "scrcpy stream error." });
+  } catch {}
+}
+
+function decodeScrcpyPayload(payload: Uint8Array, meta: ScrcpyFrameMeta) {
+  if (!runtime.h264Decoder || !runtime.h264Configured) return;
+  if (meta.config) {
+    runtime.h264ConfigPayload = payload;
+    return;
+  }
+  if (runtime.h264ReadyForKey && !meta.key) return;
+  const data = meta.key && runtime.h264ConfigPayload ? concatBytes(runtime.h264ConfigPayload, payload) : payload;
+  runtime.h264ReadyForKey = false;
+  try {
+    runtime.h264Decoder.decode(new (window as any).EncodedVideoChunk({
+      type: meta.key ? "key" : "delta",
+      timestamp: meta.ptsUs ?? Math.round(performance.now() * 1000),
+      data
+    }));
+  } catch (caught) {
+    runtime.h264ReadyForKey = true;
+    useCaptureRuntimeStore.setState({ error: caught instanceof Error ? caught.message : "Could not decode scrcpy H.264 frame." });
+  }
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array) {
+  const next = new Uint8Array(a.byteLength + b.byteLength);
+  next.set(a, 0);
+  next.set(b, a.byteLength);
+  return next;
+}
+
+function appendRawH264Bytes(bytes: Uint8Array) {
+  const data = concatBytes(runtime.h264RawBuffer, bytes);
+  const starts = findStartCodes(data);
+  if (starts.length < 2) {
+    runtime.h264RawBuffer = data;
+    return;
+  }
+  for (let index = 0; index < starts.length - 1; index += 1) {
+    processRawNal(data.subarray(starts[index], starts[index + 1]));
+  }
+  runtime.h264RawBuffer = data.subarray(starts[starts.length - 1]);
+}
+
+function findStartCodes(data: Uint8Array) {
+  const starts: number[] = [];
+  for (let i = 0; i < data.length - 3; i += 1) {
+    if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) starts.push(i);
+    else if (i < data.length - 4 && data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 1) starts.push(i);
+  }
+  return starts;
+}
+
+function nalPayloadOffset(nal: Uint8Array) {
+  return nal[2] === 1 ? 3 : 4;
+}
+
+function processRawNal(nal: Uint8Array) {
+  const offset = nalPayloadOffset(nal);
+  if (nal.length <= offset) return;
+  const nalType = nal[offset] & 0x1f;
+  if (nalType === 9) {
+    flushRawAccessUnit();
+    return;
+  }
+  if (nalType === 7 || nalType === 8) {
+    runtime.h264ParameterSets = [...runtime.h264ParameterSets.filter((item) => (item[nalPayloadOffset(item)] & 0x1f) !== nalType), nal];
+  }
+  const isVcl = nalType === 1 || nalType === 5;
+  if (isVcl && runtime.h264AuHasVcl) flushRawAccessUnit();
+  runtime.h264AuNals.push(nal);
+  if (isVcl) runtime.h264AuHasVcl = true;
+  if (nalType === 5) runtime.h264AuKey = true;
+}
+
+function flushRawAccessUnit() {
+  if (!runtime.h264AuNals.length || !runtime.h264AuHasVcl) {
+    runtime.h264AuNals = [];
+    runtime.h264AuHasVcl = false;
+    runtime.h264AuKey = false;
+    return;
+  }
+  const hasParameterSet = runtime.h264AuNals.some((nal) => {
+    const type = nal[nalPayloadOffset(nal)] & 0x1f;
+    return type === 7 || type === 8;
+  });
+  const nals = runtime.h264AuKey && !hasParameterSet ? [...runtime.h264ParameterSets, ...runtime.h264AuNals] : runtime.h264AuNals;
+  const data = concatMany(nals);
+  runtime.h264AuNals = [];
+  const key = runtime.h264AuKey;
+  runtime.h264AuHasVcl = false;
+  runtime.h264AuKey = false;
+  if (runtime.h264ReadyForKey && !key) return;
+  runtime.h264ReadyForKey = false;
+  try {
+    runtime.h264Decoder?.decode(new (window as any).EncodedVideoChunk({
+      type: key ? "key" : "delta",
+      timestamp: Math.round(performance.now() * 1000),
+      data
+    }));
+  } catch (caught) {
+    runtime.h264ReadyForKey = true;
+    useCaptureRuntimeStore.setState({ error: caught instanceof Error ? caught.message : "Could not decode raw scrcpy H.264 access unit." });
+  }
+}
+
+function concatMany(parts: Uint8Array[]) {
+  const length = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const next = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    next.set(part, offset);
+    offset += part.byteLength;
+  }
+  return next;
+}
+
+function drawDecodedFrame(frame: any) {
+  const canvas = runtime.canvas;
+  if (!canvas) {
+    frame.close();
+    return;
+  }
+  const width = frame.displayWidth || frame.codedWidth;
+  const height = frame.displayHeight || frame.codedHeight;
+  if (!width || !height) {
+    frame.close();
+    return;
+  }
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    useCaptureRuntimeStore.setState({ sourceSize: { width, height } });
+  }
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx?.drawImage(frame, 0, 0, width, height);
+  if (runtime.previewCanvas) {
+    if (runtime.previewCanvas.width !== width || runtime.previewCanvas.height !== height) {
+      runtime.previewCanvas.width = width;
+      runtime.previewCanvas.height = height;
+    }
+    runtime.previewCanvas.getContext("2d")?.drawImage(frame, 0, 0, width, height);
+  }
+  frame.close();
+  analyzeCanvas(canvas, width, height);
 }
 
 async function startBrowserCapture() {

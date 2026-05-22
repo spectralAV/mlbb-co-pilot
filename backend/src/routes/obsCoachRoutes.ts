@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSource.js";
-import { getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
+import { attachScrcpyH264Client, getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
 import {
   addObsRegion,
   clearObsRegions,
@@ -37,8 +37,9 @@ export async function obsCoachRoutes(app: FastifyInstance) {
   app.get("/api/obs/frame", async (_req, reply) => reply.code(404).send({ ok: false, error: "No OBS frame source is connected yet." }));
   app.get("/api/capture/status", async () => getAdbCaptureStatus());
   app.get("/api/capture/scrcpy/status", async () => getScrcpyStatus());
-  app.post("/api/capture/scrcpy/start", async (req) => ({ ok: true, status: startScrcpy(req.body) }));
+  app.post("/api/capture/scrcpy/start", async (req) => ({ ok: true, status: await startScrcpy(req.body) }));
   app.post("/api/capture/scrcpy/stop", async () => ({ ok: true, status: stopScrcpy() }));
+  app.get("/ws/capture/scrcpy-h264", { websocket: true }, (socket) => attachScrcpyH264Client(socket));
   app.get("/api/capture/frame", async (_req, reply) => {
     try {
       const frame = await captureAdbPngFrame();
