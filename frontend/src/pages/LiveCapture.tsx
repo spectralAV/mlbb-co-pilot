@@ -74,7 +74,7 @@ export function LiveCapture() {
     <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
       <section className="card overflow-hidden">
         <div className="relative bg-black" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "adb" && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+          {(sourceMode === "adb" || sourceMode === "scrcpy") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
@@ -118,7 +118,7 @@ export function LiveCapture() {
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Capture is now owned by the app shell instead of the current page. ADB still-frame capture, managed scrcpy mirroring, draft recognition, map trainer, and overlay can consume the same runtime state.</p>
+          <p className="mt-2 text-sm text-slate-300">Capture is now owned by the app shell instead of the current page. ADB still-frame capture, managed background scrcpy with native preview frames, draft recognition, map trainer, and overlay can consume the same runtime state.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
         </div>
       </aside>

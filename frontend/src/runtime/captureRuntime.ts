@@ -26,7 +26,7 @@ export const captureSources: Array<{
   detail: string;
 }> = [
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
-  { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Managed native Android mirror through the local scrcpy binary." },
+  { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Background Android mirror with native ADB preview frames until direct stream decoding is connected." },
   { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly network video source for backend decoding." },
   { id: "capture_card", title: "Capture Card", state: "planned", detail: "HDMI/USB video input for phones, tablets, or external devices." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
@@ -139,7 +139,10 @@ async function startScrcpyCapture() {
     const result = await startScrcpy({ maxFps: 60, videoBitRate: "16M", background: true });
     if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
     resetBuffers();
+    runtime.adbActive = true;
     useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 } });
+    startAgeTimer();
+    void pollAdbFrame();
   } catch (caught) {
     useCaptureRuntimeStore.setState({ error: caught instanceof Error ? caught.message : "Could not start scrcpy." });
   }
