@@ -24,5 +24,12 @@ The current app starts and manages scrcpy as a native external process. This is 
 - 16M video bitrate
 - no audio
 - stay-awake
+- no local scrcpy window by default
 
 This keeps latency low and avoids browser screen-share permission issues.
+
+## Background Mode
+
+The managed source starts scrcpy with `--no-window` by default. That prevents the mirror window from jumping to the foreground or being scaled by the desktop display. A visible mirror can still be launched by posting `{ "background": false }` to `/api/capture/scrcpy/start`.
+
+This background launch is separate from full backend frame decoding. Direct scrcpy video-stream decoding is still the next deeper integration step for high-FPS CV frames.

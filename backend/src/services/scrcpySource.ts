@@ -8,6 +8,7 @@ let scrcpyProcess: ChildProcessWithoutNullStreams | null = null;
 let startedAt: string | null = null;
 let lastExit: { code: number | null; signal: NodeJS.Signals | null; at: string } | null = null;
 let lastError = "";
+let lastArgs: string[] = [];
 
 function candidateScrcpyPaths() {
   return [
@@ -35,6 +36,7 @@ export function getScrcpyStatus() {
     startedAt,
     lastExit,
     lastError,
+    args: lastArgs,
     message: scrcpyProcess && !scrcpyProcess.killed ? "scrcpy native mirror is running." : "scrcpy native mirror is stopped."
   };
 }
@@ -42,18 +44,26 @@ export function getScrcpyStatus() {
 export function startScrcpy(options: any = {}) {
   if (scrcpyProcess && !scrcpyProcess.killed) return getScrcpyStatus();
   const scrcpy = resolveScrcpy();
+  const background = options.background !== false;
   const args = [
-    "--window-title=MLBB Co-Pilot scrcpy",
     "--video-codec=h264",
     `--video-bit-rate=${String(options.videoBitRate ?? "16M")}`,
     `--max-fps=${String(options.maxFps ?? 60)}`,
     "--no-audio",
     "--stay-awake"
   ];
+  if (background) {
+    args.push("--no-window");
+  } else {
+    args.push("--window-title=MLBB Co-Pilot scrcpy", "--render-driver=direct3d");
+    if (options.windowWidth) args.push(`--window-width=${String(options.windowWidth)}`);
+    if (options.windowHeight) args.push(`--window-height=${String(options.windowHeight)}`);
+  }
   if (options.turnScreenOff) args.push("--turn-screen-off");
   lastError = "";
   lastExit = null;
-  scrcpyProcess = spawn(scrcpy, args, { windowsHide: false });
+  lastArgs = args;
+  scrcpyProcess = spawn(scrcpy, args, { windowsHide: background });
   startedAt = new Date().toISOString();
   scrcpyProcess.stderr.on("data", (data) => {
     lastError = String(data).trim().slice(-2000);

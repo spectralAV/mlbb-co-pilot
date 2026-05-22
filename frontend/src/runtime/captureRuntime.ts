@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { startScrcpy, stopScrcpy } from "../api/client";
 
 export type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" | "minimap";
 export type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
@@ -135,7 +136,7 @@ export function startSelectedCaptureRuntime() {
 async function startScrcpyCapture() {
   useCaptureRuntimeStore.setState({ error: "" });
   try {
-    const result = await startScrcpy({ maxFps: 60, videoBitRate: "16M" });
+    const result = await startScrcpy({ maxFps: 60, videoBitRate: "16M", background: true });
     if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
     resetBuffers();
     useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 } });
@@ -318,4 +319,3 @@ function startAgeTimer() {
     useCaptureRuntimeStore.setState({ lastFrameAge: last ? performance.now() - last : null });
   }, 250);
 }
-import { startScrcpy, stopScrcpy } from "../api/client";
