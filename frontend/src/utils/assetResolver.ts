@@ -3,10 +3,21 @@ const FALLBACK = "";
 function slug(value: unknown) {
   return String(value ?? "")
     .trim()
-    .replace(/['’]/g, "")
+    .replace(/['\u2019]/g, "")
     .replace(/[^a-zA-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .toLowerCase();
+}
+
+function titleFile(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replace(/['\u2019]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function mlbbNextImage(path: string, size = 64) {
@@ -33,37 +44,45 @@ export function resolveItemIcon(item: unknown): string {
 
 export function resolveEmblemIcon(emblem: unknown): string {
   const e = emblem as any;
-  const raw = typeof emblem === "string" ? emblem : e?.img_src ?? e?.image_path ?? e?.icon_url;
-  if (raw) return resolveAssetPath(String(raw).endsWith(".png") || String(raw).includes("/") ? String(raw) : `/images/emblems/${slug(raw)}.png`);
+  const raw = typeof emblem === "string" ? emblem : e?.img_src ?? e?.image_path ?? e?.icon_url ?? e?.icon;
+  if (raw) {
+    if (/^https?:\/\//i.test(String(raw)) || String(raw).includes("/images/emblem/main/")) return resolveAssetPath(String(raw));
+    const filename = String(raw).includes("/") ? String(raw).split("/").pop() : raw;
+    return resolveAssetPath(`/images/emblem/main/${String(filename).endsWith(".png") ? filename : `${slug(filename)}.png`}`);
+  }
   const name = e?.name ?? e?.emblem_name;
-  return name ? mlbbNextImage(`/images/emblems/${slug(String(name).replace(/ emblem$/i, ""))}.png`) : FALLBACK;
+  return name ? mlbbNextImage(`/images/emblem/main/${slug(String(name).replace(/ emblem$/i, ""))}.png`) : FALLBACK;
 }
 
 export function resolveTalentIcon(talent: unknown): string {
   const t = talent as any;
-  const raw = t?.icon_url ?? t?.image_path ?? t?.img_src;
+  const raw = typeof talent === "string" ? talent : t?.icon_url ?? t?.image_path ?? t?.img_src ?? t?.icon;
   if (!raw) return FALLBACK;
-  return String(raw).includes("/") ? resolveAssetPath(raw) : mlbbNextImage(`/images/emblems/abilities/${raw}`);
+  if (String(raw).includes("/")) return resolveAssetPath(raw);
+  return mlbbNextImage(`/images/emblem/ability/${raw}`);
 }
 
 export function resolveSpellIcon(spell: unknown): string {
   const key = slug(spell);
   if (!key) return FALLBACK;
   const map: Record<string, string> = {
-    flicker: "flicker.png",
-    retribution: "retribution.png",
-    inspire: "inspire.png",
-    flameshot: "flameshot.png",
-    vengeance: "vengeance.png",
-    petrify: "petrify.png",
-    execute: "execute.png",
-    sprint: "sprint.png",
-    purify: "purify.png",
-    aegis: "aegis.png",
-    arrival: "arrival.png",
-    revitalize: "revitalize.png",
-    revitalise: "revitalize.png",
-    healing_spell: "healing_spell.png"
+    flicker: "Flicker.png",
+    retribution: "Retribution.png",
+    ice_retribution: "Retribution.png",
+    flame_retribution: "Retribution.png",
+    bloody_retribution: "Retribution.png",
+    inspire: "Inspire.png",
+    flameshot: "Flameshot.png",
+    vengeance: "Vengeance.png",
+    petrify: "Petrify.png",
+    execute: "Execute.png",
+    sprint: "Sprint.png",
+    purify: "Purify.png",
+    aegis: "Aegis.png",
+    arrival: "Arrival.png",
+    revitalize: "Revitalize.png",
+    revitalise: "Revitalize.png",
+    healing_spell: "Healing Spell.png"
   };
-  return mlbbNextImage(`/images/spells/${map[key] ?? `${key}.png`}`);
+  return `https://mlbb.io/battle_spells/${encodeURIComponent(map[key] ?? `${titleFile(spell)}.png`)}`;
 }

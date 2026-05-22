@@ -88,7 +88,14 @@ export function BuildLab() {
     }
     return map;
   }, [items]);
-  const emblemByName = useMemo(() => new Map(emblems.map((emblem) => [normalizeKey(String(emblem.name ?? "").replace(/ emblem$/i, "")), emblem])), [emblems]);
+  const emblemByKey = useMemo(() => {
+    const map = new Map<string, Item>();
+    for (const emblem of emblems) {
+      if (emblem.id != null) map.set(String(emblem.id), emblem);
+      map.set(normalizeKey(String(emblem.name ?? "").replace(/ emblem$/i, "")), emblem);
+    }
+    return map;
+  }, [emblems]);
   const talentById = useMemo(() => {
     const map = new Map<string, Item>();
     for (const talent of talents) {
@@ -129,8 +136,10 @@ export function BuildLab() {
     const name = pickBuildHeroName(build);
     const hero = heroByName.get(normalizeKey(name));
     const spell = String(build?.battle_spell ?? build?.battleSpell ?? build?.spell ?? build?.spell_name ?? "");
+    const emblemId = build?.main_emblem_id ?? build?.mainEmblemId ?? build?.emblem_id ?? build?.emblems?.main_id;
     const emblemName = String(build?.main_emblem ?? build?.mainEmblem ?? build?.emblem ?? build?.emblem_name ?? "");
-    const emblem = emblemByName.get(normalizeKey(emblemName.replace(/ emblem$/i, "")));
+    const emblem = emblemByKey.get(String(emblemId ?? "")) ?? emblemByKey.get(normalizeKey(emblemName.replace(/ emblem$/i, "")));
+    const emblemLabel = emblemName || displayName(emblem, "");
     const buildItems = pickItemIds(build).map((id) => itemById.get(String(id)) ?? itemById.get(normalizeKey(id))).filter(Boolean) as Item[];
     const buildTalents = pickTalentIds(build).map((id) => talentById.get(String(id)) ?? talentById.get(normalizeKey(id))).filter(Boolean) as Item[];
     const tags = Array.from(new Set(buildItems.flatMap((item) => item.semantic_tags ?? []))).slice(0, 14);
@@ -158,7 +167,7 @@ export function BuildLab() {
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            {emblemName && <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/20 px-2 py-1 text-xs text-cyan-100"><Img src={resolveEmblemIcon(emblem ?? emblemName)} alt={emblemName} className="h-4 w-4 rounded" />{emblemName}</span>}
+            {emblemLabel && <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/20 px-2 py-1 text-xs text-cyan-100"><Img src={resolveEmblemIcon(emblem ?? emblemLabel)} alt={emblemLabel} className="h-4 w-4 rounded" />{emblemLabel}</span>}
             {buildTalents.map((talent) => <span key={`${build?.id}-talent-${talent.id ?? talent.name}`} className="inline-flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-1 text-xs text-violet-100"><Img src={resolveTalentIcon(talent)} alt={displayName(talent)} className="h-4 w-4 rounded" />{displayName(talent)}</span>)}
           </div>
 
