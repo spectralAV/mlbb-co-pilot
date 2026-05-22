@@ -4,7 +4,7 @@ export type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" 
 export type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
 export type RegionMetrics = { mean: number; contrast: number; changed: number; active: boolean };
 export type CaptureSource = "adb" | "window" | "scrcpy" | "ndi" | "capture_card" | "obs";
-export type SourceMode = "idle" | "browser" | "adb";
+export type SourceMode = "idle" | "browser" | "adb" | "scrcpy";
 type NativeCrop = { time: number; key: RegionKey; width: number; height: number; bitmap: ImageBitmap };
 type FrameSummary = { time: number; sourceWidth: number; sourceHeight: number; regions: Record<RegionKey, RegionMetrics> };
 
@@ -25,7 +25,7 @@ export const captureSources: Array<{
   detail: string;
 }> = [
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
-  { id: "scrcpy", title: "Backend scrcpy", state: "planned", detail: "Native video decoder path for realtime phone capture." },
+  { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Managed native Android mirror through the local scrcpy binary." },
   { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly network video source for backend decoding." },
   { id: "capture_card", title: "Capture Card", state: "planned", detail: "HDMI/USB video input for phones, tablets, or external devices." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
@@ -111,6 +111,8 @@ export function stopCaptureRuntime() {
   if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
   runtime.adbPreviewUrl = "";
   runtime.nativeCropBuffer.splice(0).forEach((crop) => crop.bitmap.close());
+  const mode = useCaptureRuntimeStore.getState().sourceMode;
+  if (mode === "scrcpy") void stopScrcpy().catch(() => {});
   useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", stream: null, adbPreviewUrl: "", nativeCrops: 0, fps: 0, lastFrameAge: null });
 }
 
@@ -118,15 +120,28 @@ export function startSelectedCaptureRuntime() {
   const selected = useCaptureRuntimeStore.getState().selectedSource;
   if (selected === "adb") return void startAdbCapture();
   if (selected === "window") return void startBrowserCapture();
+  if (selected === "scrcpy") return void startScrcpyCapture();
   const messages: Record<CaptureSource, string> = {
     adb: "",
     window: "",
-    scrcpy: "Backend scrcpy stream decoder is the recommended realtime phone path, but it is not connected yet.",
+    scrcpy: "",
     ndi: "NDI stream input is planned for iPhone/iPad users, but the backend decoder is not connected yet.",
     capture_card: "Capture card input is planned for HDMI/USB devices, but the backend decoder is not connected yet.",
     obs: "OBS/camera capture is optional and not connected yet. Use ADB Phone now, or backend scrcpy once the decoder is connected."
   };
   useCaptureRuntimeStore.setState({ error: messages[selected] });
+}
+
+async function startScrcpyCapture() {
+  useCaptureRuntimeStore.setState({ error: "" });
+  try {
+    const result = await startScrcpy({ maxFps: 60, videoBitRate: "16M" });
+    if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
+    resetBuffers();
+    useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 } });
+  } catch (caught) {
+    useCaptureRuntimeStore.setState({ error: caught instanceof Error ? caught.message : "Could not start scrcpy." });
+  }
 }
 
 async function startBrowserCapture() {
@@ -303,3 +318,4 @@ function startAgeTimer() {
     useCaptureRuntimeStore.setState({ lastFrameAge: last ? performance.now() - last : null });
   }, 250);
 }
+import { startScrcpy, stopScrcpy } from "../api/client";

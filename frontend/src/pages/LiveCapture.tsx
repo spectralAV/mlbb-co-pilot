@@ -93,7 +93,7 @@ export function LiveCapture() {
             <Metric label="FPS" value={fps} />
             <Metric label="Buffer" value={`${buffered}/${maxBufferedFrames}`} />
             <Metric label="Latency" value={lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`} />
-            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : running ? "Live" : "Idle"} />
+            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : running ? "Live" : "Idle"} />
             <Metric className="col-span-2" label="Native Source" value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
             <Metric className="col-span-2" label="Native ROI Crops" value={`${nativeCrops}/${maxNativeCrops}`} />
           </div>
@@ -118,7 +118,7 @@ export function LiveCapture() {
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Capture is now owned by the app shell instead of the current page. Draft recognition, map trainer, and overlay can consume the same runtime state.</p>
+          <p className="mt-2 text-sm text-slate-300">Capture is now owned by the app shell instead of the current page. ADB still-frame capture, managed scrcpy mirroring, draft recognition, map trainer, and overlay can consume the same runtime state.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
         </div>
       </aside>

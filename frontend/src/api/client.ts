@@ -23,6 +23,9 @@ export const projectMinimapPoint = (x: number, y: number) => apiPost<any>("/api/
 export const getHeroRecognitionManifest = () => apiGet<any>("/api/vision/heroes/manifest");
 export const getLatestDraftRecognition = () => apiGet<any>("/api/vision/draft/latest");
 export const ingestDraftRecognition = (state: unknown) => apiPost<any>("/api/vision/draft/recognition", state);
+export const getScrcpyStatus = () => apiGet<any>("/api/capture/scrcpy/status");
+export const startScrcpy = (options: unknown = {}) => apiPost<any>("/api/capture/scrcpy/start", options);
+export const stopScrcpy = () => apiPost<any>("/api/capture/scrcpy/stop");
 export async function applyPatchZip(file: File) {
   const body = new FormData();
   body.append("patch", file);
