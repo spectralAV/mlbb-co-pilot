@@ -10,6 +10,7 @@ export const getHeroBuild = (heroName: string) => apiGet<any>(`/api/builds/hero/
 export const getCoachState = () => apiGet<any>("/api/coach/state");
 export const updateCoachState = (state: unknown) => apiPost<any>("/api/coach/state", state);
 export const getObsRegions = () => apiGet<any>("/api/obs/regions");
+export const saveObsRegions = (regions: unknown) => apiPost<any>("/api/obs/regions", regions);
 export const addObsRegion = (key: string, region: number[]) => apiPost<any>("/api/obs/regions/add", { key, region });
 export const clearObsRegions = (key: string) => apiPost<any>("/api/obs/regions/clear", { key });
 export const getObsConfig = () => apiGet<any>("/api/obs/config");
