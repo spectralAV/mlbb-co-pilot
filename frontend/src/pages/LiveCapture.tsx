@@ -26,7 +26,7 @@ const captureSources: Array<{
 }> = [
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
   { id: "scrcpy", title: "Backend scrcpy", state: "planned", detail: "Native video decoder path for realtime phone capture." },
-  { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly LAN video source for backend decoding." },
+  { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly network video source for backend decoding." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
   { id: "obs", title: "OBS / Camera", state: "optional", detail: "Optional desktop/streaming setup, not required." }
 ];
