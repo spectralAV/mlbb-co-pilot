@@ -16,6 +16,7 @@ type DraftStore = {
   setLane: (lane?: string) => void;
   togglePick: (side: DraftSide, heroId: number) => void;
   placeHero: (kind: DraftKind, side: DraftSide, slot: number, heroId: number) => void;
+  replaceSlots: (slots: Partial<Pick<DraftStore, "allyPicks" | "enemyPicks" | "allyBans" | "enemyBans">>) => void;
   clearSlot: (kind: DraftKind, side: DraftSide, slot: number) => void;
   clear: () => void;
 };
@@ -35,6 +36,12 @@ function setSlot(slots: DraftSlots, slot: number, heroId: number | null) {
   const next = [...slots];
   while (next.length < 5) next.push(null);
   next[Math.max(0, Math.min(4, slot))] = heroId;
+  return next.slice(0, 5);
+}
+
+function normalizeSlots(slots: DraftSlots | undefined) {
+  const next = Array.isArray(slots) ? slots.map((id) => typeof id === "number" ? id : null) : [];
+  while (next.length < 5) next.push(null);
   return next.slice(0, 5);
 }
 
@@ -70,6 +77,12 @@ export const useDraftStore = create<DraftStore>((set) => ({
     };
     return { ...clean, [key]: setSlot(clean[key], slot, heroId) };
   }),
+  replaceSlots: (slots) => set((state) => ({
+    allyPicks: slots.allyPicks ? normalizeSlots(slots.allyPicks) : state.allyPicks,
+    enemyPicks: slots.enemyPicks ? normalizeSlots(slots.enemyPicks) : state.enemyPicks,
+    allyBans: slots.allyBans ? normalizeSlots(slots.allyBans) : state.allyBans,
+    enemyBans: slots.enemyBans ? normalizeSlots(slots.enemyBans) : state.enemyBans
+  })),
   clearSlot: (kind, side, slot) => set((state) => {
     const key = keyOf(kind, side);
     return { [key]: setSlot(state[key], slot, null) };
