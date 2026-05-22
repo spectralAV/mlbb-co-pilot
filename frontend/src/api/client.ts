@@ -15,6 +15,8 @@ export const addObsRegion = (key: string, region: number[]) => apiPost<any>("/ap
 export const clearObsRegions = (key: string) => apiPost<any>("/api/obs/regions/clear", { key });
 export const getObsConfig = () => apiGet<any>("/api/obs/config");
 export const saveObsConfig = (config: unknown) => apiPost<any>("/api/obs/config", config);
+export const getMapZones = () => apiGet<any>("/api/map/zones");
+export const saveMapZones = (zones: unknown) => apiPost<any>("/api/map/zones", { zones });
 export async function applyPatchZip(file: File) {
   const body = new FormData();
   body.append("patch", file);
