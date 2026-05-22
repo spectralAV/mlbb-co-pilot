@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleStop, Database, Gauge, MonitorUp, ScanLine, Smartphone } from "lucide-react";
+import { CircleStop, Database, Gauge, MonitorUp, ScanLine, Smartphone, Tv } from "lucide-react";
 
 type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" | "minimap";
 type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
 type RegionMetrics = { mean: number; contrast: number; changed: number; active: boolean };
 type NativeCrop = { time: number; key: RegionKey; width: number; height: number; bitmap: ImageBitmap };
 type FrameSummary = { time: number; sourceWidth: number; sourceHeight: number; regions: Record<RegionKey, RegionMetrics> };
+type CaptureSource = "adb" | "window" | "scrcpy" | "obs";
 
 const regions: Region[] = [
   { key: "equipment_window", label: "Equipment Window", rect: [0.58, 0.08, 0.38, 0.78] },
@@ -16,6 +17,18 @@ const regions: Region[] = [
 
 const maxBufferedFrames = 180;
 const maxNativeCrops = 96;
+
+const captureSources: Array<{
+  id: CaptureSource;
+  title: string;
+  state: "ready" | "permission" | "planned" | "optional";
+  detail: string;
+}> = [
+  { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
+  { id: "scrcpy", title: "Backend scrcpy", state: "planned", detail: "Native video decoder path for realtime phone capture." },
+  { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
+  { id: "obs", title: "OBS / Camera", state: "optional", detail: "Optional desktop/streaming setup, not required." }
+];
 
 function emptyMetrics(): Record<RegionKey, RegionMetrics> {
   return {
@@ -65,6 +78,7 @@ export function LiveCapture() {
   const rafRef = useRef<number | null>(null);
   const [running, setRunning] = useState(false);
   const [sourceMode, setSourceMode] = useState<"idle" | "browser" | "adb">("idle");
+  const [selectedSource, setSelectedSource] = useState<CaptureSource>("adb");
   const [fps, setFps] = useState(0);
   const [buffered, setBuffered] = useState(0);
   const [nativeCrops, setNativeCrops] = useState(0);
@@ -116,6 +130,22 @@ export function LiveCapture() {
       const message = caught instanceof Error ? caught.message : "Could not start screen capture.";
       setError(`${message}. Use ADB Native in this in-app browser, or open the app in Chrome/Edge for window capture.`);
     }
+  }
+
+  function startSelectedSource() {
+    if (selectedSource === "adb") {
+      void startAdbCapture();
+      return;
+    }
+    if (selectedSource === "window") {
+      void startCapture();
+      return;
+    }
+    if (selectedSource === "scrcpy") {
+      setError("Backend scrcpy stream decoder is the recommended realtime phone path, but it is not connected yet.");
+      return;
+    }
+    setError("OBS/camera capture is optional and not connected yet. Use ADB Phone now, or backend scrcpy once the decoder is connected.");
   }
 
   async function startAdbCapture() {
@@ -250,6 +280,7 @@ export function LiveCapture() {
   }, [running]);
 
   const activeWindows = regions.filter((region) => metrics[region.key]?.active && region.key.includes("window"));
+  const selected = captureSources.find((source) => source.id === selectedSource) ?? captureSources[0];
 
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -258,13 +289,27 @@ export function LiveCapture() {
         <p className="text-slate-400">Realtime screen/window capture with a rolling frame buffer for short MLBB equipment and attributes popups.</p>
       </div>
       <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
-        <button className="btn inline-flex items-center justify-center gap-2" onClick={startCapture} disabled={running}><MonitorUp className="h-4 w-4" />Window</button>
-        <button className="btn inline-flex items-center justify-center gap-2" onClick={startAdbCapture} disabled={running}><Smartphone className="h-4 w-4" />ADB Native</button>
+        <button className="btn inline-flex items-center justify-center gap-2" onClick={startSelectedSource} disabled={running}><MonitorUp className="h-4 w-4" />Start</button>
         <button className="min-h-11 rounded-lg bg-white/10 px-4 py-2 font-semibold active:bg-white/20" onClick={stopCapture} disabled={!running}><CircleStop className="mr-2 inline h-4 w-4" />Stop</button>
       </div>
     </div>
 
     {error && <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">{error}</div>}
+
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {captureSources.map((source) => {
+        const active = selectedSource === source.id;
+        const Icon = source.id === "adb" ? Smartphone : source.id === "window" ? MonitorUp : source.id === "obs" ? Tv : Database;
+        return <button key={source.id} type="button" onClick={() => setSelectedSource(source.id)} disabled={running} className={`min-h-32 rounded-lg border p-4 text-left transition active:scale-[0.99] ${active ? "border-violet-300 bg-violet-500/20" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
+          <div className="flex items-center justify-between gap-3">
+            <Icon className={active ? "h-5 w-5 text-violet-200" : "h-5 w-5 text-cyan-300"} />
+            <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase ${source.state === "ready" ? "bg-emerald-500/20 text-emerald-200" : source.state === "planned" ? "bg-cyan-500/20 text-cyan-100" : source.state === "optional" ? "bg-slate-500/25 text-slate-200" : "bg-amber-500/20 text-amber-100"}`}>{source.state}</span>
+          </div>
+          <div className="mt-3 font-black text-white">{source.title}</div>
+          <p className="mt-2 text-sm text-slate-300">{source.detail}</p>
+        </button>;
+      })}
+    </section>
 
     <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
       <section className="card overflow-hidden">
@@ -277,7 +322,7 @@ export function LiveCapture() {
               <span className={`absolute left-1 top-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-emerald-400 text-slate-950" : "bg-black/60 text-sky-100"}`}>{region.label}</span>
             </div>;
           })}
-          {!running && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-center text-sm text-slate-300"><div className="max-w-sm px-4">Use Window capture in a normal browser, or ADB Native in this in-app browser. ADB Native uses true phone pixels but is slower than video capture.</div></div>}
+          {!running && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-center text-sm text-slate-300"><div className="max-w-sm px-4">Selected: {selected.title}. Capture sources are selectable, so OBS is only one optional path.</div></div>}
         </div>
       </section>
 
@@ -313,7 +358,7 @@ export function LiveCapture() {
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Window capture is the fast path. ADB Native is a permission-safe fallback that preserves phone resolution for detail samples.</p>
+          <p className="mt-2 text-sm text-slate-300">Phone ADB, backend scrcpy, browser window share, and OBS/camera are separate capture paths. Pick the one that matches the setup.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
         </div>
       </aside>
