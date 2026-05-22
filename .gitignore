@@ -29,3 +29,5 @@ data/recognition-samples/lane-icon-vector-templates.json
 data/recognition-samples/crops/
 data/recognition-samples/labeled/
 repo-patches/
+.codex-tools/
+samples/
