@@ -291,6 +291,7 @@ export function LiveCapture() {
 
   const activeWindows = regions.filter((region) => metrics[region.key]?.active && region.key.includes("window"));
   const selected = captureSources.find((source) => source.id === selectedSource) ?? captureSources[0];
+  const sourceAspect = sourceSize.width && sourceSize.height ? `${sourceSize.width} / ${sourceSize.height}` : "20 / 9";
 
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -323,7 +324,7 @@ export function LiveCapture() {
 
     <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
       <section className="card overflow-hidden">
-        <div className="relative aspect-[20/9] bg-black">
+        <div className="relative bg-black" style={{ aspectRatio: sourceAspect }}>
           {sourceMode === "adb" && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;

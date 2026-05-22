@@ -1,5 +1,5 @@
 import { type PointerEvent, useEffect, useRef, useState } from "react";
-import { addObsRegion, clearObsRegions, getObsRegions } from "../api/client";
+import { addObsRegion, clearObsRegions, getObsConfig, saveObsConfig, getObsRegions } from "../api/client";
 
 const regionOptions = [
   ["ally_bans_norm", "Ally Ban Section"],
@@ -13,6 +13,16 @@ const regionOptions = [
 
 type Point = { x: number; y: number };
 
+const aspectPresets = [
+  ["20:9", "20:9 phone", 20, 9],
+  ["19.5:9", "19.5:9 phone", 19.5, 9],
+  ["19:9", "19:9 phone", 19, 9],
+  ["16:9", "16:9 video", 16, 9],
+  ["4:3", "4:3 tablet", 4, 3],
+  ["3:2", "3:2 tablet", 3, 2],
+  ["custom", "Custom", 20, 9]
+] as const;
+
 export function Calibration() {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [key, setKey] = useState("ally_bans_norm");
@@ -20,9 +30,20 @@ export function Calibration() {
   const [start, setStart] = useState<Point | null>(null);
   const [current, setCurrent] = useState<Point | null>(null);
   const [selected, setSelected] = useState<number[] | null>(null);
+  const [aspectPreset, setAspectPreset] = useState("20:9");
+  const [sourceWidth, setSourceWidth] = useState(20);
+  const [sourceHeight, setSourceHeight] = useState(9);
 
   async function load() {
-    setRegions(await getObsRegions());
+    const [savedRegions, config] = await Promise.all([getObsRegions(), getObsConfig().catch(() => ({}))]);
+    setRegions(savedRegions);
+    const width = Number(config?.screenshotWidth ?? config?.sourceWidth);
+    const height = Number(config?.screenshotHeight ?? config?.sourceHeight);
+    if (width > 0 && height > 0) {
+      setSourceWidth(width);
+      setSourceHeight(height);
+      setAspectPreset("custom");
+    }
   }
 
   useEffect(() => { void load(); }, []);
@@ -58,6 +79,25 @@ export function Calibration() {
     setRegions(result.regions);
   }
 
+  function chooseAspect(value: string) {
+    setAspectPreset(value);
+    const preset = aspectPresets.find(([id]) => id === value);
+    if (preset && value !== "custom") {
+      setSourceWidth(preset[2]);
+      setSourceHeight(preset[3]);
+    }
+  }
+
+  async function saveAspect() {
+    const existing = await getObsConfig().catch(() => ({}));
+    await saveObsConfig({
+      ...existing,
+      captureRatio: `${sourceWidth}:${sourceHeight}`,
+      sourceWidth,
+      sourceHeight
+    });
+  }
+
   const drag = start && current ? {
     left: Math.min(start.x, current.x),
     top: Math.min(start.y, current.y),
@@ -77,17 +117,21 @@ export function Calibration() {
 
   return <div className="space-y-5">
     <div>
-      <h2 className="text-3xl font-black">OBS Region Calibration</h2>
-      <p className="text-slate-400">Draw normalized 20:9 regions for draft picks, bans, minimap, scoreboard, and item areas.</p>
+      <h2 className="text-3xl font-black">Source Region Calibration</h2>
+      <p className="text-slate-400">Draw normalized regions against the source aspect ratio produced by the phone, tablet, capture card, NDI, or stream input.</p>
     </div>
     <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+      <select className="input w-full sm:w-auto" value={aspectPreset} onChange={(event) => chooseAspect(event.target.value)}>{aspectPresets.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+      <input className="input w-full sm:w-28" type="number" min="1" step="0.1" value={sourceWidth} onChange={(event) => { setAspectPreset("custom"); setSourceWidth(Number(event.target.value) || 1); }} />
+      <input className="input w-full sm:w-28" type="number" min="1" step="0.1" value={sourceHeight} onChange={(event) => { setAspectPreset("custom"); setSourceHeight(Number(event.target.value) || 1); }} />
+      <button className="btn w-full sm:w-auto" onClick={saveAspect}>Save Aspect</button>
       <select className="input w-full sm:w-auto" value={key} onChange={(event) => setKey(event.target.value)}>{regionOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
       <button className="btn w-full sm:w-auto" onClick={save} disabled={!selected}>Save Region</button>
       <button className="btn w-full sm:w-auto" onClick={() => clear(key)}>Clear Selected</button>
       <button className="btn w-full sm:w-auto" onClick={() => clear("all")}>Clear All Lists</button>
     </div>
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <div ref={boxRef} className="relative aspect-[20/9] touch-none select-none overflow-hidden rounded-lg border border-sky-300/30 bg-[#03060c]" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); const p = pointer(event); setStart(p); setCurrent(p); }} onPointerMove={(event) => { if (start) setCurrent(pointer(event)); }} onPointerUp={(event) => finish(pointer(event))}>
+      <div ref={boxRef} className="relative touch-none select-none overflow-hidden rounded-lg border border-sky-300/30 bg-[#03060c]" style={{ aspectRatio: `${sourceWidth} / ${sourceHeight}` }} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); const p = pointer(event); setStart(p); setCurrent(p); }} onPointerMove={(event) => { if (start) setCurrent(pointer(event)); }} onPointerUp={(event) => finish(pointer(event))}>
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] bg-[size:40px_40px]" />
         <div className="absolute left-[1.5%] top-[61.5%] h-[36%] w-[21.5%] rounded border border-violet-300/40 bg-violet-500/10" />
         {savedRects().map(({ key: savedKey, region }, index) => <div key={`${savedKey}-${index}`} title={savedKey} className="absolute border-2 border-sky-300 bg-sky-400/10" style={{ left: `${region[0] * 100}%`, top: `${region[1] * 100}%`, width: `${region[2] * 100}%`, height: `${region[3] * 100}%` }} />)}
