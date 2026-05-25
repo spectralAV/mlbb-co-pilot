@@ -9,7 +9,8 @@ import {
   startSelectedCaptureRuntime,
   stopCaptureRuntime,
   useCaptureRuntimeStore,
-  type CaptureSource
+  type CaptureSource,
+  type ScrcpyVideoCodec
 } from "../runtime/captureRuntime";
 
 export function LiveCapture() {
@@ -19,15 +20,19 @@ export function LiveCapture() {
     running,
     sourceMode,
     selectedSource,
+    selectedCodec,
     setSelectedSource,
+    setSelectedCodec,
     fps,
     buffered,
     nativeCrops,
     sourceSize,
     lastFrameAge,
     metrics,
+    liveVision,
     error,
     adbPreviewUrl,
+    captureLog,
     stream
   } = useCaptureRuntimeStore();
 
@@ -42,6 +47,12 @@ export function LiveCapture() {
   const activeWindows = regions.filter((region) => metrics[region.key]?.active && region.key.includes("window"));
   const selected = captureSources.find((source) => source.id === selectedSource) ?? captureSources[0];
   const sourceAspect = sourceSize.width && sourceSize.height ? `${sourceSize.width} / ${sourceSize.height}` : "20 / 9";
+  const codecOptions: Array<{ id: ScrcpyVideoCodec; label: string; detail: string }> = [
+    { id: "h264", label: "H.264", detail: "Live WebCodecs path" },
+    { id: "h265", label: "H.265", detail: "Preset only" },
+    { id: "av1", label: "AV1", detail: "Preset only" }
+  ];
+  const canStartSelected = !(selectedSource === "scrcpy" && selectedCodec !== "h264");
 
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -50,14 +61,14 @@ export function LiveCapture() {
         <p className="text-slate-400">Unified runtime capture stays alive while you move between pages.</p>
       </div>
       <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
-        <button className="btn inline-flex items-center justify-center gap-2" onClick={startSelectedCaptureRuntime} disabled={running}><MonitorUp className="h-4 w-4" />Start</button>
+        <button className="btn inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50" onClick={startSelectedCaptureRuntime} disabled={running || !canStartSelected}><MonitorUp className="h-4 w-4" />Start</button>
         <button className="min-h-11 rounded-lg bg-white/10 px-4 py-2 font-semibold active:bg-white/20" onClick={stopCaptureRuntime} disabled={!running}><CircleStop className="mr-2 inline h-4 w-4" />Stop</button>
       </div>
     </div>
 
     {error && <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-100">{error}</div>}
     {running && <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
-      Capture runtime is active globally. You can open Draft, Game, Map Trainer, or Settings without restarting capture.
+      Capture runtime is active globally. You can open Draft, Calibration, Stream Output, or Settings without restarting capture.
     </div>}
 
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -75,10 +86,32 @@ export function LiveCapture() {
       })}
     </section>
 
+    {selectedSource === "scrcpy" && <section className="card p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-bold">Scrcpy Codec</h3>
+          <p className="text-sm text-slate-400">Switch codecs before starting capture. H.264 is the active low-latency browser preview path; H.265 and AV1 are saved presets until backend decode is wired.</p>
+        </div>
+        <div className="grid w-full grid-cols-3 gap-2 sm:w-auto">
+          {codecOptions.map((codec) => {
+            const active = selectedCodec === codec.id;
+            return <button key={codec.id} type="button" disabled={running} onClick={() => setSelectedCodec(codec.id)} className={`min-h-12 rounded-lg border px-3 py-2 text-left transition active:scale-[0.99] ${active ? "border-cyan-300 bg-cyan-400/15 text-white" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}>
+              <div className="text-sm font-black">{codec.label}</div>
+              <div className="text-[11px] text-slate-400">{codec.detail}</div>
+            </button>;
+          })}
+        </div>
+      </div>
+    </section>}
+
+    {selectedSource === "scrcpy" && selectedCodec !== "h264" && <div className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+      {selectedCodec.toUpperCase()} is selectable for device/encoder testing, but live preview and CV are disabled for it right now so the app does not fall into the slow ADB frame path.
+    </div>}
+
     <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
       <section className="card overflow-hidden">
         <div className="relative bg-black" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "scrcpy" ? <canvas ref={(node) => { scrcpyCanvasRef.current = node; attachScrcpyPreviewCanvas(node); }} className="h-full w-full object-contain" /> : sourceMode === "adb" && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+          {sourceMode === "scrcpy" ? <canvas ref={(node) => { scrcpyCanvasRef.current = node; attachScrcpyPreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
@@ -97,7 +130,8 @@ export function LiveCapture() {
             <Metric label="FPS" value={fps} />
             <Metric label="Buffer" value={`${buffered}/${maxBufferedFrames}`} />
             <Metric label="Latency" value={lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`} />
-            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : running ? "Live" : "Idle"} />
+            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
+            <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : selectedSource === "obs" ? "Native decoded" : "-"} />
             <Metric className="col-span-2" label="Native Source" value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
             <Metric className="col-span-2" label="Native ROI Crops" value={`${nativeCrops}/${maxNativeCrops}`} />
           </div>
@@ -121,9 +155,40 @@ export function LiveCapture() {
         </div>
 
         <div className="card p-4">
+          <h3 className="flex items-center gap-2 font-bold"><ScanLine className="h-4 w-4 text-cyan-300" />Screen Classifier</h3>
+          {liveVision ? <>
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-cyan-300/25 bg-cyan-500/10 p-3">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Detected state</div>
+                <div className="mt-1 text-lg font-black uppercase text-cyan-100">{liveVision.screen.replace(/_/g, " ")}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-black text-white">{Math.round(liveVision.confidence * 100)}%</div>
+                <div className="text-xs font-bold uppercase text-slate-400">{liveVision.directorScene ?? "main"} overlay</div>
+              </div>
+            </div>
+            <div className="mt-3 space-y-1 text-sm text-slate-300">
+              {liveVision.evidence.map((line) => <div key={line}>- {line}</div>)}
+            </div>
+          </> : <p className="mt-3 text-sm text-slate-400">Start capture to emit screen-state snapshots for the live overlay director.</p>}
+        </div>
+
+        <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Capture is now owned by the app shell instead of the current page. Direct scrcpy H.264 decoding, ADB still-frame fallback, draft recognition, map trainer, and overlay consume the same runtime state.</p>
+          <p className="mt-2 text-sm text-slate-300">Capture is owned by the app shell instead of the current page. Native OBS bridge frames, direct scrcpy H.264 fallback, ADB still-frame testing, map trainer, and overlays consume the same runtime state.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
+        </div>
+
+        <div className="card p-4">
+          <h3 className="font-bold">Capture Log</h3>
+          <div className="mt-3 max-h-56 space-y-2 overflow-auto text-xs">
+            {captureLog.length ? captureLog.slice(-10).reverse().map((entry) => (
+              <div key={`${entry.time}-${entry.message}`} className={`rounded-lg border px-3 py-2 ${entry.level === "error" ? "border-red-400/30 bg-red-500/10 text-red-100" : entry.level === "warn" ? "border-amber-300/30 bg-amber-500/10 text-amber-100" : "border-white/10 bg-white/5 text-slate-300"}`}>
+                <span className="mr-2 text-slate-500">{new Date(entry.time).toLocaleTimeString()}</span>
+                {entry.message}
+              </div>
+            )) : <div className="rounded-lg bg-white/5 p-3 text-slate-400">No capture events yet.</div>}
+          </div>
         </div>
       </aside>
     </div>

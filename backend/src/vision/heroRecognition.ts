@@ -69,6 +69,11 @@ export async function getHeroRecognitionManifest() {
   };
 }
 
+export async function getHeroRecognitionReference(heroId: number) {
+  const manifest = await getHeroRecognitionManifest();
+  return manifest.heroes.find((hero) => hero.id === heroId) ?? null;
+}
+
 function toHeroReference(hero: any): HeroReference | null {
   const id = Number(hero?.id ?? hero?.hero_id ?? hero?.raw?.id ?? hero?.raw?.hero_id);
   const name = String(hero?.name ?? hero?.hero_name ?? hero?.raw?.hero_name ?? "").trim();

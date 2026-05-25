@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSource.js";
+import { getLatestNativeObsFrame, getNativeObsBridgeStatus, ingestNativeObsFrame } from "../services/nativeObsBridge.js";
 import { attachScrcpyH264Client, getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
 import {
   addObsRegion,
@@ -19,26 +20,57 @@ function isRegion(value: unknown): value is number[] {
 }
 
 export async function obsCoachRoutes(app: FastifyInstance) {
+  app.addContentTypeParser("image/bmp", { parseAs: "buffer" }, (_req, body, done) => done(null, body));
+
   app.get("/api/coach/state", async () => getObsCoachState());
   app.post("/api/coach/state", async (req) => {
     setObsCoachState(req.body as any);
     return getObsCoachState();
   });
 
-  app.get("/api/obs/status", async () => ({
-    ok: true,
-    realtime: getObsRealtime(),
-    captureConnected: false,
-    message: "OBS capture adapter prepared; live source reading is not connected in this TypeScript build."
-  }));
+  app.get("/api/obs/status", async () => {
+    const bridge = getNativeObsBridgeStatus();
+    return {
+      ok: true,
+      realtime: getObsRealtime(),
+      captureConnected: bridge.connected,
+      bridge,
+      message: bridge.connected ? "Native OBS scrcpy source is feeding CV frames." : "Waiting for the native OBS scrcpy source CV bridge."
+    };
+  });
 
-  app.post("/api/obs/start", async () => ({ ok: true, realtime: setObsRealtime(true), message: "OBS realtime flag enabled. Capture adapter is still manual/prepared." }));
-  app.post("/api/obs/stop", async () => ({ ok: true, realtime: setObsRealtime(false), message: "OBS realtime stopped." }));
-  app.get("/api/obs/frame", async (_req, reply) => reply.code(404).send({ ok: false, error: "No OBS frame source is connected yet." }));
+  app.post("/api/obs/start", async () => ({ ok: true, realtime: setObsRealtime(true), bridge: getNativeObsBridgeStatus(), message: "OBS overlay realtime enabled. Start the native scrcpy source with its CV bridge enabled to feed detected state." }));
+  app.post("/api/obs/stop", async () => ({ ok: true, realtime: setObsRealtime(false), bridge: getNativeObsBridgeStatus(), message: "OBS overlay realtime stopped." }));
+  app.get("/api/obs/frame", async (_req, reply) => sendNativeObsFrame(reply));
+  app.get("/api/capture/obs/status", async () => ({ ok: true, bridge: getNativeObsBridgeStatus() }));
+  app.post("/api/capture/obs/frame", { bodyLimit: 5 * 1024 * 1024 }, async (req, reply) => {
+    if (!Buffer.isBuffer(req.body)) return reply.code(400).send({ ok: false, error: "Expected an image/bmp frame body." });
+    const status = ingestNativeObsFrame(req.body, String(req.headers["x-mlbb-source"] ?? "obs-scrcpy-plugin"));
+    return { ok: true, bridge: status };
+  });
+  app.get("/api/capture/obs/frame", async (_req, reply) => sendNativeObsFrame(reply));
   app.get("/api/capture/status", async () => getAdbCaptureStatus());
   app.get("/api/capture/scrcpy/status", async () => getScrcpyStatus());
-  app.post("/api/capture/scrcpy/start", async (req) => ({ ok: true, status: await startScrcpy(req.body) }));
-  app.post("/api/capture/scrcpy/stop", async () => ({ ok: true, status: stopScrcpy() }));
+  app.post("/api/capture/scrcpy/start", async (req, reply) => {
+    try {
+      const status = await startScrcpy(req.body);
+      if (!status.ok) return reply.code(400).send({ ok: false, status, error: status.message });
+      return { ok: true, status };
+    } catch (error) {
+      app.log.error({ error, body: req.body }, "scrcpy capture start failed");
+      return reply.code(503).send({ ok: false, error: error instanceof Error ? error.message : "scrcpy capture start failed.", status: getScrcpyStatus() });
+    }
+  });
+  app.route({
+    method: "POST",
+    url: "/api/capture/scrcpy/stop",
+    bodyLimit: 1,
+    config: { rawBody: true },
+    handler: async () => {
+    app.log.info("scrcpy capture stop requested");
+    return { ok: true, status: stopScrcpy() };
+    }
+  });
   app.get("/ws/capture/scrcpy-h264", { websocket: true }, (socket) => attachScrcpyH264Client(socket));
   app.get("/api/capture/frame", async (_req, reply) => {
     try {
@@ -50,6 +82,7 @@ export async function obsCoachRoutes(app: FastifyInstance) {
         .type("image/png")
         .send(frame.buffer);
     } catch (error) {
+      app.log.warn({ error }, "ADB frame capture failed");
       reply.code(503).send({ ok: false, error: error instanceof Error ? error.message : "ADB frame capture failed." });
     }
   });
@@ -68,4 +101,16 @@ export async function obsCoachRoutes(app: FastifyInstance) {
 
   app.get("/api/obs/config", async () => getObsConfig());
   app.post("/api/obs/config", async (req) => ({ ok: true, config: await saveObsConfig(req.body) }));
+}
+
+function sendNativeObsFrame(reply: any) {
+  const frame = getLatestNativeObsFrame();
+  if (!frame) return reply.code(404).send({ ok: false, error: "No native OBS bridge frame has arrived yet." });
+  return reply
+    .header("cache-control", "no-store")
+    .header("x-captured-at", frame.capturedAt)
+    .header("x-source-width", String(frame.width))
+    .header("x-source-height", String(frame.height))
+    .type("image/bmp")
+    .send(frame.buffer);
 }

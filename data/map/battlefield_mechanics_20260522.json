@@ -1,0 +1,273 @@
+{
+  "capturedAtLocalDate": "2026-05-22",
+  "source": "MLBB battlefield guide screenshots",
+  "rawSampleFolder": "data/recognition-samples/raw/20260522-battlefield-guide",
+  "resolution": {
+    "width": 2856,
+    "height": 1280
+  },
+  "sampleCount": 38,
+  "mechanics": [
+    {
+      "id": "cyclone-eye",
+      "name": "Cyclone Eye",
+      "category": "terrain_feature",
+      "tags": ["mobility", "terrain"],
+      "firstSpawnSec": 40,
+      "respawnSec": 45,
+      "countOnMap": 4,
+      "effect": "After a brief stay of 1.2 seconds, grants Power of Cyclone, making the hero glide forward and pass through some obstacles. Disappears after activation and returns after gathering enough power.",
+      "coachingSignals": ["rotation_shortcut_available", "escape_path_available", "gank_angle_available"],
+      "mapTrainerTypes": ["vision", "semantic"]
+    },
+    {
+      "id": "bush",
+      "name": "Bush",
+      "category": "terrain_feature",
+      "tags": ["area", "sight_range"],
+      "effect": "If there is no enemy unit in the bush, entering it makes the hero invisible after a 1 second delay. Dealing damage makes the hero detectable.",
+      "coachingSignals": ["ambush_risk", "vision_denial", "facecheck_warning"],
+      "mapTrainerTypes": ["bush"]
+    },
+    {
+      "id": "magic-sentry",
+      "name": "Magic Sentry",
+      "category": "terrain_feature",
+      "tags": ["sight_range", "reveal"],
+      "trigger": "Appears when any side-lane inner turret is destroyed.",
+      "respawnSec": 90,
+      "maxPerSide": 2,
+      "effect": "An allied hero standing in the area awakens the sentry, lighting up nearby jungle for 6 seconds and revealing invisible units. Recharges for 90 seconds.",
+      "coachingSignals": ["post_inner_turret_vision", "reveal_window", "jungle_scouting"],
+      "mapTrainerTypes": ["vision", "objective"]
+    },
+    {
+      "id": "scavenger-crab",
+      "name": "Scavenger Crab",
+      "category": "common_creep",
+      "tags": ["gold", "exp", "side_lane"],
+      "firstSpawnSec": 42,
+      "respawnSec": 45,
+      "effect": "Gold lane crab grants 1 coin and 80 gold scaling over time. EXP lane crab grants 1 EXP Scroll and 70 EXP scaling over time. Attacks every 1 second for physical damage and does not recover HP immediately after leaving combat.",
+      "coachingSignals": ["side_lane_economy_pickup", "small_objective_spawn"],
+      "mapTrainerTypes": ["objective", "jungle"]
+    },
+    {
+      "id": "lithowanderer",
+      "name": "Lithowanderer",
+      "category": "common_creep",
+      "tags": ["speed_up", "river", "vision"],
+      "firstSpawnSec": 48,
+      "respawnSec": 60,
+      "patrolSec": 45,
+      "effect": "Killer gains Walkie Grass, increasing river movement speed by 15% and restoring 1% mana per second for the killer and nearby allies. Spawns a Stone Roamer that patrols for 45 seconds and alerts/exposes enemies entering sight range.",
+      "coachingSignals": ["river_control", "rotation_speed_buff", "roamer_scouting"],
+      "mapTrainerTypes": ["objective", "river", "vision"]
+    },
+    {
+      "id": "molten-fiend",
+      "name": "Molten Fiend",
+      "category": "elite_creep",
+      "tags": ["attack", "red_jungle", "jungle_buff"],
+      "firstSpawnSec": 25,
+      "respawnSec": 90,
+      "effect": "In the first 2 minutes, if killed in the allied jungle while a nearby allied Retribution hero has recently damaged creeps, Molten Power is granted to the nearest allied jungler even if a non-jungler lands the kill. Drops 3 fruits lasting 10 seconds. Reward can grant adaptive penetration and extra true damage/slow by role.",
+      "coachingSignals": ["red_buff_spawn", "jungler_buff_priority", "fruit_pickup"],
+      "mapTrainerTypes": ["jungle", "objective"]
+    },
+    {
+      "id": "fire-beetle",
+      "name": "Fire Beetle",
+      "category": "common_creep",
+      "tags": ["small_camp", "mana_hp"],
+      "firstSpawnSec": 39,
+      "respawnSec": 70,
+      "effect": "Killer restores 5% max mana and 350 HP over 2 seconds. On death, releases a weaker Little Fire Beetle that can survive up to 15 seconds.",
+      "coachingSignals": ["small_camp_sustain", "jungle_clear"],
+      "mapTrainerTypes": ["jungle"]
+    },
+    {
+      "id": "lava-golem",
+      "name": "Lava Golem",
+      "category": "common_creep",
+      "tags": ["small_camp", "mana_hp"],
+      "firstSpawnSec": 31,
+      "respawnSec": 70,
+      "effect": "Killer restores 5% max mana and 350 HP over 2 seconds. Attacks every 1 second for physical damage and has no other abilities.",
+      "coachingSignals": ["small_camp_sustain", "jungle_clear"],
+      "mapTrainerTypes": ["jungle"]
+    },
+    {
+      "id": "thunder-fenrir",
+      "name": "Thunder Fenrir",
+      "category": "elite_creep",
+      "tags": ["regen", "blue_jungle", "jungle_buff"],
+      "firstSpawnSec": 25,
+      "respawnSec": 90,
+      "effect": "Drops 3 fruits lasting 10 seconds. Reward reduces skill cooldown by 10%, mana cost by 40%, and energy cost by 20% for 75 seconds. Soul of Wind restores max HP based on killed unit type. In the first 2 minutes, Thunder Power can be assigned to the nearest allied jungler with Retribution if conditions are met.",
+      "coachingSignals": ["blue_buff_spawn", "jungler_buff_priority", "cooldown_resource_buff"],
+      "mapTrainerTypes": ["jungle", "objective"]
+    },
+    {
+      "id": "horned-lizard",
+      "name": "Horned Lizard",
+      "category": "common_creep",
+      "tags": ["small_camp", "defense"],
+      "firstSpawnSec": 40,
+      "respawnSec": 70,
+      "effect": "Attacks every 1 second for physical damage. Below 50% HP, gains 70 physical and magic defense. Reward restores 5% mana and 350 HP over 2 seconds.",
+      "coachingSignals": ["small_camp_sustain", "jungle_clear"],
+      "mapTrainerTypes": ["jungle"]
+    },
+    {
+      "id": "base",
+      "name": "Base",
+      "category": "building",
+      "tags": ["building", "sight", "true_damage"],
+      "sightRangeUnits": 8,
+      "attackRangeUnits": 5,
+      "rankAdjustments": {
+        "mythicalHonorPlus": {
+          "hp": 9000,
+          "previousHp": 7900,
+          "note": "All Bases' HP increases from 7900 to 9000."
+        }
+      },
+      "effect": "Grants surrounding sight until destroyed. Attacks every 1 second for 560 true damage, ramps damage by 75% per successive attack on the same hero up to 20 stacks, gains 50% damage reduction when no enemy minions are around, and self-repairs 165 HP every 5 seconds.",
+      "coachingSignals": ["base_dive_risk", "no_minion_damage_reduction", "endgame_push"],
+      "mapTrainerTypes": ["objective"]
+    },
+    {
+      "id": "base-turret",
+      "name": "Base Turret",
+      "category": "building",
+      "tags": ["building", "sight", "true_damage", "protection"],
+      "sightRangeUnits": 8,
+      "attackRangeUnits": 5,
+      "protectionUntilSec": 720,
+      "rankAdjustments": {
+        "mythicalHonorPlus": {
+          "hp": 8200,
+          "previousHp": 7300,
+          "note": "All Base Turrets' HP increases from 7300 to 8200."
+        }
+      },
+      "effect": "Grants sight until destroyed. Attacks every 1 second for 520 true damage, ramps damage by 75% per successive attack on the same hero up to 20 stacks, gains 50% damage reduction when no enemy minions are around. If the same-lane inner turret is destroyed in the first 12 minutes, Holy Defense damages and knocks back the next enemy minion wave and enemy heroes in front; enemy Lord takes 65% max HP damage.",
+      "coachingSignals": ["base_turret_dive_risk", "holy_defense_window", "lord_push_resistance"],
+      "mapTrainerTypes": ["objective"]
+    },
+    {
+      "id": "inner-turret",
+      "name": "Inner Turret",
+      "category": "building",
+      "tags": ["building", "sight", "true_damage", "protection"],
+      "sightRangeUnits": 8,
+      "attackRangeUnits": 5,
+      "protectionUntilSec": 480,
+      "rankAdjustments": {
+        "mythicalHonorPlus": {
+          "hp": 6700,
+          "previousHp": 5700,
+          "note": "All Inner Turrets' HP increases from 5700 to 6700."
+        }
+      },
+      "effect": "Grants sight until destroyed. Attacks every 1 second for 360 true damage, ramps damage by 75% per successive attack on the same hero up to 20 stacks, gains 50% damage reduction when no enemy minions are around. If the same-lane outer turret is destroyed in the first 8 minutes, Hardened Plate grants 50% damage reduction for 1 minute.",
+      "coachingSignals": ["inner_turret_dive_risk", "hardened_plate_window", "magic_sentry_unlock"],
+      "mapTrainerTypes": ["objective"]
+    },
+    {
+      "id": "outer-turret",
+      "name": "Outer Turret",
+      "category": "building",
+      "tags": ["building", "sight", "true_damage", "shield"],
+      "sightRangeUnits": 8,
+      "attackRangeUnits": 5,
+      "protectionUntilSec": 300,
+      "rankAdjustments": {
+        "mythicalHonorPlus": {
+          "goldLaneEnergyShieldAllyDamageReductionPct": 35,
+          "expAndMidEnergyShieldAllyDamageReductionPct": 10,
+          "defaultEnergyShieldAllyDamageReductionPct": 15,
+          "note": "When Energy Shield is active, nearby allied hero damage reduction changes from 15% to 35% for Gold Lane outer turret and from 15% to 10% for EXP/Mid outer turrets."
+        }
+      },
+      "effect": "Grants sight until destroyed. Attacks every 1 second for 320 true damage, ramps damage by 75% per successive attack on the same hero up to 20 stacks, gains 50% damage reduction when no enemy minions are around. Has Energy Shield in the first 5 minutes; shield gives 30% damage reduction and grants nearby allies 15% damage reduction. Enemy heroes can damage the shield for gold up to 360.",
+      "coachingSignals": ["outer_turret_plate_window", "shield_gold_window", "early_dive_risk"],
+      "mapTrainerTypes": ["objective"]
+    },
+    {
+      "id": "dragon-turtle",
+      "name": "Dragon Turtle",
+      "category": "legend_creep",
+      "tags": ["shield", "objective", "exp_gold_lane"],
+      "firstSpawnSec": 120,
+      "respawnSec": 120,
+      "stopsRespawningAfterSec": 480,
+      "effect": "First Turtle spawn location determines side-lane features: the closer side lane is EXP Lane and the other is Gold Lane. Fifteen seconds before Turtle spawns or after it is killed, a current appears that flows toward or away from it, boosting movement speed by up to 50%. Killer receives a shield and physical attack/magic power bonus; allies receive a one-time smaller shield.",
+      "coachingSignals": ["turtle_spawn", "side_lane_assignment", "river_current_rotation", "objective_contest"],
+      "mapTrainerTypes": ["objective", "river"]
+    },
+    {
+      "id": "elemental-lord",
+      "name": "Elemental Lord",
+      "category": "legend_creep",
+      "tags": ["push", "objective", "lord"],
+      "firstSpawnSec": 480,
+      "respawnSec": 180,
+      "evolvesAtSec": 1080,
+      "respawnAfterEvolveSec": 150,
+      "attributeGrowthStopsAtSec": 1800,
+      "effect": "Joins the killer's team on the next minion spawn, strengthens allied minions, and pushes the enemy's weakest lane until death. The summoned Lord can charge enemy turrets for true damage equal to 30% of turret max HP. Evolves at 18 minutes; evolved neutral Lord gains damage reduction that decreases with nearby heroes, while summoned Lord gains damage reduction that increases with nearby allies and allows nearby allies to deal extra magic damage on attacks.",
+      "coachingSignals": ["lord_spawn", "lord_contest", "weakest_lane_push", "evolved_lord_window"],
+      "mapTrainerTypes": ["objective", "lane"]
+    }
+  ],
+  "runtimeImplications": [
+    "Map Trainer should support objective subtypes such as turtle, lord, outer_turret, inner_turret, base_turret, base, cyclone_eye, magic_sentry, buff_camp, small_camp, and crab.",
+    "Objective timers can be computed from game clock once spawn/kill events are recognized.",
+    "Vision and danger scoring should depend on game phase: outer turret shield before 5:00, inner turret protection before 8:00, base turret protection before 12:00, Turtle before 8:00, Lord after 8:00, evolved Lord after 18:00.",
+    "Turtle location determines EXP/Gold lane semantics, so lane labels should be dynamic rather than hard-coded to top/bottom.",
+    "Bush, Magic Sentry, Lithowanderer Stone Roamer, and turrets are all sight sources and should feed gank-risk reasoning.",
+    "Cyclone Eye should be modeled as a mobility/rotation edge, not just an area polygon."
+  ],
+  "copiedFiles": [
+    "Screenshot_20260522-190113.png",
+    "Screenshot_20260522-190145.png",
+    "Screenshot_20260522-190153.png",
+    "Screenshot_20260522-190213.png",
+    "Screenshot_20260522-190234.png",
+    "Screenshot_20260522-190244.png",
+    "Screenshot_20260522-190307.png",
+    "Screenshot_20260522-190329.png",
+    "Screenshot_20260522-190344.png",
+    "Screenshot_20260522-190401.png",
+    "Screenshot_20260522-190413.png",
+    "Screenshot_20260522-190420.png",
+    "Screenshot_20260522-190427.png",
+    "Screenshot_20260522-190433.png",
+    "Screenshot_20260522-190437.png",
+    "Screenshot_20260522-190446.png",
+    "Screenshot_20260522-190449.png",
+    "Screenshot_20260522-190456.png",
+    "Screenshot_20260522-190459.png",
+    "Screenshot_20260522-190504.png",
+    "Screenshot_20260522-190531.png",
+    "Screenshot_20260522-190540.png",
+    "Screenshot_20260522-190545.png",
+    "Screenshot_20260522-190549.png",
+    "Screenshot_20260522-190556.png",
+    "Screenshot_20260522-190604.png",
+    "Screenshot_20260522-190750.png",
+    "Screenshot_20260522-190800.png",
+    "Screenshot_20260522-190815.png",
+    "Screenshot_20260522-190819.png",
+    "Screenshot_20260522-190842.png",
+    "Screenshot_20260522-191257.png",
+    "Screenshot_20260522-191306.png",
+    "Screenshot_20260522-191313.png",
+    "Screenshot_20260522-191327.png",
+    "Screenshot_20260522-191336.png",
+    "Screenshot_20260522-191342.png",
+    "Screenshot_20260522-191353.png"
+  ]
+}

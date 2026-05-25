@@ -24,7 +24,7 @@ backups/
 data/cache/*.json
 !data/cache/.gitkeep
 data/game-sessions/
-data/recognition-samples/raw/*.png
+data/recognition-samples/raw/
 data/recognition-samples/lane-icon-vector-templates.json
 data/recognition-samples/crops/
 data/recognition-samples/labeled/

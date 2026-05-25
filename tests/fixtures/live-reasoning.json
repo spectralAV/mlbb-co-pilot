@@ -1,0 +1,36 @@
+[
+  {
+    "name": "low confidence stays neutral",
+    "input": { "screen": "live_hud", "confidence": 0.31 },
+    "expectedRule": "confidence_gate",
+    "expectedScene": "main"
+  },
+  {
+    "name": "blind objective setup becomes map warning",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.86,
+      "signals": {
+        "objectiveName": "Turtle",
+        "objectiveSpawnsInSec": 42,
+        "missingEnemyCount": 3,
+        "riverVision": false
+      }
+    },
+    "expectedRule": "objective_blind_risk",
+    "expectedScene": "map"
+  },
+  {
+    "name": "healing without counter item is deterministic callout",
+    "input": {
+      "screen": "scoreboard",
+      "confidence": 0.82,
+      "signals": {
+        "enemyHealingThreats": ["Estes"],
+        "teamHasAntiHeal": false
+      }
+    },
+    "expectedRule": "anti_heal_gap",
+    "expectedScene": "text"
+  }
+]

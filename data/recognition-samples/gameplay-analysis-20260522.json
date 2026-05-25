@@ -1,0 +1,168 @@
+{
+  "capturedAtLocalDate": "2026-05-22",
+  "rawSampleFolder": "data/recognition-samples/raw/20260522-gameplay-analysis",
+  "resolution": {
+    "width": 2856,
+    "height": 1280
+  },
+  "sampleCount": 36,
+  "purpose": "Local MLBB gameplay and draft screenshots for UI state classification, minimap calibration, scoreboard extraction, item-shop recognition, and live coaching signal design.",
+  "screenFamilies": {
+    "draftLobbyAndBanPick": {
+      "coverage": [
+        "ranked five-player lobby",
+        "first ban phase",
+        "second ban phase",
+        "ally team pick",
+        "enemy team pick",
+        "hero model pick confirmation",
+        "lane/role icons on left player rail",
+        "top-row ban/pick portraits"
+      ],
+      "useFor": [
+        "draft phase classifier",
+        "team side detection",
+        "selected/ban hero portrait region calibration",
+        "role icon detection on player rail",
+        "pick turn timer OCR"
+      ]
+    },
+    "loadingScreen": {
+      "coverage": [
+        "ten hero loading cards",
+        "player names",
+        "spell/emblem icons",
+        "loading percentages",
+        "skin/card title text"
+      ],
+      "useFor": [
+        "final team composition confirmation",
+        "battle spell extraction",
+        "hero/card portrait matching"
+      ]
+    },
+    "liveHud": {
+      "coverage": [
+        "minimap in normal play",
+        "death replay overlay",
+        "kill banners",
+        "lord callouts",
+        "top score/time/gold HUD",
+        "skill cooldowns",
+        "quick-chat callouts"
+      ],
+      "useFor": [
+        "minimap marker detection",
+        "death state classifier",
+        "objective callout classifier",
+        "HUD OCR region calibration",
+        "teamfight/event banner detection"
+      ]
+    },
+    "scoreboard": {
+      "coverage": [
+        "equipment tab",
+        "attributes tab",
+        "team gold comparison",
+        "turret/lord/turtle counters",
+        "KDA/gold columns",
+        "item builds",
+        "hero levels and death timers"
+      ],
+      "useFor": [
+        "scoreboard open-state classifier",
+        "item build extraction",
+        "enemy composition and economy snapshot",
+        "attribute table OCR"
+      ]
+    },
+    "itemShop": {
+      "coverage": [
+        "recommended magic build",
+        "build path panel",
+        "purchase and prioritize states",
+        "owned item row"
+      ],
+      "useFor": [
+        "shop open-state classifier",
+        "recommendation extraction",
+        "anti-heal/magic build advisory validation"
+      ]
+    }
+  },
+  "regionNotes": {
+    "minimap": {
+      "normalizedRect": [0.0, 0.0, 0.18, 0.29],
+      "notes": "Live HUD samples show minimap markers, pings, objective circles, hero portraits, lane dots, turret icons, and death overlay dimming. The minimap remains visible under most live/death overlays and is suitable for marker segmentation."
+    },
+    "topHud": {
+      "normalizedRect": [0.28, 0.0, 0.45, 0.08],
+      "notes": "Contains team score, game clock, alive/death timers, and kill feed portraits. Needs separate masks for draft screens because the top bar has a different layout there."
+    },
+    "scoreboardBody": {
+      "normalizedRect": [0.10, 0.13, 0.80, 0.78],
+      "notes": "Equipment and attributes layouts share the same modal frame but require separate extractors. Equipment has sparse icon columns; attributes has dense numeric columns."
+    },
+    "draftCenterGrid": {
+      "normalizedRect": [0.27, 0.10, 0.48, 0.64],
+      "notes": "Hero grid and 3D model states occupy the same broad center area. Classifier should first separate grid vs model/confirmation views before hero recognition."
+    },
+    "draftLeftRail": {
+      "normalizedRect": [0.00, 0.08, 0.22, 0.84],
+      "notes": "Stable source for allied player slots, lane icons, requested heroes, and selected heroes during draft."
+    },
+    "draftRightRail": {
+      "normalizedRect": [0.78, 0.08, 0.22, 0.84],
+      "notes": "Stable source for enemy slots and selected heroes. Empty-slot placeholders are strong cues for pick phase progress."
+    },
+    "shopPanel": {
+      "normalizedRect": [0.10, 0.05, 0.80, 0.90],
+      "notes": "Large modal with tabs, recommended items, build path, and purchase button. It should be excluded from live HUD/minimap coaching except for item recommendation features."
+    }
+  },
+  "implementationFindings": [
+    "The current capture regions cover minimap and scoreboard/window activation, but they do not yet distinguish draft, loading, shop, death replay, or live HUD states.",
+    "A lightweight screen-state classifier should run before deeper OCR/recognition so the app does not try to parse draft screens as live gameplay.",
+    "Scoreboard extraction needs two modes: equipment/build icons and attributes/numeric stats.",
+    "The draft samples are rich enough to add first-pass state labels for ban phase, ally pick, enemy pick, and match-start preparation.",
+    "The live samples show that death replay and kill banners dim the screen, so minimap detection should use marker color/shape rather than global brightness alone."
+  ],
+  "copiedFiles": [
+    "Screenshot_20260522-151107 (3).png",
+    "Screenshot_20260522-151139 (3).png",
+    "Screenshot_20260522-151147 (3).png",
+    "Screenshot_20260522-151202 (3).png",
+    "Screenshot_20260522-151210 (3).png",
+    "Screenshot_20260522-151234 (3).png",
+    "Screenshot_20260522-151253 (3).png",
+    "Screenshot_20260522-151413 (3).png",
+    "Screenshot_20260522-151759 (3).png",
+    "Screenshot_20260522-151909 (3).png",
+    "Screenshot_20260522-151917 (3).png",
+    "Screenshot_20260522-152052 (3).png",
+    "Screenshot_20260522-152059 (3).png",
+    "Screenshot_20260522-152314 (3).png",
+    "Screenshot_20260522-152327 (3).png",
+    "Screenshot_20260522-152413 (3).png",
+    "Screenshot_20260522-152557 (3).png",
+    "Screenshot_20260522-152600 (3).png",
+    "Screenshot_20260522-152610 (3).png",
+    "Screenshot_20260522-152641 (3).png",
+    "Screenshot_20260522-152652 (3).png",
+    "Screenshot_20260522-152815 (3).png",
+    "Screenshot_20260522-152819 (3).png",
+    "Screenshot_20260522-152840 (3).png",
+    "Screenshot_20260522-153404 (3).png",
+    "Screenshot_20260522-153423 (3).png",
+    "Screenshot_20260522-165219 (3).png",
+    "Screenshot_20260522-165309 (3).png",
+    "Screenshot_20260522-165333 (3).png",
+    "Screenshot_20260522-165337 (3).png",
+    "Screenshot_20260522-165354 (3).png",
+    "Screenshot_20260522-165406 (3).png",
+    "Screenshot_20260522-165429 (3).png",
+    "Screenshot_20260522-165454 (3).png",
+    "Screenshot_20260522-165503 (3).png",
+    "Screenshot_20260522-165549 (3).png"
+  ]
+}

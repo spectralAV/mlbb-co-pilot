@@ -29,6 +29,26 @@
       "queues": ["solo", "duo", "trio", "five_man"],
       "roles": ["jungle", "exp", "gold", "mid", "roam"],
       "regions": ["player_banner_full", "player_avatar_frame", "player_role_icon", "queue_slots_full"]
+    },
+    "match_loading": {
+      "regions": ["ally_loading_cards", "enemy_loading_cards", "hero_card_portraits", "battle_spell_icons", "emblem_icons", "loading_percentages", "player_names"]
+    },
+    "live_hud": {
+      "states": ["normal", "death_replay", "teamfight", "objective_callout", "kill_banner"],
+      "regions": ["minimap", "top_hud", "kill_banner", "quick_chat_callout", "skill_buttons", "battle_spell_button", "death_replay_timer", "gold_counter"]
+    },
+    "scoreboard_equipment": {
+      "regions": ["scoreboard_modal", "ally_rows", "enemy_rows", "team_gold_bar", "objective_counters", "kda_columns", "gold_columns", "item_slots", "hero_portraits", "hero_levels", "death_timers"]
+    },
+    "scoreboard_attributes": {
+      "regions": ["scoreboard_modal", "ally_attribute_rows", "enemy_attribute_rows", "hp_column", "physical_attack_column", "magic_power_column", "physical_defense_column", "magic_defense_column", "hero_portraits", "hero_levels", "death_timers"]
+    },
+    "item_shop": {
+      "regions": ["shop_modal", "category_tabs", "recommended_items", "owned_item_row", "build_path", "item_detail_panel", "purchase_button", "prioritize_button"]
+    },
+    "battlefield_guide": {
+      "states": ["terrain_feature", "common_creep", "elite_creep", "legend_creep", "building"],
+      "regions": ["guide_title", "guide_tags", "spawn_timers", "details_panel", "attribute_table", "ability_icons", "entity_preview"]
     }
   },
   "queueRules": {

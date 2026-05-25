@@ -1,5 +1,26 @@
 import type { MapZoneId, MapZoneState, ZoneStatus } from "../../lib/gameTypes";
 
+type Point = [number, number];
+
+type MinimapProjectionLike = {
+  tacticalCorners?: {
+    topLeft?: Point;
+    topRight?: Point;
+    bottomRight?: Point;
+    bottomLeft?: Point;
+  };
+};
+
+export type TacticalMapMarker = {
+  id: string;
+  side: "ally" | "enemy";
+  minimap?: Point;
+  tactical?: Point;
+  heroIcon?: string;
+  heroName?: string;
+  confidence?: number;
+};
+
 type Zone = {
   id: MapZoneId;
   label: string;
@@ -33,6 +54,16 @@ const statusClass: Record<ZoneStatus, string> = {
 };
 
 const tacticalMapReference = "/assets/map/mlbb-tactical-map-reference.png";
+const markerShells = {
+  ally: "/assets/map/markers/placeholder-ally.png",
+  enemy: "/assets/map/markers/placeholder-enemy.png"
+};
+const defaultTacticalCorners = {
+  topLeft: [0.18, 0.08] as Point,
+  topRight: [0.80, 0.10] as Point,
+  bottomRight: [0.88, 0.88] as Point,
+  bottomLeft: [0.12, 0.86] as Point
+};
 
 function getStatus(states: MapZoneState[] | undefined, id: MapZoneId): ZoneStatus {
   return states?.find((zone) => zone.id === id)?.status ?? (id === "objective_pit" ? "objective" : "unknown");
@@ -40,11 +71,15 @@ function getStatus(states: MapZoneState[] | undefined, id: MapZoneId): ZoneStatu
 
 export function BattlefieldMap({
   states,
+  markers = [],
+  projection,
   onZoneClick,
   compact = false,
   showOverlay = false
 }: {
   states?: MapZoneState[];
+  markers?: TacticalMapMarker[];
+  projection?: MinimapProjectionLike;
   onZoneClick?: (id: MapZoneId) => void;
   compact?: boolean;
   showOverlay?: boolean;
@@ -60,5 +95,51 @@ export function BattlefieldMap({
         {zone.label}
       </button>;
     })}
+
+    {markers.map((marker) => <TacticalHeroMarker key={marker.id} marker={marker} projection={projection} />)}
   </div>;
+}
+
+function TacticalHeroMarker({ marker, projection }: { key?: string; marker: TacticalMapMarker; projection?: MinimapProjectionLike }) {
+  const point = marker.tactical ?? (marker.minimap ? projectMinimapPoint(marker.minimap, projection) : null);
+  if (!point) return null;
+  const shell = markerShells[marker.side];
+  const label = marker.heroName ?? `${marker.side} hero`;
+  return <div
+    className="pointer-events-none absolute z-20 h-14 w-14 -translate-x-1/2 -translate-y-full drop-shadow-[0_7px_10px_rgba(0,0,0,0.55)] sm:h-16 sm:w-16"
+    style={{ left: `${point[0] * 100}%`, top: `${point[1] * 100}%` }}
+    title={label}
+  >
+    <img className="relative h-full w-full object-contain" src={shell} alt={label} draggable={false} />
+    {marker.heroIcon && <img
+      className="absolute left-[18%] top-[6%] h-[58%] w-[64%] rounded-full object-cover"
+      src={marker.heroIcon}
+      alt=""
+      draggable={false}
+    />}
+    {typeof marker.confidence === "number" && <span className="absolute -right-1 top-1 rounded-full bg-black/70 px-1 text-[9px] font-bold text-white">
+      {Math.round(marker.confidence * 100)}
+    </span>}
+  </div>;
+}
+
+function projectMinimapPoint(point: Point, projection?: MinimapProjectionLike): Point {
+  const corners = projection?.tacticalCorners ?? defaultTacticalCorners;
+  const topLeft = corners.topLeft ?? defaultTacticalCorners.topLeft;
+  const topRight = corners.topRight ?? defaultTacticalCorners.topRight;
+  const bottomRight = corners.bottomRight ?? defaultTacticalCorners.bottomRight;
+  const bottomLeft = corners.bottomLeft ?? defaultTacticalCorners.bottomLeft;
+  const u = clamp01(point[0]);
+  const v = clamp01(point[1]);
+  const top: Point = [lerp(topLeft[0], topRight[0], u), lerp(topLeft[1], topRight[1], u)];
+  const bottom: Point = [lerp(bottomLeft[0], bottomRight[0], u), lerp(bottomLeft[1], bottomRight[1], u)];
+  return [clamp01(lerp(top[0], bottom[0], v)), clamp01(lerp(top[1], bottom[1], v))];
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
 }

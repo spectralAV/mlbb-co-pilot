@@ -30,6 +30,34 @@ Treat the MLBB minimap as two recognition layers:
 
 Do not use these references as a reason to repaint the app UI yet. They are source geometry for future minimap calibration, segmentation, and marker recognition.
 
+## Gameplay Sample Set
+
+`gameplay-analysis-20260522.json` indexes a 36-screenshot set copied from live gameplay and draft captures. The raw PNGs live under `raw/20260522-gameplay-analysis/` and are intentionally ignored by Git.
+
+This set adds coverage for:
+
+- ranked lobby, ban, pick, and match-start prep states
+- loading screen hero cards, spells, and loading percentages
+- live HUD states, including death replay, objective calls, kill banners, and teamfights
+- equipment and attributes scoreboard modals
+- item shop recommendation and build-path panels
+
+Use this set to build a first-pass screen-state classifier before attempting OCR or deeper recognition. The same `2856x1280` region scale applies to the existing region maps.
+
+## Battlefield Guide Sample Set
+
+`../map/battlefield_mechanics_20260522.json` indexes a 38-screenshot set copied from the in-game battlefield guide. The raw PNGs live under `raw/20260522-battlefield-guide/` and are intentionally ignored by Git.
+
+This set captures map mechanics that Map Trainer can use as semantic zone/objective context:
+
+- terrain features: bushes, Cyclone Eye, and Magic Sentry
+- common and elite jungle creeps, including spawn and respawn timers
+- Turtle and Lord timing, rewards, and phase changes
+- turret/base protection windows, sight ranges, damage, and defensive effects
+- Mythical Honor+ turret and base adjustments
+
+Use this set to connect drawn map zones to coaching behavior such as vision risk, rotation shortcuts, jungle buff timing, Turtle/Lord timers, and turret protection phases.
+
 Important regions:
 
 - `player_banner_full`

@@ -1,5 +1,6 @@
 import { analyzeDraft } from "../engines/draftEngine.js";
 import { eventBus } from "../event-bus/eventBus.js";
+import { DETECTED_FACT_CONFIDENCE, updateMatchDraft } from "../state/matchState.js";
 
 type RecognizedSlot = {
   heroId?: number;
@@ -26,7 +27,7 @@ type RecognizedDraft = {
 let latestDraftRecognition: any = null;
 
 export async function ingestDraftRecognition(input: RecognizedDraft) {
-  const state = {
+  const normalized = {
     phase: input.phase ?? "pick",
     allyPicks: compactSlots(input.allyPicks),
     enemyPicks: compactSlots(input.enemyPicks),
@@ -39,6 +40,14 @@ export async function ingestDraftRecognition(input: RecognizedDraft) {
     frameId: input.frameId,
     timestamp: input.timestamp ?? Date.now()
   };
+  const state = {
+    ...normalized,
+    allyPicks: detectedSlots(normalized.allyPicks),
+    enemyPicks: detectedSlots(normalized.enemyPicks),
+    allyBans: detectedSlots(normalized.allyBans),
+    enemyBans: detectedSlots(normalized.enemyBans),
+    selectedHero: isDetectedSlot(normalized.selectedHero) ? normalized.selectedHero : null
+  };
   const analysis = await analyzeDraft({
     allyPicks: state.allyPicks.map(slotValue),
     enemyPicks: state.enemyPicks.map(slotValue),
@@ -50,6 +59,7 @@ export async function ingestDraftRecognition(input: RecognizedDraft) {
     phase: state.phase
   });
   latestDraftRecognition = { state, analysis, updatedAt: new Date().toISOString() };
+  updateMatchDraft(latestDraftRecognition);
   eventBus.emit("draft_recognized", latestDraftRecognition);
   eventBus.emit("draft_updated", analysis);
   return latestDraftRecognition;
@@ -79,4 +89,17 @@ function normalizeSlot(slot: RecognizedSlot | number | string | null | undefined
 
 function slotValue(slot: RecognizedSlot) {
   return slot.heroId ?? slot.heroName ?? "";
+}
+
+function detectedSlots(slots: RecognizedSlot[]) {
+  return slots.filter(isDetectedSlot);
+}
+
+function isDetectedSlot(slot: RecognizedSlot | null) {
+  return Boolean(
+    slot &&
+    slot.source !== "manual" &&
+    (slot.heroId !== undefined || Boolean(slot.heroName)) &&
+    Number(slot.confidence ?? 0) >= DETECTED_FACT_CONFIDENCE,
+  );
 }

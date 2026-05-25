@@ -10,6 +10,10 @@ button,a,select,input,textarea{touch-action:manipulation}
 .chip{@apply text-xs px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/20}
 .touch-scroll{-webkit-overflow-scrolling:touch;scrollbar-width:thin}
 .safe-bottom{padding-bottom:env(safe-area-inset-bottom)}
+@keyframes ticker{
+  from{transform:translateX(0)}
+  to{transform:translateX(-50%)}
+}
 @media (max-width: 768px){
   .card{box-shadow:none}
 }

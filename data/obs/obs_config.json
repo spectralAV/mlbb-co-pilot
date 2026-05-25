@@ -3,7 +3,124 @@
   "port": 4455,
   "password": "",
   "sourceName": "MLBB_SOURCE",
-  "captureRatio": "20:9",
+  "captureRatio": "2856:1280",
   "screenshotWidth": 1600,
-  "screenshotHeight": 720
+  "screenshotHeight": 720,
+  "activeCalibrationPresetId": "default",
+  "calibrationPresets": [
+    {
+      "id": "default",
+      "name": "Default Device",
+      "source": "adb",
+      "width": 2856,
+      "height": 1280,
+      "regions": {
+        "comment": "Coordinates are normalized [x,y,w,h] 0..1 relative to the OBS source screenshot.",
+        "ally_bans_norm": [
+          [
+            0.035599,
+            0,
+            0.224919,
+            0.086652
+          ]
+        ],
+        "enemy_bans_norm": [
+          [
+            0.737055,
+            0,
+            0.222492,
+            0.088458
+          ]
+        ],
+        "ally_picks_norm": [
+          [
+            0,
+            0.083042,
+            0.162621,
+            0.832224
+          ]
+        ],
+        "enemy_picks_norm": [
+          [
+            0.842233,
+            0.084847,
+            0.157767,
+            0.828613
+          ]
+        ],
+        "minimap_norm": [
+          0.028361,
+          0,
+          0.140756,
+          0.314063
+        ],
+        "scoreboard_norm": [
+          [
+            0.31877,
+            0,
+            0.366505,
+            0.0686
+          ]
+        ],
+        "items_norm": [],
+        "attributes_window_norm": []
+      },
+      "updatedAt": "2026-05-23T15:45:09.992Z"
+    },
+    {
+      "id": "window-share-1600x720-mpibdfl6",
+      "name": "Window Share 1600x720",
+      "source": "window",
+      "width": 1658,
+      "height": 792,
+      "regions": {
+        "comment": "Coordinates are normalized [x,y,w,h] 0..1 relative to the OBS source screenshot.",
+        "ally_picks_norm": [
+          [
+            0,
+            0.083042,
+            0.162621,
+            0.832224
+          ]
+        ],
+        "scoreboard_norm": [
+          [
+            0.31877,
+            0,
+            0.366505,
+            0.0686
+          ]
+        ],
+        "items_norm": [],
+        "attributes_window_norm": [],
+        "enemy_bans_norm": [
+          [
+            0.716626,
+            0.034928,
+            0.226863,
+            0.094305
+          ]
+        ],
+        "enemy_picks_norm": [
+          [
+            0.819001,
+            0.14495,
+            0.177723,
+            0.75968
+          ]
+        ],
+        "minimap_norm": [
+          [
+            0.039312,
+            0.022289,
+            0.151515,
+            0.313759
+          ]
+        ]
+      },
+      "updatedAt": "2026-05-23T14:10:05.738Z"
+    }
+  ],
+  "sourceWidth": 2856,
+  "sourceHeight": 1280
 }

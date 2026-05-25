@@ -6,7 +6,7 @@ export type MapZone = {
   name: string;
   type: string;
   polygon: number[][];
-  drawMode?: "polygon" | "freehand";
+  drawMode?: "polygon" | "freehand" | "oval";
   dangerWeight: number;
   connectedZones?: string[];
 };
@@ -87,7 +87,7 @@ function normalizeZone(zone: any, index: number): MapZone | null {
     name: String(zone?.name ?? `Zone ${index + 1}`),
     type: String(zone?.type ?? "semantic"),
     polygon,
-    drawMode: zone?.drawMode === "freehand" ? "freehand" : "polygon",
+    drawMode: zone?.drawMode === "freehand" || zone?.drawMode === "oval" ? zone.drawMode : "polygon",
     dangerWeight: Number.isFinite(Number(zone?.dangerWeight)) ? Number(zone.dangerWeight) : 0.5,
     connectedZones: Array.isArray(zone?.connectedZones) ? zone.connectedZones.map(String) : []
   };

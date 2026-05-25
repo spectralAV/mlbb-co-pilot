@@ -1,15 +1,51 @@
 {
   "comment": "Coordinates are normalized [x,y,w,h] 0..1 relative to the OBS source screenshot.",
-  "ally_bans_norm": [],
-  "enemy_bans_norm": [],
-  "ally_picks_norm": [],
-  "enemy_picks_norm": [],
-  "minimap_norm": [
-    0.015,
-    0.615,
-    0.215,
-    0.36
+  "ally_bans_norm": [
+    [
+      0.035599,
+      0,
+      0.224919,
+      0.086652
+    ]
   ],
-  "scoreboard_norm": [],
-  "items_norm": []
+  "enemy_bans_norm": [
+    [
+      0.737055,
+      0,
+      0.222492,
+      0.088458
+    ]
+  ],
+  "ally_picks_norm": [
+    [
+      0,
+      0.083042,
+      0.162621,
+      0.832224
+    ]
+  ],
+  "enemy_picks_norm": [
+    [
+      0.842233,
+      0.084847,
+      0.157767,
+      0.828613
+    ]
+  ],
+  "minimap_norm": [
+    0.028361,
+    0,
+    0.140756,
+    0.314063
+  ],
+  "scoreboard_norm": [
+    [
+      0.31877,
+      0,
+      0.366505,
+      0.0686
+    ]
+  ],
+  "items_norm": [],
+  "attributes_window_norm": []
 }

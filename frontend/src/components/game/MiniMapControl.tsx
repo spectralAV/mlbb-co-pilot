@@ -2,6 +2,7 @@ import { ChevronRight, Map, Route } from "lucide-react";
 import type { GameState, MapZoneId, ZoneStatus } from "../../lib/gameTypes";
 import { GamePanel, RiskBadge } from "./GameShell";
 import { BattlefieldMap } from "./BattlefieldMap";
+import { useCaptureRuntimeStore } from "../../runtime/captureRuntime";
 
 const nextStatus: Record<ZoneStatus, ZoneStatus> = {
   unknown: "safe",
@@ -12,6 +13,8 @@ const nextStatus: Record<ZoneStatus, ZoneStatus> = {
 };
 
 export function MiniMapControl({ state, onChange }: { state: GameState; onChange: (patch: Partial<GameState>) => void }) {
+  const minimapDetections = useCaptureRuntimeStore((store) => store.minimapDetections);
+
   function cycle(id: MapZoneId) {
     onChange({
       mapZones: state.mapZones.map((zone) => zone.id === id ? { ...zone, status: nextStatus[zone.status], lastUpdatedAt: Date.now() } : zone)
@@ -20,7 +23,7 @@ export function MiniMapControl({ state, onChange }: { state: GameState; onChange
 
   return <GamePanel title="Tactical Map Control" icon={Map}>
     <div className="relative">
-      <BattlefieldMap states={state.mapZones} onZoneClick={cycle} />
+      <BattlefieldMap states={state.mapZones} markers={minimapDetections} onZoneClick={cycle} />
       <div className="pointer-events-none absolute bottom-[18%] left-[24%] flex items-center text-[11px] font-bold text-cyan-100 sm:text-xs">
         <Route className="mr-1 h-5 w-5" /> Red to Mid to Turtle <ChevronRight className="h-5 w-5 animate-pulse" />
       </div>

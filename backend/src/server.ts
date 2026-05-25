@@ -15,13 +15,26 @@ import { syncRoutes } from "./routes/syncRoutes.js";
 import { updateRoutes } from "./routes/updateRoutes.js";
 import { analyzeDraft } from "./engines/draftEngine.js";
 import { analyzeBuild } from "./engines/buildEngine.js";
+import { suggestHeroSynergies } from "./engines/synergyEngine.js";
 import { eventBus } from "./event-bus/eventBus.js";
 import { getMapRuntimeManifest, getMinimapProjection, getZones, mapPointToZone, projectMinimapPoint, saveMinimapProjection, saveZones } from "./map-runtime/mapRuntime.js";
 import { installModule, listModules, sdkDescription } from "./module-runtime/moduleRuntime.js";
 import { getLatestDraftRecognition, ingestDraftRecognition } from "./vision/draftRecognition.js";
-import { getHeroRecognitionManifest, heroRecognitionScenes } from "./vision/heroRecognition.js";
+import { getHeroRecognitionManifest, getHeroRecognitionReference, heroRecognitionScenes } from "./vision/heroRecognition.js";
+import { getLatestLiveVision, ingestLiveVisionFrame } from "./vision/liveVisionState.js";
+import { getLatestLiveReasoning, ingestLiveReasoning } from "./engines/liveReasoningEngine.js";
+import { getMatchState } from "./state/matchState.js";
 
 const app = Fastify({ logger: true });
+
+process.on("unhandledRejection", (reason) => {
+  app.log.error({ reason }, "Unhandled promise rejection");
+});
+
+process.on("uncaughtException", (error) => {
+  app.log.fatal({ error }, "Uncaught exception");
+});
+
 await app.register(cors, { origin: true });
 await app.register(multipart);
 await app.register(websocket);
@@ -47,12 +60,30 @@ app.get("/api/cache/metadata", async () => ({ success:true, data: await cache.re
 app.post("/api/draft/analyze", async (req) => { const result = await analyzeDraft(req.body as any); eventBus.emit("draft_updated", result); return {success:true,data:result}; });
 app.post("/api/draft/recommend", async (req) => { const body=req.body as any; return {success:true,data: await mlbbIo.combinedRecommendations(body.allyHeroes??[], body.enemyHeroes??[])}; });
 app.post("/api/draft/counters", async (req) => { const body=req.body as any; return {success:true,data: await mlbbIo.counterPickSuggestions(body.enemyHeroes??[])}; });
+app.post("/api/draft/synergy", async (req) => { const body=req.body as any; const heroes = await cache.read<any[]>("compiled-heroes.json", []); const fallback = heroes.length ? heroes : await cache.read<any[]>("heroes.json", []); return {success:true,data:suggestHeroSynergies(fallback, body.allyHeroes??[], { lane: body.lane, role: body.role }).slice(0, 12)}; });
 app.post("/api/build/analyze", async (req) => { const body=req.body as any; return {success:true,data: await analyzeBuild(body.heroId, body.enemyHeroIds??[])}; });
 app.get("/api/registry/overview", async () => ({ success:true, data: await semanticRegistry.overview() }));
 app.get("/api/vision/heroes/manifest", async () => ({ success:true, data: await getHeroRecognitionManifest() }));
+app.get("/api/vision/heroes/icon/:id", async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const hero = Number.isFinite(id) ? await getHeroRecognitionReference(id) : null;
+  if (!hero) return reply.code(404).send({ success: false, error: "Unknown hero reference" });
+  const image = await fetch(hero.iconUrl);
+  if (!image.ok) return reply.code(502).send({ success: false, error: "Hero reference unavailable" });
+  const data = Buffer.from(await image.arrayBuffer());
+  return reply
+    .header("cache-control", "public, max-age=86400")
+    .type(image.headers.get("content-type") ?? "image/png")
+    .send(data);
+});
 app.get("/api/vision/scenes", async () => ({ success:true, data: heroRecognitionScenes }));
 app.get("/api/vision/draft/latest", async () => ({ success:true, data:getLatestDraftRecognition() }));
 app.post("/api/vision/draft/recognition", async (req) => ({ success:true, data:await ingestDraftRecognition(req.body as any) }));
+app.get("/api/vision/live/latest", async () => ({ success:true, data:getLatestLiveVision() }));
+app.post("/api/vision/live/frame", async (req) => ({ success:true, data:ingestLiveVisionFrame(req.body as any) }));
+app.get("/api/reasoning/live/latest", async () => ({ success:true, data:getLatestLiveReasoning() }));
+app.post("/api/reasoning/live/evaluate", async (req) => ({ success:true, data:ingestLiveReasoning(req.body as any) }));
+app.get("/api/match/state", async () => ({ success:true, data:getMatchState() }));
 
 app.get("/api/map/runtime", async () => ({ success:true, manifest:getMapRuntimeManifest(), zones:getZones(), projection:getMinimapProjection() }));
 app.get("/api/map/zones", async () => ({ success:true, data:getZones() }));

@@ -7,6 +7,8 @@ import { resolveAdb } from "./adbFrameSource.js";
 const ROOT = path.resolve(process.cwd(), "..");
 const DEVICE_SERVER_PATH = "/data/local/tmp/mlbb-copilot-scrcpy-server.jar";
 const SCRCPY_PORT = 27183;
+const MAX_CLIENT_BUFFERED_BYTES = 192 * 1024;
+type ScrcpyVideoCodec = "h264" | "h265" | "av1";
 
 let scrcpyProcess: ChildProcessWithoutNullStreams | null = null;
 let h264Shell: ChildProcessWithoutNullStreams | null = null;
@@ -21,6 +23,7 @@ let codecMetaRead = false;
 let h264RawStream = false;
 let h264Stats = { frames: 0, bytes: 0, width: 0, height: 0, codec: "", lastFrameAt: null as string | null };
 const h264Clients = new Set<any>();
+const h264ClientState = new Map<any, { needsKeyframe: boolean }>();
 
 function candidateScrcpyPaths() {
   return [
@@ -57,7 +60,7 @@ function resolveScrcpyServer() {
 export function getScrcpyStatus() {
   return {
     ok: Boolean((scrcpyProcess && !scrcpyProcess.killed) || h264Started),
-    mode: h264Started ? "scrcpy-h264-webcodecs" : "scrcpy-native",
+    mode: h264Started ? `scrcpy-${h264Stats.codec || "video"}-webcodecs` : "scrcpy-native",
     scrcpy: resolveScrcpy(),
     pid: h264Shell?.pid ?? scrcpyProcess?.pid ?? null,
     startedAt,
@@ -71,12 +74,18 @@ export function getScrcpyStatus() {
 }
 
 export function startScrcpy(options: any = {}) {
-  if (options.decoder === "h264" || options.directH264) return startScrcpyH264(options);
+  const requestedCodec = normalizeVideoCodec(options.videoCodec ?? options.decoder);
+  if ((options.decoder === "h265" || options.decoder === "av1" || requestedCodec !== "h264") && !options.allowExperimentalCodec) {
+    lastError = `${requestedCodec.toUpperCase()} scrcpy streaming is not wired into the low-latency browser decoder yet. Use H.264 for live capture.`;
+    return { ...getScrcpyStatus(), ok: false, message: lastError };
+  }
+  if (options.decoder === "h264" || options.directH264) return startScrcpyH264({ ...options, decoder: "h264", videoCodec: "h264", rawStream: true });
   if (scrcpyProcess && !scrcpyProcess.killed) return getScrcpyStatus();
   const scrcpy = resolveScrcpy();
   const background = options.background !== false;
+  const videoCodec = normalizeVideoCodec(options.videoCodec);
   const args = [
-    "--video-codec=h264",
+    `--video-codec=${videoCodec}`,
     `--video-bit-rate=${String(options.videoBitRate ?? "16M")}`,
     `--max-fps=${String(options.maxFps ?? 60)}`,
     "--no-audio",
@@ -119,8 +128,12 @@ export function stopScrcpy() {
 
 export function attachScrcpyH264Client(socket: any) {
   h264Clients.add(socket);
+  h264ClientState.set(socket, { needsKeyframe: true });
   socket.send(JSON.stringify({ type: "scrcpy_status", status: getScrcpyStatus() }));
-  socket.on("close", () => h264Clients.delete(socket));
+  socket.on("close", () => {
+    h264Clients.delete(socket);
+    h264ClientState.delete(socket);
+  });
 }
 
 function broadcastJson(message: unknown) {
@@ -132,7 +145,27 @@ function broadcastJson(message: unknown) {
 
 function broadcastBinary(payload: Buffer) {
   for (const client of h264Clients) {
-    if (client.readyState === 1) client.send(payload);
+    if (client.readyState !== 1) continue;
+    client.send(payload);
+  }
+}
+
+function broadcastH264Frame(meta: { type: "scrcpy_frame"; config: boolean; key: boolean; ptsUs: number; size: number }, payload: Buffer) {
+  const metaPayload = JSON.stringify(meta);
+  for (const client of h264Clients) {
+    if (client.readyState !== 1) continue;
+    const state = h264ClientState.get(client) ?? { needsKeyframe: true };
+    h264ClientState.set(client, state);
+
+    if (!meta.config && state.needsKeyframe && !meta.key) continue;
+    if (!meta.config && typeof client.bufferedAmount === "number" && client.bufferedAmount > MAX_CLIENT_BUFFERED_BYTES) {
+      state.needsKeyframe = true;
+      continue;
+    }
+
+    client.send(metaPayload);
+    client.send(payload);
+    if (meta.key) state.needsKeyframe = false;
   }
 }
 
@@ -160,6 +193,9 @@ async function startScrcpyH264(options: any = {}) {
   const server = resolveScrcpyServer();
   const bitRate = String(options.videoBitRate ?? 16000000).replace(/[^0-9]/g, "") || "16000000";
   const maxFps = String(options.maxFps ?? 60);
+  const videoCodec = normalizeVideoCodec(options.videoCodec ?? options.decoder);
+  const encoder = typeof options.videoEncoder === "string" ? options.videoEncoder : defaultVideoEncoder(videoCodec);
+  const rawStream = options.rawStream ?? videoCodec === "h264";
   lastError = "";
   lastExit = null;
 
@@ -177,13 +213,16 @@ async function startScrcpyH264(options: any = {}) {
     "audio=false",
     "control=false",
     "cleanup=false",
-    "raw_stream=true",
-    "video_codec=h264",
+    `raw_stream=${rawStream ? "true" : "false"}`,
+    `video_codec=${videoCodec}`,
     `video_bit_rate=${bitRate}`,
     `max_fps=${maxFps}`
   ];
+  if (encoder) serverArgs.push(`video_encoder=${encoder}`);
   lastArgs = serverArgs;
-  h264RawStream = true;
+  h264Stats.codec = videoCodec;
+  h264RawStream = Boolean(rawStream);
+  broadcastJson({ type: "scrcpy_log", message: `Starting scrcpy ${videoCodec.toUpperCase()} stream, raw=${rawStream}, max_fps=${maxFps}, bitrate=${bitRate}.` });
   h264Shell = spawn(adb, serverArgs, { windowsHide: true });
   startedAt = new Date().toISOString();
   h264Shell.stdout.on("data", (data) => {
@@ -264,7 +303,11 @@ function parseScrcpyBytes(chunk: Buffer) {
   if (h264RawStream) {
     h264Stats.bytes += chunk.byteLength;
     h264Stats.lastFrameAt = new Date().toISOString();
-    broadcastJson({ type: "scrcpy_stream_meta", codec: "h264" });
+    if (!codecMetaRead) {
+      codecMetaRead = true;
+      h264Stats.codec ||= "h264";
+      broadcastJson({ type: "scrcpy_stream_meta", codec: h264Stats.codec, raw: true });
+    }
     broadcastBinary(chunk);
     return;
   }
@@ -298,7 +341,15 @@ function parseScrcpyBytes(chunk: Buffer) {
     h264Stats.frames += 1;
     h264Stats.bytes += size;
     h264Stats.lastFrameAt = new Date().toISOString();
-    broadcastJson({ type: "scrcpy_frame", config, key, ptsUs, size });
-    broadcastBinary(payload);
+    broadcastH264Frame({ type: "scrcpy_frame", config, key, ptsUs, size }, payload);
   }
+}
+
+function normalizeVideoCodec(value: unknown): ScrcpyVideoCodec {
+  return value === "h265" || value === "av1" ? value : "h264";
+}
+
+function defaultVideoEncoder(codec: ScrcpyVideoCodec) {
+  void codec;
+  return undefined;
 }

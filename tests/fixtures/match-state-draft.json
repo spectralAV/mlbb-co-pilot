@@ -1,0 +1,16 @@
+{
+  "state": {
+    "phase": "pick",
+    "timestamp": 1740000000000,
+    "allyPicks": [
+      { "heroId": 11, "heroName": "Confirmed", "confidence": 0.92, "source": "draft-slot" },
+      { "heroId": 12, "heroName": "Too Weak", "confidence": 0.42, "source": "draft-slot" }
+    ],
+    "enemyPicks": [
+      { "heroId": 13, "heroName": "Manual", "confidence": 1, "source": "manual" }
+    ],
+    "allyBans": [],
+    "enemyBans": []
+  },
+  "analysis": { "bestPick": { "hero": "Confirmed Counter", "score": 83 } }
+}

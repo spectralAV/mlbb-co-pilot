@@ -10,8 +10,8 @@ export function CaptureRuntimeHost() {
     return () => attachCaptureRuntime(null, null);
   }, []);
 
-  return <div className="hidden" aria-hidden="true">
-    <video ref={videoRef} muted playsInline />
-    <canvas ref={canvasRef} />
+  return <div className="pointer-events-none fixed -left-[9999px] top-0 h-px w-px overflow-hidden opacity-0" aria-hidden="true">
+    <video ref={videoRef} muted playsInline className="h-px w-px" />
+    <canvas ref={canvasRef} className="h-px w-px" />
   </div>;
 }

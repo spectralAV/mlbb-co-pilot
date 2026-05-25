@@ -1,0 +1,41 @@
+{
+  "mode": "bilinear_quad",
+  "source": "minimap-normalized-square",
+  "target": "tactical-map-normalized-rhombus",
+  "minimapCorners": {
+    "topLeft": [
+      0,
+      0
+    ],
+    "topRight": [
+      1,
+      0
+    ],
+    "bottomRight": [
+      1,
+      1
+    ],
+    "bottomLeft": [
+      0,
+      1
+    ]
+  },
+  "tacticalCorners": {
+    "topLeft": [
+      0.2718932443703086,
+      0.1172399755750051
+    ],
+    "topRight": [
+      0.7714762301918265,
+      0.0986304556424646
+    ],
+    "bottomRight": [
+      0.8632193494578816,
+      0.8969788607484517
+    ],
+    "bottomLeft": [
+      0.16680567139282734,
+      0.9416417085865488
+    ]
+  }
+}

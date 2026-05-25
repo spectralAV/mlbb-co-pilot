@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, BarChart3, Boxes, Bot, Compass, Crosshair, Database, Gamepad2, Map, Monitor, Radar, Settings, SlidersHorizontal } from "lucide-react";
+import { Activity, Boxes, Crosshair, Database, Radio, Radar, Settings, SlidersHorizontal } from "lucide-react";
 import { CaptureRuntimeHost } from "./CaptureRuntimeHost";
-const links=[["/","Dashboard",Activity],["/draft","Draft Room",Crosshair],["/game","Game",Gamepad2],["/analysis","Analysis",BarChart3],["/build","Build Lab",Boxes],["/map","Tactical Map",Map],["/map-trainer","Map Trainer",Compass],["/capture","Live Capture",Radar],["/overlay-preview","OBS Overlay",Monitor],["/calibration","Calibration",SlidersHorizontal],["/modules","Modules",Bot],["/settings","Settings",Settings]] as const;
+const links=[["/","Status",Activity],["/capture","Live",Radar],["/draft","Draft",Crosshair],["/calibration","Calibration",SlidersHorizontal],["/build","Build Data",Boxes],["/mlbb-control","Stream Output",Radio],["/settings","Settings",Settings]] as const;
 export function Layout(){return <div className="min-h-screen lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
   <CaptureRuntimeHost/>
   <aside className="hidden border-r border-white/10 bg-black/30 p-4 lg:block lg:h-screen lg:sticky lg:top-0">

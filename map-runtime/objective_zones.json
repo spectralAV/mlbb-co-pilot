@@ -1,1 +1,153 @@
-[]
+[
+  {
+    "id": "outer-turret",
+    "type": "building",
+    "spawnSec": 0,
+    "protectionUntilSec": 300,
+    "rankAdjustments": {
+      "mythicalHonorPlus": {
+        "goldLaneEnergyShieldAllyDamageReductionPct": 35,
+        "expAndMidEnergyShieldAllyDamageReductionPct": 10,
+        "defaultEnergyShieldAllyDamageReductionPct": 15
+      }
+    },
+    "tags": ["sight", "shield", "true_damage"],
+    "coachingSignals": ["outer_turret_plate_window", "shield_gold_window", "early_dive_risk"]
+  },
+  {
+    "id": "inner-turret",
+    "type": "building",
+    "spawnSec": 0,
+    "protectionUntilSec": 480,
+    "rankAdjustments": {
+      "mythicalHonorPlus": {
+        "hp": 6700,
+        "previousHp": 5700
+      }
+    },
+    "tags": ["sight", "protection", "true_damage"],
+    "coachingSignals": ["inner_turret_dive_risk", "hardened_plate_window", "magic_sentry_unlock"]
+  },
+  {
+    "id": "base-turret",
+    "type": "building",
+    "spawnSec": 0,
+    "protectionUntilSec": 720,
+    "rankAdjustments": {
+      "mythicalHonorPlus": {
+        "hp": 8200,
+        "previousHp": 7300
+      }
+    },
+    "tags": ["sight", "protection", "true_damage"],
+    "coachingSignals": ["base_turret_dive_risk", "holy_defense_window", "lord_push_resistance"]
+  },
+  {
+    "id": "base",
+    "type": "building",
+    "spawnSec": 0,
+    "rankAdjustments": {
+      "mythicalHonorPlus": {
+        "hp": 9000,
+        "previousHp": 7900
+      }
+    },
+    "tags": ["sight", "self_repair", "true_damage"],
+    "coachingSignals": ["base_dive_risk", "no_minion_damage_reduction", "endgame_push"]
+  },
+  {
+    "id": "dragon-turtle",
+    "type": "legend_creep",
+    "spawnSec": 120,
+    "respawnSec": 120,
+    "stopsRespawningAfterSec": 480,
+    "tags": ["shield", "objective", "river_current"],
+    "coachingSignals": ["turtle_spawn", "side_lane_assignment", "river_current_rotation", "objective_contest"]
+  },
+  {
+    "id": "elemental-lord",
+    "type": "legend_creep",
+    "spawnSec": 480,
+    "respawnSec": 180,
+    "evolvesAtSec": 1080,
+    "respawnAfterEvolveSec": 150,
+    "attributeGrowthStopsAtSec": 1800,
+    "tags": ["push", "objective", "lord"],
+    "coachingSignals": ["lord_spawn", "lord_contest", "weakest_lane_push", "evolved_lord_window"]
+  },
+  {
+    "id": "cyclone-eye",
+    "type": "terrain_feature",
+    "spawnSec": 40,
+    "respawnSec": 45,
+    "countOnMap": 4,
+    "tags": ["mobility", "terrain"],
+    "coachingSignals": ["rotation_shortcut_available", "escape_path_available", "gank_angle_available"]
+  },
+  {
+    "id": "magic-sentry",
+    "type": "terrain_feature",
+    "trigger": "side_lane_inner_turret_destroyed",
+    "respawnSec": 90,
+    "maxPerSide": 2,
+    "tags": ["vision", "reveal"],
+    "coachingSignals": ["post_inner_turret_vision", "reveal_window", "jungle_scouting"]
+  },
+  {
+    "id": "scavenger-crab",
+    "type": "common_creep",
+    "spawnSec": 42,
+    "respawnSec": 45,
+    "tags": ["gold", "exp", "side_lane"],
+    "coachingSignals": ["side_lane_economy_pickup", "small_objective_spawn"]
+  },
+  {
+    "id": "lithowanderer",
+    "type": "common_creep",
+    "spawnSec": 48,
+    "respawnSec": 60,
+    "patrolSec": 45,
+    "tags": ["speed_up", "river", "vision"],
+    "coachingSignals": ["river_control", "rotation_speed_buff", "roamer_scouting"]
+  },
+  {
+    "id": "molten-fiend",
+    "type": "elite_creep",
+    "spawnSec": 25,
+    "respawnSec": 90,
+    "tags": ["attack", "red_jungle", "jungle_buff"],
+    "coachingSignals": ["red_buff_spawn", "jungler_buff_priority", "fruit_pickup"]
+  },
+  {
+    "id": "thunder-fenrir",
+    "type": "elite_creep",
+    "spawnSec": 25,
+    "respawnSec": 90,
+    "tags": ["regen", "blue_jungle", "jungle_buff"],
+    "coachingSignals": ["blue_buff_spawn", "jungler_buff_priority", "cooldown_resource_buff"]
+  },
+  {
+    "id": "fire-beetle",
+    "type": "common_creep",
+    "spawnSec": 39,
+    "respawnSec": 70,
+    "tags": ["small_camp", "mana_hp"],
+    "coachingSignals": ["small_camp_sustain", "jungle_clear"]
+  },
+  {
+    "id": "lava-golem",
+    "type": "common_creep",
+    "spawnSec": 31,
+    "respawnSec": 70,
+    "tags": ["small_camp", "mana_hp"],
+    "coachingSignals": ["small_camp_sustain", "jungle_clear"]
+  },
+  {
+    "id": "horned-lizard",
+    "type": "common_creep",
+    "spawnSec": 40,
+    "respawnSec": 70,
+    "tags": ["small_camp", "defense"],
+    "coachingSignals": ["small_camp_sustain", "jungle_clear"]
+  }
+]
