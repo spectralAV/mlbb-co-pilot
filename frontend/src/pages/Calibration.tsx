@@ -1,5 +1,5 @@
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { getObsConfig, getObsRegions, saveObsConfig, saveObsRegions } from "../api/client";
+import { apiUrl, getObsConfig, getObsRegions, saveObsConfig, saveObsRegions } from "../api/client";
 import { analyzeCapturedFrameBlob, captureCurrentRuntimeFrame, captureSources, type CaptureSource, type SourceMode, useCaptureRuntimeStore } from "../runtime/captureRuntime";
 import { setActiveCalibrationRegions } from "../vision/calibrationRegions";
 
@@ -334,7 +334,7 @@ export function Calibration() {
         sourceMode = frame.mode;
         sourceLabel = `${frame.mode} / ${frame.source}`;
       } else if (runtime.selectedSource === "adb") {
-        const response = await fetch(`/api/capture/frame?t=${Date.now()}`, { cache: "no-store" });
+        const response = await fetch(apiUrl(`/api/capture/frame?t=${Date.now()}`), { cache: "no-store" });
         if (!response.ok) throw new Error(await response.text());
         blob = await response.blob();
       } else {

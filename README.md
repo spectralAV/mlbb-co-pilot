@@ -21,6 +21,36 @@ Frontend: http://localhost:5173
 
 Backend health: http://localhost:8787/api/health
 
+## Desktop App
+
+Electron desktop mode is wired for a Windows-first local app shell and has packaging targets declared for Windows, macOS, and Linux.
+
+Run the desktop app against the dev servers:
+
+```powershell
+npm run desktop:dev
+```
+
+Run the built desktop shell:
+
+```powershell
+npm run desktop
+```
+
+Create an unpacked desktop build for local QA:
+
+```powershell
+npm run desktop:pack
+```
+
+Create a platform installer/package:
+
+```powershell
+npm run desktop:dist
+```
+
+The Electron shell starts the compiled Fastify backend as a managed local process, waits for `/api/health`, and loads the built frontend from the backend origin. Browser dev mode remains available through `npm run dev`.
+
 Optional portless local DNS mode after setup:
 
 ```powershell

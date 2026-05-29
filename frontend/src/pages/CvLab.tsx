@@ -2,6 +2,7 @@ import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, Camera, Check, Cpu, FileUp, Play, RefreshCw, ScanSearch, Trash2, Wand2 } from "lucide-react";
 import {
   deleteCvAnnotation,
+  apiUrl,
   getCvAnnotationClasses,
   getCvAnnotations,
   getHeroRecognitionManifest,
@@ -126,7 +127,7 @@ export function CvLab() {
         return;
       }
       if (selectedSource === "obs") {
-        const response = await fetch(`/api/capture/obs/frame?t=${Date.now()}`, { cache: "no-store" });
+        const response = await fetch(apiUrl(`/api/capture/obs/frame?t=${Date.now()}`), { cache: "no-store" });
         if (!response.ok) throw new Error("No OBS bridge frame is available.");
         await loadBlob(await response.blob(), "obs-native-frame");
         return;
@@ -146,7 +147,7 @@ export function CvLab() {
   async function openSample(sample: AnnotationSample) {
     setBusy("sample");
     try {
-      const response = await fetch(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`, { cache: "no-store" });
+      const response = await fetch(apiUrl(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`), { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load labelled image.");
       setSplit(sample.split);
       await loadBlob(await response.blob(), sample.source, sample.boxes.map((box, index) => ({

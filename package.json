@@ -2,11 +2,17 @@
   "name": "mlbb-co-pilot",
   "private": true,
   "version": "0.4.0",
+  "description": "Semantic tactical intelligence system for Mobile Legends: Bang Bang.",
+  "main": "electron/main.cjs",
   "author": "SpectralAV",
   "license": "Apache-2.0",
   "copyright": "Copyright 2026 SpectralAV",
   "scripts": {
     "dev": "concurrently -k -n BACKEND,FRONTEND -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "desktop:dev": "concurrently -k -n BACKEND,FRONTEND,ELECTRON -c blue,green,magenta \"npm run dev:backend\" \"npm run dev:frontend\" \"node electron/wait-and-start.cjs\"",
+    "desktop": "npm run build && electron .",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
@@ -35,6 +41,65 @@
     "start": "npm run dev"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.spectralav.mlbb-copilot",
+    "productName": "MLBB Co-Pilot",
+    "asar": true,
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "LICENSE",
+      "NOTICE",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist",
+        "to": "backend/dist"
+      },
+      {
+        "from": "backend/package.json",
+        "to": "backend/package.json"
+      },
+      {
+        "from": "backend/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
+        "from": "frontend/dist",
+        "to": "frontend/dist"
+      },
+      {
+        "from": "data/cache/.gitkeep",
+        "to": "data/cache/.gitkeep"
+      },
+      {
+        "from": "data/obs",
+        "to": "data/obs"
+      },
+      {
+        "from": "data/map",
+        "to": "data/map"
+      },
+      {
+        "from": "map-runtime",
+        "to": "map-runtime"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   }
 }

@@ -1,6 +1,6 @@
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Brush, Circle, Crosshair, ImageDown, MousePointer2, RotateCcw, Save, Trash2, ZoomIn, ZoomOut } from "lucide-react";
-import { getMapProjection, getMapZones, getObsRegions, saveMapProjection, saveMapZones, saveObsRegions } from "../api/client";
+import { apiUrl, getMapProjection, getMapZones, getObsRegions, saveMapProjection, saveMapZones, saveObsRegions } from "../api/client";
 import { captureCurrentRuntimeFrame, useCaptureRuntimeStore } from "../runtime/captureRuntime";
 
 type Point = [number, number];
@@ -263,7 +263,7 @@ export function MapTrainer() {
     const frame = await captureCurrentRuntimeFrame();
     if (frame) return { blob: frame.blob, source: `${frame.mode} / ${frame.source}` };
     if (runtime.selectedSource !== "adb") throw new Error(`Start Live Capture for ${runtime.selectedSource} before pulling a trainer frame.`);
-    const response = await fetch(`/api/capture/frame?t=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(apiUrl(`/api/capture/frame?t=${Date.now()}`), { cache: "no-store" });
     if (!response.ok) throw new Error(await response.text());
     return { blob: await response.blob(), source: "selected ADB source" };
   }

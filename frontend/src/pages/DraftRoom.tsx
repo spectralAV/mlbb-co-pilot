@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiGet, apiPost, getLatestDraftRecognition } from "../api/client";
+import { apiGet, apiPost, apiWsUrl, getLatestDraftRecognition } from "../api/client";
 import { HeroPicker } from "../components/HeroPicker";
 import { useCaptureRuntimeStore } from "../runtime/captureRuntime";
 import { useDraftStore, type DraftKind, type DraftSide, type DraftSlots, type Hero } from "../stores/draftStore";
@@ -121,8 +121,7 @@ export function DraftRoom() {
 
   useEffect(() => {
     if (!effectiveRealtime) return;
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws/events`);
+    const socket = new WebSocket(apiWsUrl("/ws/events"));
     socket.onopen = () => setRealtimeStatus("Realtime draft recognition active");
     socket.onmessage = (message) => {
       try {

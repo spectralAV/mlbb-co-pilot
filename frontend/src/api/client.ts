@@ -1,4 +1,5 @@
-const API = "";
+import { API_BASE, apiUrl, apiWsUrl } from "./transport";
+
 async function responseError(res: Response, path: string) {
   const text = await res.text().catch(() => "");
   try {
@@ -8,9 +9,9 @@ async function responseError(res: Response, path: string) {
     return new Error(text || `${path} failed (${res.status})`);
   }
 }
-export async function apiGet<T>(path:string):Promise<T>{ const res=await fetch(`${API}${path}`, { cache: "no-store" }); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
-export async function apiPost<T>(path:string, body:unknown={}):Promise<T>{ const res=await fetch(`${API}${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
-export const API_BASE = API;
+export async function apiGet<T>(path:string):Promise<T>{ const res=await fetch(apiUrl(path), { cache: "no-store" }); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
+export async function apiPost<T>(path:string, body:unknown={}):Promise<T>{ const res=await fetch(apiUrl(path),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
+export { API_BASE, apiUrl, apiWsUrl };
 export const syncOfficialData = (authorization: string) => apiPost<any>("/api/sync/official", { authorization });
 export const getAdbAssetStatus = () => apiGet<any>("/api/sync/adb-assets/status");
 export const syncAdbAssets = (scope: "draft" | "vision" | "ui" = "draft") => apiPost<any>("/api/sync/adb-assets", { scope });
@@ -27,12 +28,12 @@ export const updateOverlayMediaConfig = (config: unknown) => apiPost<any>("/api/
 export async function uploadOverlayMedia(slot: "logo" | "sponsor", file: File) {
   const body = new FormData();
   body.append("media", file);
-  const res = await fetch(`${API}/api/overlay/media/${slot}`, { method: "POST", body });
+  const res = await fetch(apiUrl(`/api/overlay/media/${slot}`), { method: "POST", body });
   if (!res.ok) throw await responseError(res, `/api/overlay/media/${slot}`);
   return res.json() as Promise<any>;
 }
 export async function deleteOverlayMedia(slot: "logo" | "sponsor") {
-  const res = await fetch(`${API}/api/overlay/media/${slot}`, { method: "DELETE" });
+  const res = await fetch(apiUrl(`/api/overlay/media/${slot}`), { method: "DELETE" });
   if (!res.ok) throw await responseError(res, `/api/overlay/media/${slot}`);
   return res.json() as Promise<any>;
 }
@@ -74,7 +75,7 @@ export async function matchDinoIdentity(crop: Blob, options: unknown = {}) {
   const body = new FormData();
   body.append("options", JSON.stringify(options));
   body.append("crop", crop, "hero-crop.png");
-  const response = await fetch(`${API}/api/vision/models/dino/match`, { method: "POST", body });
+  const response = await fetch(apiUrl("/api/vision/models/dino/match"), { method: "POST", body });
   if (!response.ok) throw await responseError(response, "/api/vision/models/dino/match");
   return response.json() as Promise<any>;
 }
@@ -84,7 +85,7 @@ export async function inferTimerCrop(crop: Blob, timerType: string) {
   const body = new FormData();
   body.append("timerType", timerType);
   body.append("crop", crop, "timer-crop.png");
-  const response = await fetch(`${API}/api/vision/models/timer-ocr/infer`, { method: "POST", body });
+  const response = await fetch(apiUrl("/api/vision/models/timer-ocr/infer"), { method: "POST", body });
   if (!response.ok) throw await responseError(response, "/api/vision/models/timer-ocr/infer");
   return response.json() as Promise<any>;
 }
@@ -94,7 +95,7 @@ export async function inferScreenOcrFrame(frame: Blob, options: unknown = {}) {
   const body = new FormData();
   body.append("options", JSON.stringify(options));
   body.append("frame", frame, "screen-frame.png");
-  const response = await fetch(`${API}/api/vision/models/screen-ocr/infer`, { method: "POST", body });
+  const response = await fetch(apiUrl("/api/vision/models/screen-ocr/infer"), { method: "POST", body });
   if (!response.ok) throw await responseError(response, "/api/vision/models/screen-ocr/infer");
   return response.json() as Promise<any>;
 }
@@ -102,7 +103,7 @@ export const getCvAnnotationClasses = () => apiGet<any>("/api/vision/annotations
 export const getCvAnnotations = () => apiGet<any>("/api/vision/annotations");
 export const syncCvAnnotations = () => apiPost<any>("/api/vision/annotations/sync");
 export async function deleteCvAnnotation(id: string) {
-  const response = await fetch(`${API}/api/vision/annotations/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const response = await fetch(apiUrl(`/api/vision/annotations/${encodeURIComponent(id)}`), { method: "DELETE" });
   if (!response.ok) throw await responseError(response, "/api/vision/annotations");
   return response.json() as Promise<any>;
 }
@@ -110,7 +111,7 @@ export async function saveCvAnnotation(frame: Blob, metadata: unknown) {
   const body = new FormData();
   body.append("metadata", JSON.stringify(metadata));
   body.append("frame", frame, "annotation-frame.png");
-  const response = await fetch(`${API}/api/vision/annotations`, { method: "POST", body });
+  const response = await fetch(apiUrl("/api/vision/annotations"), { method: "POST", body });
   if (!response.ok) throw await responseError(response, "/api/vision/annotations");
   return response.json() as Promise<any>;
 }
@@ -118,7 +119,7 @@ export async function inferUltralyticsFrame(frame: Blob, confidence = 0.55) {
   const body = new FormData();
   body.append("confidence", String(confidence));
   body.append("frame", frame, "frame.jpg");
-  const response = await fetch(`${API}/api/vision/models/ultralytics/infer`, { method: "POST", body });
+  const response = await fetch(apiUrl("/api/vision/models/ultralytics/infer"), { method: "POST", body });
   if (!response.ok) throw await responseError(response, "/api/vision/models/ultralytics/infer");
   return response.json() as Promise<any>;
 }
@@ -135,7 +136,7 @@ export const stopScrcpy = () => apiPost<any>("/api/capture/scrcpy/stop");
 export async function applyPatchZip(file: File) {
   const body = new FormData();
   body.append("patch", file);
-  const res = await fetch(`${API}/api/updates/apply`, { method: "POST", body });
+  const res = await fetch(apiUrl("/api/updates/apply"), { method: "POST", body });
   const json = await res.json();
   if (!res.ok || json.ok === false) throw new Error(json.error ?? `Patch upload failed: ${res.status}`);
   return json;

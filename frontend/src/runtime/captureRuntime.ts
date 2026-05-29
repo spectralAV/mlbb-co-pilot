@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startScrcpy, stopScrcpy } from "../api/client";
+import { apiUrl, apiWsUrl, getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startScrcpy, stopScrcpy } from "../api/client";
 import { detectDraftVisualContext } from "../vision/draftContextDetector";
 import { queueDraftBanIconRecognition } from "../vision/draftIconDetector";
 import { detectMinimapMarkerCandidatesFromRgba } from "../vision/minimapMarkerDetector";
@@ -455,8 +455,7 @@ function startScrcpyH264Decode() {
   runtime.h264Configured = false;
   createH264Decoder();
 
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${window.location.host}/ws/capture/scrcpy-h264`);
+  const socket = new WebSocket(apiWsUrl("/ws/capture/scrcpy-h264"));
   runtime.h264Socket = socket;
   socket.binaryType = "arraybuffer";
   const opened = new Promise<void>((resolve, reject) => {
@@ -874,7 +873,7 @@ async function pollAdbFrame() {
   if (!runtime.adbActive) return;
   const started = performance.now();
   try {
-    const response = await fetch(`/api/capture/frame?t=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(apiUrl(`/api/capture/frame?t=${Date.now()}`), { cache: "no-store" });
     if (!response.ok) throw new Error(await response.text());
     const elapsed = performance.now() - started;
     if (elapsed > 1000) addCaptureLog("warn", `ADB frame took ${Math.round(elapsed)}ms.`);
@@ -909,7 +908,7 @@ async function pollAdbFrame() {
 async function pollObsBridgeFrame() {
   if (!runtime.obsBridgeActive) return;
   try {
-    const response = await fetch(`/api/capture/obs/frame?t=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(apiUrl(`/api/capture/obs/frame?t=${Date.now()}`), { cache: "no-store" });
     if (response.status === 404) {
       useCaptureRuntimeStore.setState({ error: "Waiting for OBS frames. Add the scrcpy Device Source in OBS and enable its MLBB CoPilot CV bridge setting." });
       return;

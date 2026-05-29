@@ -1,7 +1,9 @@
 import Fastify from "fastify";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import staticPlugin from "@fastify/static";
 import websocket from "@fastify/websocket";
 import { FRONTEND_PORT, HOST, LOCAL_DNS_HOSTNAMES, PORT } from "./config.js";
 import { cache } from "./services/cacheService.js";
@@ -42,6 +44,7 @@ import { getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, norm
 import { getVisionReflectionSummary } from "./vision/visionReflection.js";
 
 const app = Fastify({ logger: true });
+const frontendDist = path.resolve(process.cwd(), "..", "frontend", "dist");
 
 process.on("unhandledRejection", (reason) => {
   app.log.error({ reason }, "Unhandled promise rejection");
@@ -78,6 +81,29 @@ await app.register(runtimeRoutes);
 await app.register(updateRoutes);
 await app.register(overlayRoutes);
 await app.register(obsCoachRoutes);
+
+async function fileExists(file: string) {
+  try {
+    await stat(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function registerFrontendStatic() {
+  if (!await fileExists(path.join(frontendDist, "index.html"))) return;
+  await app.register(staticPlugin, { root: frontendDist, prefix: "/", wildcard: false });
+
+  app.get("/*", async (req, reply) => {
+    const pathname = (req.raw.url ?? "").split("?")[0] ?? "";
+    if (pathname === "/api" || pathname.startsWith("/api/") || pathname === "/ws" || pathname.startsWith("/ws/")) {
+      return reply.code(404).send({ ok: false, error: "Route not found." });
+    }
+    if (path.extname(pathname)) return reply.code(404).send({ ok: false, error: "Asset not found." });
+    return reply.sendFile("index.html");
+  });
+}
 
 app.get("/api/health", async () => ({ ok: true, service: "MLBB Co-Pilot", time: new Date().toISOString() }));
 app.post("/api/sync/all", async () => { const result = await mlbbIo.syncAll(); eventBus.emit("data_synced", result); return { success:true, result }; });
@@ -361,5 +387,7 @@ app.post("/api/events/emit", async (req) => ({ success:true, event:eventBus.emit
 app.get("/api/events/recent", async () => ({ success:true, events:eventBus.recent() }));
 
 app.get("/ws/events", { websocket:true }, (socket) => { const unsub = eventBus.subscribe((event)=>socket.send(JSON.stringify(event))); socket.on("close", unsub); });
+
+await registerFrontendStatic();
 
 try { await app.listen({ port: PORT, host: HOST }); console.log(`MLBB Co-Pilot backend running on ${HOST}:${PORT}`); } catch(err) { app.log.error(err); process.exit(1); }
