@@ -53,6 +53,28 @@ npm run desktop:dist
 
 The Electron shell starts the compiled Fastify backend as a managed local process, waits for `/api/health`, and loads the built frontend from the backend origin. Browser dev mode remains available through `npm run dev`.
 
+## Container Package
+
+The web runtime can also be published as a GitHub Container Registry package:
+
+```text
+ghcr.io/spectralav/mlbb-co-pilot:latest
+ghcr.io/spectralav/mlbb-co-pilot:0.4.0
+ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.4.0
+```
+
+Run it locally:
+
+```powershell
+docker run --rm -p 8787:8787 ghcr.io/spectralav/mlbb-co-pilot:latest
+```
+
+Then open:
+
+```text
+http://localhost:8787
+```
+
 Optional portless local DNS mode after setup:
 
 ```powershell
