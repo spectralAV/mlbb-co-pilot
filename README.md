@@ -6,6 +6,8 @@ This build merges the v0.2.0 tactical co-pilot app, BuildLab runtime fixes, sing
 
 ## Install
 
+For a step-by-step setup guide, see [Installing MLBB Co-Pilot](docs/installing-mlbb-copilot.md).
+
 ```powershell
 cd "C:\Users\rokas\Documents\MLBB CoPilot"
 npm run install:all
