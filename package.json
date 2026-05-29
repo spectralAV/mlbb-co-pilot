@@ -13,6 +13,8 @@
     "local-dns:status": "powershell -ExecutionPolicy Bypass -File .\\tools\\local-dns.ps1 -Action status",
     "local-dns:install": "powershell -ExecutionPolicy Bypass -File .\\tools\\local-dns.ps1 -Action install",
     "local-dns:remove": "powershell -ExecutionPolicy Bypass -File .\\tools\\local-dns.ps1 -Action remove",
+    "local-proxy": "node .\\tools\\local-proxy.cjs",
+    "dev:local": "concurrently -k -n BACKEND,FRONTEND,PROXY -c blue,green,magenta \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run local-proxy\"",
     "test": "cd backend && npx tsx --test ../tests/*.test.ts",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
     "cv:status": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/ultralyticsVision.py status --project-root . } else { python backend/tools/ultralyticsVision.py status --project-root . }\"",
@@ -25,6 +27,11 @@
     "cv:wsl:bootstrap": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-wsl.ps1 -Action bootstrap",
     "cv:wsl:status": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-wsl.ps1 -Action status",
     "cv:wsl:train": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-wsl.ps1 -Action train",
+    "cv:result:metadata": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/importResultScreenDataset.py --project-root . } else { python backend/tools/importResultScreenDataset.py --project-root . }\"",
+    "cv:result:import:sample": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/importResultScreenDataset.py --project-root . --download --shuffle --max-train 500 --max-val 150 } else { python backend/tools/importResultScreenDataset.py --project-root . --download --shuffle --max-train 500 --max-val 150 }\"",
+    "cv:result:import:all": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/importResultScreenDataset.py --project-root . --download } else { python backend/tools/importResultScreenDataset.py --project-root . --download }\"",
+    "cv:result:status": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/resultScreenVision.py status --project-root . } else { python backend/tools/resultScreenVision.py status --project-root . }\"",
+    "cv:result:train": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/resultScreenVision.py train --project-root . --device cpu --batch 4 --workers 0 --amp false",
     "start": "npm run dev"
   },
   "devDependencies": {

@@ -3,6 +3,7 @@ import { readRuntime } from "../runtime/RuntimeStore.js";
 import { suggestBans } from "./banEngine.js";
 import { scoreDraftHero } from "./scoreHero.js";
 import { recommendBattleSpells } from "./battleSpellEngine.js";
+import { recommendJunglers } from "./junglerDraftEngine.js";
 import { getPlayerProfile, type DraftLane } from "../services/playerProfile.js";
 
 function normalize(value: unknown) {
@@ -58,6 +59,15 @@ export async function analyzeDraft(state:any) {
     bestPick,
     backupPicks: scored.slice(1, 4).map(({ hero, score }) => ({ hero, score })),
     avoidPicks,
+    junglerRecommendations: recommendJunglers(allHeroes, {
+      allies: ally,
+      enemies: enemy,
+      unavailable: picked,
+      heroPool: comfortHeroes,
+      selectedLane,
+      laneDetected: Boolean(state.selectedLane),
+      runtimeByName
+    }),
     banSuggestions: suggestBans(state, enemy),
     context: {
       selectedLane,

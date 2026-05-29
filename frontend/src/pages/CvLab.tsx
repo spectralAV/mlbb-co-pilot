@@ -5,10 +5,13 @@ import {
   getCvAnnotationClasses,
   getCvAnnotations,
   getHeroRecognitionManifest,
+  getScreenOcrStatus,
   getTimerOcrStatus,
   getUltralyticsStatus,
+  inferScreenOcrFrame,
   inferUltralyticsFrame,
   inferTimerCrop,
+  installScreenOcrRuntime,
   installTimerOcrRuntime,
   saveCvAnnotation,
   syncCvAnnotations,
@@ -39,6 +42,7 @@ export function CvLab() {
   const [samples, setSamples] = useState<AnnotationSample[]>([]);
   const [model, setModel] = useState<any>(null);
   const [timerOcr, setTimerOcr] = useState<any>(null);
+  const [screenOcr, setScreenOcr] = useState<any>(null);
   const [frame, setFrame] = useState<Blob | null>(null);
   const [imageUrl, setImageUrl] = useState("");
   const [imageSize, setImageSize] = useState({ width: 20, height: 9 });
@@ -71,12 +75,13 @@ export function CvLab() {
   }, [classes]);
 
   async function refresh() {
-    const [classResult, annotationResult, modelResult, heroResult, timerResult] = await Promise.allSettled([
+    const [classResult, annotationResult, modelResult, heroResult, timerResult, screenOcrResult] = await Promise.allSettled([
       getCvAnnotationClasses(),
       getCvAnnotations(),
       getUltralyticsStatus(),
       getHeroRecognitionManifest(),
       getTimerOcrStatus(),
+      getScreenOcrStatus(),
     ]);
     if (classResult.status === "fulfilled") setClasses(classResult.value.data ?? []);
     if (annotationResult.status === "fulfilled") setSamples(annotationResult.value.data ?? []);
@@ -89,7 +94,8 @@ export function CvLab() {
       setHeroes(nextHeroes);
     }
     if (timerResult.status === "fulfilled") setTimerOcr(timerResult.value.data ?? null);
-    if ([classResult, annotationResult, modelResult, heroResult, timerResult].every((result) => result.status === "rejected")) {
+    if (screenOcrResult.status === "fulfilled") setScreenOcr(screenOcrResult.value.data ?? null);
+    if ([classResult, annotationResult, modelResult, heroResult, timerResult, screenOcrResult].every((result) => result.status === "rejected")) {
       setMessage("CV dataset status is unavailable.");
     }
   }
@@ -232,11 +238,37 @@ export function CvLab() {
   async function installOcr() {
     setBusy("install-ocr");
     try {
-      const result = await installTimerOcrRuntime();
-      setTimerOcr(result.data);
-      setMessage("Timer OCR runtime is available.");
+      const [timerResult, screenResult] = await Promise.all([
+        installTimerOcrRuntime(),
+        installScreenOcrRuntime(),
+      ]);
+      setTimerOcr(timerResult.data);
+      setScreenOcr(screenResult.data);
+      setMessage("PaddleOCR runtime is available for timers and screen text.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Timer OCR installation failed.");
+      setMessage(error instanceof Error ? error.message : "PaddleOCR installation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function readScreenText() {
+    if (!frame) return;
+    setBusy("screen-ocr");
+    try {
+      const result = await inferScreenOcrFrame(frame, { maxRegions: 5 });
+      const regions = (result.data?.regions ?? []).filter((item: any) => String(item?.text ?? "").trim());
+      if (!regions.length) {
+        setMessage("Screen OCR found no readable text in the calibrated regions.");
+        return;
+      }
+      const summary = regions
+        .slice(0, 3)
+        .map((item: any) => `${String(item.region ?? "screen").replace(/_/g, " ")}: ${String(item.text ?? "").slice(0, 48)}`)
+        .join(" / ");
+      setMessage(`Screen OCR: ${summary}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Screen OCR failed.");
     } finally {
       setBusy("");
     }
@@ -347,6 +379,7 @@ export function CvLab() {
       <Status label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} manually labelled frames`} />
       <Status label="Label Scope" value={`${classes.length} classes`} detail="Detection labels and timer ROI targets" />
       <Status label="Timer OCR" value={timerOcr?.packageAvailable && timerOcr?.paddleAvailable ? "Ready" : "Not installed"} detail={`${timerOcr?.transcribedTimerBoxes ?? 0} transcribed timer boxes`} />
+      <Status label="Screen OCR" value={screenOcr?.packageAvailable && screenOcr?.paddleAvailable ? "Ready" : "Not installed"} detail={screenOcr?.enabledForLiveCapture ? "live gate enabled" : "manual test only"} />
     </section>
 
     <div className="grid gap-4 lg:grid-cols-[minmax(460px,1fr)_360px]">
@@ -355,6 +388,7 @@ export function CvLab() {
           <div className="flex items-center gap-2 text-sm font-bold"><ScanSearch className="h-4 w-4 text-cyan-300" />Annotation Canvas</div>
           <div className="flex gap-2">
             <button className="min-h-9 rounded-lg border border-cyan-300/25 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-100" disabled={!frame || Boolean(busy)} onClick={suggestBoxes}><Wand2 className="mr-1 inline h-4 w-4" />Suggest</button>
+            <button className="min-h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold" disabled={!frame || !screenOcr?.packageAvailable || Boolean(busy)} onClick={() => void readScreenText()}><ScanSearch className="mr-1 inline h-4 w-4" />Read Text</button>
             <button className="min-h-9 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold" disabled={!boxes.length} onClick={() => setBoxes([])}><Trash2 className="mr-1 inline h-4 w-4" />Clear</button>
           </div>
         </div>
@@ -449,8 +483,8 @@ export function CvLab() {
           <h3 className="flex items-center gap-2 font-bold"><Cpu className="h-4 w-4 text-cyan-300" />Training</h3>
           <p className="mt-2 text-xs text-slate-400">Ultralytics detection dataset</p>
           <button className="btn mt-3 flex w-full items-center justify-center gap-2" disabled={Boolean(busy)} onClick={train}><Play size={16} />{busy === "train" ? "Training..." : "Train Ultralytics"}</button>
-          {!timerOcr?.packageAvailable || !timerOcr?.paddleAvailable
-            ? <button className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/5 text-sm font-semibold text-slate-100" disabled={Boolean(busy)} onClick={() => void installOcr()}>{busy === "install-ocr" ? "Installing OCR..." : "Install Timer OCR"}</button>
+          {!timerOcr?.packageAvailable || !timerOcr?.paddleAvailable || !screenOcr?.packageAvailable || !screenOcr?.paddleAvailable
+            ? <button className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/5 text-sm font-semibold text-slate-100" disabled={Boolean(busy)} onClick={() => void installOcr()}>{busy === "install-ocr" ? "Installing OCR..." : "Install PaddleOCR"}</button>
             : null}
         </section>
 

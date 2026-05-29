@@ -38,6 +38,8 @@ import { readMlbbAdbHeroHead, readMlbbAdbTexture } from "./services/mlbbAdbAsset
 import { annotationImage, deleteAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset } from "./vision/cvAnnotation.js";
 import { getDinoIdentityStatus, indexDinoReferences, matchDinoIdentity } from "./vision/dinoIdentity.js";
 import { getTimerOcrStatus, inferTimerCrop, installTimerOcrRuntime, timerClasses } from "./vision/timerRecognition.js";
+import { getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, normalizeScreenOcrRegions } from "./vision/screenTextRecognition.js";
+import { getVisionReflectionSummary } from "./vision/visionReflection.js";
 
 const app = Fastify({ logger: true });
 
@@ -55,6 +57,7 @@ const allowedCorsOrigins = new Set([
   `http://localhost:${PORT}`,
   `http://127.0.0.1:${PORT}`,
   ...LOCAL_DNS_HOSTNAMES.flatMap((hostname) => [
+    `http://${hostname}`,
     `http://${hostname}:${FRONTEND_PORT}`,
     `http://${hostname}:${PORT}`
   ])
@@ -185,6 +188,10 @@ app.get("/api/vision/draft/latest", async () => ({ success:true, data:getLatestD
 app.post("/api/vision/draft/recognition", async (req) => ({ success:true, data:await ingestDraftRecognition(req.body as any) }));
 app.get("/api/vision/live/latest", async () => ({ success:true, data:getLatestLiveVision() }));
 app.post("/api/vision/live/frame", async (req) => ({ success:true, data:ingestLiveVisionFrame(req.body as any) }));
+app.get("/api/vision/reflections", async (req) => {
+  const limit = Number((req.query as { limit?: string })?.limit ?? 50);
+  return { success: true, data: await getVisionReflectionSummary(limit) };
+});
 app.get("/api/vision/models/screen-state", async () => ({ success: true, data: await getScreenStateModel() }));
 app.get("/api/vision/models/screen-state/status", async () => ({ success: true, data: await getScreenStateTrainingStatus() }));
 app.post("/api/vision/models/screen-state/train", async (_req, reply) => {
@@ -303,6 +310,32 @@ app.post("/api/vision/models/timer-ocr/infer", async (req, reply) => {
     return { success: true, data: await inferTimerCrop(crop, timerType) };
   } catch (error) {
     return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Timer OCR failed" });
+  }
+});
+app.get("/api/vision/models/screen-ocr/status", async () => ({ success: true, data: await getScreenOcrStatus() }));
+app.post("/api/vision/models/screen-ocr/install", async (_req, reply) => {
+  try {
+    return { success: true, data: await installScreenOcrRuntime() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Screen OCR installation failed" });
+  }
+});
+app.post("/api/vision/models/screen-ocr/infer", async (req, reply) => {
+  try {
+    let frame: Buffer | null = null;
+    let options: any = {};
+    for await (const part of (req as any).parts({ limits: { fileSize: 16 * 1024 * 1024, files: 1, fields: 2 } })) {
+      if (part.type === "file") frame = await part.toBuffer();
+      if (part.type === "field" && part.fieldname === "options") options = JSON.parse(String(part.value));
+    }
+    if (!frame) return reply.code(400).send({ success: false, error: "A frame image is required." });
+    const activeRegions = options?.regions ?? await getActiveObsRegions();
+    return { success: true, data: await inferScreenTextFrame(frame, {
+      regions: normalizeScreenOcrRegions(activeRegions),
+      maxRegions: Number(options?.maxRegions ?? 8),
+    }) };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Screen OCR failed" });
   }
 });
 app.get("/api/reasoning/live/latest", async () => ({ success:true, data:getLatestLiveReasoning() }));

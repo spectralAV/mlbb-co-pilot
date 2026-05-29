@@ -41,6 +41,14 @@ data/cv/runs/
 data/cv/runtime/
 data/cv/identity/
 data/cv/footage/
+data/cv/result-screens/images/train/*
+data/cv/result-screens/images/val/*
+data/cv/result-screens/labels/train/*
+data/cv/result-screens/labels/val/*
+data/cv/result-screens/models/
+data/cv/result-screens/runs/
+data/cv/result-screens/runtime/
+data/cv/result-screens/results.csv
 data/cv/images/train/*
 data/cv/images/val/*
 data/cv/labels/train/*
@@ -50,6 +58,10 @@ data/cv/labels/*.cache
 !data/cv/images/val/.gitkeep
 !data/cv/labels/train/.gitkeep
 !data/cv/labels/val/.gitkeep
+!data/cv/result-screens/images/train/.gitkeep
+!data/cv/result-screens/images/val/.gitkeep
+!data/cv/result-screens/labels/train/.gitkeep
+!data/cv/result-screens/labels/val/.gitkeep
 data/overlay-media/*
 !data/overlay-media/.gitkeep
 repo-patches/

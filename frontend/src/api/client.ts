@@ -88,6 +88,16 @@ export async function inferTimerCrop(crop: Blob, timerType: string) {
   if (!response.ok) throw await responseError(response, "/api/vision/models/timer-ocr/infer");
   return response.json() as Promise<any>;
 }
+export const getScreenOcrStatus = () => apiGet<any>("/api/vision/models/screen-ocr/status");
+export const installScreenOcrRuntime = () => apiPost<any>("/api/vision/models/screen-ocr/install");
+export async function inferScreenOcrFrame(frame: Blob, options: unknown = {}) {
+  const body = new FormData();
+  body.append("options", JSON.stringify(options));
+  body.append("frame", frame, "screen-frame.png");
+  const response = await fetch(`${API}/api/vision/models/screen-ocr/infer`, { method: "POST", body });
+  if (!response.ok) throw await responseError(response, "/api/vision/models/screen-ocr/infer");
+  return response.json() as Promise<any>;
+}
 export const getCvAnnotationClasses = () => apiGet<any>("/api/vision/annotations/classes");
 export const getCvAnnotations = () => apiGet<any>("/api/vision/annotations");
 export const syncCvAnnotations = () => apiPost<any>("/api/vision/annotations/sync");

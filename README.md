@@ -21,16 +21,26 @@ Frontend: http://localhost:5173
 
 Backend health: http://localhost:8787/api/health
 
-Optional local DNS URL after setup: http://mlbb.local:5173
+Optional portless local DNS mode after setup:
+
+```powershell
+npm run dev:local
+```
+
+Frontend: http://mlbb.local
+
+Backend health: http://api.mlbb.local/api/health
+
+OBS output: http://obs.mlbb.local/mlbb-live-output
 
 ## Local DNS
 
 MLBB Co-Pilot can run behind friendly local hostnames for browser and OBS sources:
 
 ```text
-http://mlbb.local:5173
-http://api.mlbb.local:8787/api/health
-http://obs.mlbb.local:5173/mlbb-live-output
+http://mlbb.local
+http://api.mlbb.local/api/health
+http://obs.mlbb.local/mlbb-live-output
 ```
 
 Install the Windows hosts-file entries from an elevated PowerShell:
@@ -46,11 +56,19 @@ npm run local-dns:status
 npm run local-dns:remove
 ```
 
+Run the portless proxy together with the dev servers from an elevated PowerShell:
+
+```powershell
+npm run dev:local
+```
+
+The proxy listens on `127.0.0.1:80` and forwards frontend traffic to `127.0.0.1:5173`, API and app WebSocket traffic to `127.0.0.1:8787`, and Vite HMR WebSocket traffic to the frontend dev server. If port `80` is already taken, set `LOCAL_PROXY_PORT`, but URLs without a port require the proxy to own port `80`.
+
 Override the defaults with a comma-separated host list when needed:
 
 ```powershell
 $env:LOCAL_DNS_HOSTNAMES="mlbb.local,api.mlbb.local,obs.mlbb.local"
-npm run dev
+npm run dev:local
 ```
 
 Backend and frontend dev servers bind to `127.0.0.1` by default. For a deliberate LAN test session, set `HOST` and `FRONTEND_HOST` before starting the app.
@@ -108,6 +126,28 @@ npm run dev
 ```
 
 For AMD Windows inference, the worker exports `data/cv/models/mlbb-detect.pt` to `data/cv/models/mlbb-detect.onnx` and runs it with `onnxruntime-directml`. Training uses the Ultralytics PyTorch path. For NVIDIA GPU training/inference, install a CUDA-enabled PyTorch build into `data/cv/.venv` using the selector at https://pytorch.org/get-started/locally/.
+
+The backend keeps a bounded vision reflection log at `data/cache/vision-reflections.json`. It records noteworthy live vision frames, low-confidence/unknown frames, YOLO publish rejections, and native inference failures without changing match-state decisions. Inspect it with:
+
+```text
+GET /api/vision/reflections
+GET /api/vision/reflections?limit=25
+```
+
+Optional PaddleOCR support is available as a sidecar text reader for screen regions such as the top HUD, kill feed, scoreboard modal, draft header, and result banner. It is separate from YOLO: detection still comes from Ultralytics, while PaddleOCR only reads text from selected regions.
+
+```text
+GET  /api/vision/models/screen-ocr/status
+POST /api/vision/models/screen-ocr/install
+POST /api/vision/models/screen-ocr/infer
+```
+
+Screen OCR runs manually from CV Lab by default. To allow future live-capture OCR polling, start the backend with:
+
+```powershell
+$env:MLBB_ENABLE_SCREEN_OCR="1"
+npm run dev
+```
 
 ### WSL ROCm Runtime
 

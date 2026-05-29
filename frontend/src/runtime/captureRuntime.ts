@@ -27,6 +27,9 @@ type UltralyticsDetection = {
   bbox: [number, number, number, number];
   center: [number, number];
   source: "ultralytics-yolo";
+  trackId?: string;
+  trackAge?: number;
+  trackMissingFrames?: number;
 };
 type MinimapObjectDetection = {
   id: string;
@@ -34,6 +37,15 @@ type MinimapObjectDetection = {
   minimap: [number, number];
   confidence: number;
   source: "ultralytics-yolo";
+};
+type ScreenTextFact = {
+  region: string;
+  text: string;
+  confidence: number;
+  rect: [number, number, number, number];
+  words?: Array<{ text: string; confidence: number }>;
+  source: "paddleocr-screen";
+  observedAt: number;
 };
 export type MinimapMarkerDetection = {
   id: string;
@@ -58,6 +70,7 @@ export type LiveVisionFrame = {
     allyEquipment?: DetectedEquipmentItem[];
     yoloDetections?: UltralyticsDetection[];
     minimapObjects?: MinimapObjectDetection[];
+    screenTextFacts?: ScreenTextFact[];
   };
 };
 export type VisionStabilityState = {

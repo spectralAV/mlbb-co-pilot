@@ -49,3 +49,18 @@ Training and native inference use unmirrored fixed-layout frames. Horizontal/ver
 Draft badge augmentation uses extracted official `Atlas_ChooseLane02_add` and `Atlas_SkillIcon` sprites composited into real finalized draft geometry. Ultralytics locates a visible lane or spell badge; the existing official-reference matcher determines which lane or spell it is. Hero portrait/icon identities, minimap unit markers, objectives, and turrets still require separately verified real-frame object labels before they enter YOLO training.
 
 The local CV Lab stores hand-labelled frames under `data/cv/annotations` and syncs them into the active dataset. New classes are available for `turtle_respawn_timer`, `lord_respawn_timer`, `enemy_respawn_timer`, `ally_respawn_timer`, `minimap_objective_timer`, and `score_counter`. Detection locates these number-bearing regions; a dedicated OCR/digit reader and temporal validation layer must read and stabilize their values.
+
+PaddleOCR is optional and lives outside the YOLO detector. Timer OCR reads manually labelled timer crops, and screen OCR reads calibrated UI regions from a captured frame for text such as match time, score, kill feed, draft header, or result banners. Keep live OCR disabled unless needed; use CV Lab's manual Read Text action first because OCR is heavier than detection.
+
+## Result Screen Dataset
+
+Post-match result screens use a separate YOLO dataset under `data/cv/result-screens` so hero/result-card training does not pollute the live gameplay detector. The importer is built for the MIT-licensed `R-N/ml_yolo_dataset` repository.
+
+```powershell
+npm run cv:result:metadata
+npm run cv:result:import:sample
+npm run cv:result:status
+npm run cv:result:train
+```
+
+`cv:result:metadata` creates `dataset.yaml`, `classes.json`, and a manifest without downloading the full image set. `cv:result:import:sample` downloads a shuffled 500/150 train/validation subset for a quick local experiment. `cv:result:import:all` downloads the full roughly 900 MB source dataset. The imported classes cover result state, kills, duration, battle id, medals, AFK, and hero portraits up to Arlott; newer heroes need extra labels before this model can reliably read current result screens.

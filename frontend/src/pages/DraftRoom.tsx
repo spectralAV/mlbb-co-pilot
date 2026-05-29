@@ -219,6 +219,33 @@ export function DraftRoom() {
               <div className="mt-2 flex flex-wrap gap-1">{strategyData.bestPick.reasons?.map((reason: string) => <span className="chip" key={reason}>{reason}</span>)}</div>
             </div>
           </div>}
+          {strategyData.junglerRecommendations?.length > 0 && <div>
+            <div className="text-sm text-slate-400">Jungle plan</div>
+            <div className="mt-2 grid gap-2">
+              {strategyData.junglerRecommendations.slice(0, 3).map((option: any, index: number) => {
+                const hero = heroes.find((item) => item.id === option.heroId || item.name === option.hero);
+                const primary = index === 0;
+                return <div key={option.heroId ?? option.hero} className={`rounded-lg border p-3 ${primary ? "border-emerald-300/25 bg-emerald-500/10" : "border-white/10 bg-white/5"}`}>
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {hero?.icon && <img src={hero.icon} className="h-10 w-10 shrink-0 rounded-full object-cover" />}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <b className="truncate">{option.hero}</b>
+                          <span className="chip">{option.style}</span>
+                          {option.warningLevel !== "none" && <span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-100">{option.warningLevel} risk</span>}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">{option.boots?.boots} / {option.boots?.blessing} Retribution</div>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-emerald-200">{option.score}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">{option.reasons?.slice(0, 3).map((reason: string) => <span className="chip" key={reason}>{reason}</span>)}</div>
+                  {option.risks?.length > 0 && <p className="mt-2 text-xs text-amber-100">{option.risks[0]}</p>}
+                </div>;
+              })}
+            </div>
+          </div>}
           {strategyData.battleSpells?.recommendations?.length > 0 && <div>
             <div className="text-sm text-slate-400">Battle spell options</div>
             {strategyData.battleSpells.recommendations.map((option: any) => <div key={option.spell} className="mt-2 rounded-lg border border-white/10 bg-white/5 p-3"><b>{option.spell}</b><p className="text-sm text-slate-300">{option.reason}</p></div>)}

@@ -28,9 +28,24 @@ def read_results(value, candidates):
         score = next((value.get(key) for key in score_keys if isinstance(value.get(key), (int, float))), None)
         if text:
             candidates.append((text, float(score or 0)))
-        for item in value.values():
+        coordinate_keys = {
+            "rec_boxes",
+            "rec_polys",
+            "dt_boxes",
+            "dt_polys",
+            "input_img",
+            "page_index",
+            "model_settings",
+            "rec_scores",
+            "rec_texts",
+        }
+        for key, item in value.items():
+            if key in coordinate_keys:
+                continue
             read_results(item, candidates)
     elif isinstance(value, (list, tuple)):
+        if value and all(isinstance(item, (int, float)) for item in value):
+            return
         if len(value) >= 2 and isinstance(value[-1], (list, tuple)) and len(value[-1]) >= 2:
             text, score = value[-1][0], value[-1][1]
             if isinstance(text, str) and isinstance(score, (int, float)):
@@ -49,9 +64,17 @@ def infer(_project_root: Path, image: Path, timer_type: str):
     try:
         reader = PaddleOCR(
             lang="en",
+            ocr_version="PP-OCRv5",
+            text_detection_model_name="PP-OCRv5_mobile_det",
+            text_recognition_model_name="en_PP-OCRv5_mobile_rec",
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
+            device="cpu",
+            engine="paddle_static",
+            enable_hpi=False,
+            enable_mkldnn=False,
+            cpu_threads=2,
         )
         output = reader.predict(str(image))
     except TypeError:

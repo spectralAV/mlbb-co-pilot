@@ -1,0 +1,44 @@
+{
+  "source": {
+    "repo": "R-N/ml_yolo_dataset",
+    "ref": "main",
+    "url": "https://github.com/R-N/ml_yolo_dataset",
+    "license": "MIT",
+    "scope": "Mobile Legends post-match result screens"
+  },
+  "importedAt": "2026-05-29T02:33:19.071800+00:00",
+  "datasetRoot": "data/cv/result-screens",
+  "classes": {
+    "count": 133,
+    "first": "result_victory",
+    "last": "Arlott"
+  },
+  "downloaded": true,
+  "sourceCounts": {
+    "train": 4229,
+    "val": 1100
+  },
+  "selected": {
+    "train": 2,
+    "val": 2
+  },
+  "imported": {
+    "train": {
+      "images": 2,
+      "labels": 2,
+      "skippedImages": 0,
+      "skippedLabels": 0
+    },
+    "val": {
+      "images": 2,
+      "labels": 2,
+      "skippedImages": 0,
+      "skippedLabels": 0
+    }
+  },
+  "notes": [
+    "This dataset is intentionally separate from the live gameplay detector.",
+    "Source hero classes stop at Arlott; newer MLBB heroes require additional labels before broad result-screen hero recognition.",
+    "The result-screen model should detect UI regions and hero/result objects; OCR should still read numbers/text such as battle id and duration."
+  ]
+}

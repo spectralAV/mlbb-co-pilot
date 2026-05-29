@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects, publishNativeObsDetections } from "../backend/src/vision/ultralyticsVision.ts";
+import {
+  mapUltralyticsMinimapMarkers,
+  mapUltralyticsMinimapObjects,
+  publishNativeObsDetections,
+  resetUltralyticsTracking,
+  stabilizeUltralyticsDetections,
+} from "../backend/src/vision/ultralyticsVision.ts";
 import { getMatchState, resetMatchState } from "../backend/src/state/matchState.ts";
 
 test("ultralytics hero marker detections project into normalized minimap coordinates", () => {
@@ -70,6 +76,70 @@ test("ultralytics maps objective and turret objects only inside calibrated minim
   assert.equal(objects.length, 1);
   assert.equal(objects[0].objectType, "lord");
   assert.deepEqual(objects[0].minimap.map((value) => Number(value.toFixed(4))), [0.25, 0.5]);
+});
+
+test("ultralytics tracker keeps stable ids for matching detections", () => {
+  resetUltralyticsTracking("tracker-test");
+  const first = stabilizeUltralyticsDetections([{
+    classId: 11,
+    className: "enemy_hero_marker",
+    confidence: 0.91,
+    bbox: [0.08, 0.08, 0.02, 0.02],
+    center: [0.09, 0.09],
+    source: "ultralytics-yolo",
+  }], { streamId: "tracker-test", now: 1000 });
+  const second = stabilizeUltralyticsDetections([{
+    classId: 11,
+    className: "enemy_hero_marker",
+    confidence: 0.93,
+    bbox: [0.085, 0.08, 0.02, 0.02],
+    center: [0.095, 0.09],
+    source: "ultralytics-yolo",
+  }], { streamId: "tracker-test", now: 1800, smoothing: 0.5 });
+
+  assert.equal(second[0].trackId, first[0].trackId);
+  assert.equal(second[0].trackAge, 2);
+  assert.equal(second[0].trackMissingFrames, 0);
+  assert.ok(second[0].center[0] > first[0].center[0]);
+  assert.ok(second[0].center[0] < 0.095);
+});
+
+test("ultralytics minimap ids prefer stable track ids", () => {
+  resetUltralyticsTracking("marker-id-test");
+  const tracked = stabilizeUltralyticsDetections([{
+    classId: 10,
+    className: "ally_hero_marker",
+    confidence: 0.97,
+    bbox: [0.08, 0.08, 0.01, 0.01],
+    center: [0.02521 + 0.146359 * 0.5, 0.326563 * 0.25],
+    source: "ultralytics-yolo",
+  }], { streamId: "marker-id-test", now: 1000 });
+  const markers = mapUltralyticsMinimapMarkers(tracked);
+
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0].id, tracked[0].trackId);
+});
+
+test("ultralytics tracker expires stale tracks instead of reviving old ids", () => {
+  resetUltralyticsTracking("expiry-test");
+  const first = stabilizeUltralyticsDetections([{
+    classId: 13,
+    className: "lord",
+    confidence: 0.91,
+    bbox: [0.3, 0.2, 0.02, 0.02],
+    center: [0.31, 0.21],
+    source: "ultralytics-yolo",
+  }], { streamId: "expiry-test", now: 1000, maxAgeMs: 100 });
+  const second = stabilizeUltralyticsDetections([{
+    classId: 13,
+    className: "lord",
+    confidence: 0.92,
+    bbox: [0.3, 0.2, 0.02, 0.02],
+    center: [0.31, 0.21],
+    source: "ultralytics-yolo",
+  }], { streamId: "expiry-test", now: 1200, maxAgeMs: 100 });
+
+  assert.notEqual(second[0].trackId, first[0].trackId);
 });
 
 test("native OBS Ultralytics facts reach MatchState without a browser capture runtime", () => {

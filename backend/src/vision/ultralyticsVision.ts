@@ -8,6 +8,7 @@ import { ingestDraftRecognition } from "./draftRecognition.js";
 import { detectNativeDraftVisualContext } from "./nativeDraftContext.js";
 import { firstNormalizedRegion, getActiveObsRegions, type NormalizedRect } from "../services/obsCoachState.js";
 import { recognizeTimerDetections, type TimerFact } from "./timerRecognition.js";
+import { recordVisionReflection } from "./visionReflection.js";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(process.cwd(), "..");
@@ -29,6 +30,19 @@ export type UltralyticsDetection = {
   bbox: [number, number, number, number];
   center: [number, number];
   source: "ultralytics-yolo";
+  trackId?: string;
+  trackAge?: number;
+  trackMissingFrames?: number;
+};
+
+export type UltralyticsTrackingOptions = {
+  streamId?: string;
+  now?: number;
+  iouThreshold?: number;
+  maxAgeMs?: number;
+  maxMissingFrames?: number;
+  maxCenterDistance?: number;
+  smoothing?: number;
 };
 
 export type UltralyticsDeviceStatus = {
@@ -101,6 +115,23 @@ type WorkerRequest = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
+type UltralyticsTrack = {
+  id: string;
+  className: string;
+  bbox: [number, number, number, number];
+  center: [number, number];
+  confidence: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  missingFrames: number;
+  hits: number;
+};
+
+type UltralyticsTrackerState = {
+  sequence: number;
+  tracks: UltralyticsTrack[];
+};
+
 let worker: ChildProcessWithoutNullStreams | null = null;
 let workerWeightsMtimeMs: number | null = null;
 let workerStdout = "";
@@ -111,6 +142,7 @@ let pendingObsFrame: { image: Buffer; source: string; receivedAt: number } | nul
 let obsProcessing = false;
 let lastStatusCheckAt = 0;
 let cachedModelAvailable = false;
+const ultralyticsTrackers = new Map<string, UltralyticsTrackerState>();
 const nativeObsStatus: NativeObsUltralyticsStatus = {
   mode: "backend-native-obs",
   active: false,
@@ -130,6 +162,184 @@ const nativeObsStatus: NativeObsUltralyticsStatus = {
 function numberFromEnv(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function resetUltralyticsTracking(streamId?: string) {
+  if (streamId) ultralyticsTrackers.delete(streamId);
+  else ultralyticsTrackers.clear();
+}
+
+export function stabilizeUltralyticsDetections(detections: UltralyticsDetection[], options: UltralyticsTrackingOptions = {}) {
+  const tracking = resolveTrackingOptions(options);
+  const state = getTrackerState(tracking.streamId);
+  state.tracks = state.tracks.filter((track) => isLiveTrack(track, tracking.now, tracking.maxAgeMs, tracking.maxMissingFrames));
+
+  if (!detections.length) {
+    markMissingTracks(state.tracks);
+    state.tracks = state.tracks.filter((track) => isLiveTrack(track, tracking.now, tracking.maxAgeMs, tracking.maxMissingFrames));
+    return detections;
+  }
+
+  const assignedTracks = new Set<UltralyticsTrack>();
+  const stabilized = new Map<number, UltralyticsDetection>();
+  const ordered = detections
+    .map((detection, index) => ({ detection, index }))
+    .sort((left, right) => right.detection.confidence - left.detection.confidence);
+
+  for (const { detection, index } of ordered) {
+    const track = findBestTrack(detection, state.tracks, assignedTracks, tracking);
+    if (track) {
+      const bbox = blendBox(track.bbox, detection.bbox, tracking.smoothing);
+      const center = blendPoint(track.center, detection.center, tracking.smoothing);
+      track.bbox = bbox;
+      track.center = center;
+      track.confidence = detection.confidence;
+      track.lastSeenAt = tracking.now;
+      track.missingFrames = 0;
+      track.hits += 1;
+      assignedTracks.add(track);
+      stabilized.set(index, {
+        ...detection,
+        bbox,
+        center,
+        trackId: track.id,
+        trackAge: track.hits,
+        trackMissingFrames: 0,
+      });
+      continue;
+    }
+
+    const created = createTrack(state, detection, tracking.now);
+    assignedTracks.add(created);
+    stabilized.set(index, {
+      ...detection,
+      trackId: created.id,
+      trackAge: created.hits,
+      trackMissingFrames: 0,
+    });
+  }
+
+  for (const track of state.tracks) {
+    if (!assignedTracks.has(track)) track.missingFrames += 1;
+  }
+  state.tracks = state.tracks
+    .filter((track) => isLiveTrack(track, tracking.now, tracking.maxAgeMs, tracking.maxMissingFrames))
+    .sort((left, right) => right.lastSeenAt - left.lastSeenAt || right.confidence - left.confidence)
+    .slice(0, 128);
+  return detections.map((detection, index) => stabilized.get(index) ?? detection);
+}
+
+function resolveTrackingOptions(options: UltralyticsTrackingOptions) {
+  return {
+    streamId: options.streamId ?? "browser-capture",
+    now: options.now ?? Date.now(),
+    iouThreshold: clamp01(options.iouThreshold ?? numberFromEnv(process.env.ULTRALYTICS_TRACK_IOU, 0.18)),
+    maxAgeMs: Math.max(0, options.maxAgeMs ?? numberFromEnv(process.env.ULTRALYTICS_TRACK_MAX_AGE_MS, 3000)),
+    maxMissingFrames: Math.max(0, Math.floor(options.maxMissingFrames ?? numberFromEnv(process.env.ULTRALYTICS_TRACK_MAX_MISSING_FRAMES, 2))),
+    maxCenterDistance: Math.max(0, options.maxCenterDistance ?? numberFromEnv(process.env.ULTRALYTICS_TRACK_CENTER_DISTANCE, 0.035)),
+    smoothing: clamp01(options.smoothing ?? numberFromEnv(process.env.ULTRALYTICS_TRACK_SMOOTHING, 0.65)),
+  };
+}
+
+function getTrackerState(streamId: string) {
+  const existing = ultralyticsTrackers.get(streamId);
+  if (existing) return existing;
+  const created: UltralyticsTrackerState = { sequence: 0, tracks: [] };
+  ultralyticsTrackers.set(streamId, created);
+  return created;
+}
+
+function markMissingTracks(tracks: UltralyticsTrack[]) {
+  for (const track of tracks) track.missingFrames += 1;
+}
+
+function isLiveTrack(track: UltralyticsTrack, now: number, maxAgeMs: number, maxMissingFrames: number) {
+  return now - track.lastSeenAt <= maxAgeMs && track.missingFrames <= maxMissingFrames;
+}
+
+function findBestTrack(
+  detection: UltralyticsDetection,
+  tracks: UltralyticsTrack[],
+  assignedTracks: Set<UltralyticsTrack>,
+  options: ReturnType<typeof resolveTrackingOptions>,
+) {
+  let best: UltralyticsTrack | null = null;
+  let bestScore = 0;
+  for (const track of tracks) {
+    if (assignedTracks.has(track) || track.className !== detection.className) continue;
+    const overlap = bboxIou(track.bbox, detection.bbox);
+    const distanceScore = centerDistanceScore(track, detection, options.maxCenterDistance);
+    if (overlap < options.iouThreshold && distanceScore <= 0) continue;
+    const score = Math.max(overlap, distanceScore * 0.9);
+    if (score > bestScore) {
+      best = track;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function createTrack(state: UltralyticsTrackerState, detection: UltralyticsDetection, now: number): UltralyticsTrack {
+  const track: UltralyticsTrack = {
+    id: nextTrackId(state, detection.className),
+    className: detection.className,
+    bbox: detection.bbox,
+    center: detection.center,
+    confidence: detection.confidence,
+    firstSeenAt: now,
+    lastSeenAt: now,
+    missingFrames: 0,
+    hits: 1,
+  };
+  state.tracks.push(track);
+  return track;
+}
+
+function nextTrackId(state: UltralyticsTrackerState, className: string) {
+  const safeClass = className.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "object";
+  state.sequence += 1;
+  return `yolo-track-${safeClass}-${state.sequence}`;
+}
+
+function bboxIou(left: [number, number, number, number], right: [number, number, number, number]) {
+  const leftRight = left[0] + left[2];
+  const leftBottom = left[1] + left[3];
+  const rightRight = right[0] + right[2];
+  const rightBottom = right[1] + right[3];
+  const intersectionWidth = Math.max(0, Math.min(leftRight, rightRight) - Math.max(left[0], right[0]));
+  const intersectionHeight = Math.max(0, Math.min(leftBottom, rightBottom) - Math.max(left[1], right[1]));
+  const intersectionArea = intersectionWidth * intersectionHeight;
+  if (intersectionArea <= 0) return 0;
+  const unionArea = left[2] * left[3] + right[2] * right[3] - intersectionArea;
+  return unionArea > 0 ? intersectionArea / unionArea : 0;
+}
+
+function centerDistanceScore(track: UltralyticsTrack, detection: UltralyticsDetection, fallbackDistance: number) {
+  const distance = Math.hypot(track.center[0] - detection.center[0], track.center[1] - detection.center[1]);
+  const sizeLimit = Math.max(track.bbox[2], track.bbox[3], detection.bbox[2], detection.bbox[3]) * 2.5;
+  const limit = Math.max(fallbackDistance, sizeLimit);
+  if (limit <= 0 || distance > limit) return 0;
+  return 1 - distance / limit;
+}
+
+function blendBox(previous: [number, number, number, number], current: [number, number, number, number], currentWeight: number): [number, number, number, number] {
+  return [
+    blendNumber(previous[0], current[0], currentWeight),
+    blendNumber(previous[1], current[1], currentWeight),
+    blendNumber(previous[2], current[2], currentWeight),
+    blendNumber(previous[3], current[3], currentWeight),
+  ];
+}
+
+function blendPoint(previous: [number, number], current: [number, number], currentWeight: number): [number, number] {
+  return [
+    blendNumber(previous[0], current[0], currentWeight),
+    blendNumber(previous[1], current[1], currentWeight),
+  ];
+}
+
+function blendNumber(previous: number, current: number, currentWeight: number) {
+  return previous * (1 - currentWeight) + current * currentWeight;
 }
 
 export async function getUltralyticsStatus(): Promise<UltralyticsStatus> {
@@ -191,10 +401,10 @@ export async function trainUltralyticsModel(options: { epochs?: number; imageSiz
   return result;
 }
 
-export async function inferUltralyticsFrame(image: Buffer, confidence = 0.55) {
+export async function inferUltralyticsFrame(image: Buffer, confidence = 0.55, streamId = "browser-capture") {
   const status = await getUltralyticsStatus();
   if (!status.packageAvailable || !status.modelAvailable) return { ...status, ready: false, detections: [] as UltralyticsDetection[] };
-  const detections = await requestWorkerInference(image, confidence);
+  const detections = stabilizeUltralyticsDetections(await requestWorkerInference(image, confidence), { streamId });
   return { ...status, ready: true, detections };
 }
 
@@ -204,7 +414,7 @@ export function mapUltralyticsMinimapMarkers(detections: UltralyticsDetection[],
       (detection.className === "ally_hero_marker" || detection.className === "enemy_hero_marker") &&
       inMinimap(detection.center, minimap))
     .map((detection, index) => ({
-      id: `yolo-${detection.className}-${index}`,
+      id: detection.trackId ?? `yolo-${detection.className}-${index}`,
       side: detection.className === "enemy_hero_marker" ? "enemy" as const : "ally" as const,
       markerClass: "ultralytics-yolo" as const,
       minimap: toMinimapPoint(detection.center, minimap),
@@ -217,7 +427,7 @@ export function mapUltralyticsMinimapObjects(detections: UltralyticsDetection[],
   return detections
     .filter((detection) => objectClasses.has(detection.className) && inMinimap(detection.center, minimap))
     .map((detection, index) => ({
-      id: `yolo-map-${detection.className}-${index}`,
+      id: detection.trackId ?? `yolo-map-${detection.className}-${index}`,
       objectType: detection.className as "turtle" | "lord" | "ally_turret" | "enemy_turret",
       minimap: toMinimapPoint(detection.center, minimap),
       confidence: clamp01(detection.confidence),
@@ -239,8 +449,22 @@ export function queueNativeObsUltralyticsFrame(image: Buffer, source = "obs-scrc
 }
 
 export function publishNativeObsDetections(detections: UltralyticsDetection[], source = "obs-scrcpy-plugin", calibratedRegions: Record<string, unknown> = {}, timerFacts: TimerFact[] = []) {
-  const accepted = detections.filter((detection) => Number(detection.confidence) >= 0.55);
-  if (!accepted.length) return null;
+  const confident = detections.filter((detection) => Number(detection.confidence) >= 0.55);
+  const accepted = confident.some((detection) => detection.trackId)
+    ? confident
+    : stabilizeUltralyticsDetections(confident, { streamId: `publish:${source}` });
+  if (!accepted.length) {
+    void recordVisionReflection({
+      category: "ultralytics",
+      outcome: "rejected",
+      source,
+      reason: detections.length ? "confidence_below_publish_threshold" : "no_detections",
+      detectionCount: detections.length,
+      labels: detections.map((detection) => detection.className),
+      metadata: { threshold: 0.55 },
+    });
+    return null;
+  }
   const latestVision = getLatestLiveVision();
   const existing = latestVision && Date.now() - latestVision.timestamp < 2500 ? latestVision : null;
   const surface = detectedYoloSurface(accepted);
@@ -287,7 +511,7 @@ async function processNativeObsQueue() {
       nativeObsStatus.active = true;
       const startedAt = Date.now();
       try {
-        const detections = await requestWorkerInference(frame.image, 0.55);
+        const detections = stabilizeUltralyticsDetections(await requestWorkerInference(frame.image, 0.55), { streamId: `native:${frame.source}` });
         nativeObsStatus.active = true;
         nativeObsStatus.processedFrames += 1;
         nativeObsStatus.lastInferenceAt = new Date().toISOString();
@@ -302,6 +526,12 @@ async function processNativeObsQueue() {
         publishNativeObsDetections(detections, frame.source, calibratedRegions, timerFacts);
       } catch (error) {
         nativeObsStatus.error = error instanceof Error ? error.message : "Native OBS inference failed.";
+        void recordVisionReflection({
+          category: "ultralytics",
+          outcome: "failed",
+          source: frame.source,
+          reason: nativeObsStatus.error,
+        });
       }
     }
   } finally {

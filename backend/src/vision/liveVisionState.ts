@@ -2,7 +2,9 @@ import { eventBus } from "../event-bus/eventBus.js";
 import { ingestLiveReasoning } from "../engines/liveReasoningEngine.js";
 import { DETECTED_FACT_CONFIDENCE, getMatchState, updateMatchVision } from "../state/matchState.js";
 import { updateMinimapMonitor, type MinimapMonitorSnapshot } from "./minimapMonitor.js";
+import type { ScreenTextFact } from "./screenTextRecognition.js";
 import type { TimerFact } from "./timerRecognition.js";
+import { recordVisionReflection } from "./visionReflection.js";
 
 export type VisionScreenState =
   | "unknown"
@@ -36,6 +38,9 @@ type ModelDetectionFact = {
   bbox: [number, number, number, number];
   center: [number, number];
   source: "ultralytics-yolo";
+  trackId?: string;
+  trackAge?: number;
+  trackMissingFrames?: number;
 };
 
 type MapObjectFact = {
@@ -80,6 +85,7 @@ type VisionFrameInput = {
     yoloDetections?: ModelDetectionFact[];
     minimapObjects?: MapObjectFact[];
     timerFacts?: TimerFact[];
+    screenTextFacts?: ScreenTextFact[];
   };
 };
 
@@ -110,6 +116,7 @@ export type LiveVisionSnapshot = {
     minimapObjects: MapObjectFact[];
     mapMonitor: MinimapMonitorSnapshot;
     timerFacts: TimerFact[];
+    screenTextFacts: ScreenTextFact[];
   };
   directorScene: VisionDirectorScene;
   updatedAt: string;
@@ -183,6 +190,7 @@ export function ingestLiveVisionFrame(input: VisionFrameInput) {
       minimapObjects,
       mapMonitor,
       timerFacts: normalizeTimerFacts(input.signals?.timerFacts),
+      screenTextFacts: normalizeScreenTextFacts(input.signals?.screenTextFacts),
     },
     directorScene: "main",
     updatedAt: new Date().toISOString()
@@ -192,6 +200,7 @@ export function ingestLiveVisionFrame(input: VisionFrameInput) {
   latest = snapshot;
   updateMatchVision(snapshot, reasoning);
   eventBus.emit("vision_updated", snapshot);
+  reflectLiveVisionSnapshot(snapshot);
   return snapshot;
 }
 
@@ -291,14 +300,20 @@ function normalizeEquipmentFacts(value: unknown, side: "ally" | "enemy"): Equipm
 function normalizeModelDetections(value: unknown): ModelDetectionFact[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((fact: any) => ({
-      classId: Number(fact?.classId),
-      className: String(fact?.className ?? "").trim(),
-      confidence: clamp01(fact?.confidence),
-      bbox: normalizeBox(fact?.bbox),
-      center: normalizePoint(fact?.center),
-      source: "ultralytics-yolo" as const,
-    }))
+    .map((fact: any) => {
+      const trackId = String(fact?.trackId ?? "").trim();
+      return {
+        classId: Number(fact?.classId),
+        className: String(fact?.className ?? "").trim(),
+        confidence: clamp01(fact?.confidence),
+        bbox: normalizeBox(fact?.bbox),
+        center: normalizePoint(fact?.center),
+        source: "ultralytics-yolo" as const,
+        ...(trackId ? { trackId } : {}),
+        trackAge: optionalNumber(fact?.trackAge),
+        trackMissingFrames: optionalNumber(fact?.trackMissingFrames),
+      };
+    })
     .filter((fact) =>
       Number.isInteger(fact.classId) &&
       Boolean(fact.className) &&
@@ -307,6 +322,44 @@ function normalizeModelDetections(value: unknown): ModelDetectionFact[] {
       fact.confidence >= DETECTED_FACT_CONFIDENCE)
     .map((fact) => ({ ...fact, bbox: fact.bbox!, center: fact.center! }))
     .slice(0, 64);
+}
+
+function reflectLiveVisionSnapshot(snapshot: LiveVisionSnapshot) {
+  const detectionCount = snapshot.signals.yoloDetections.length;
+  const markerCount = snapshot.minimapMarkers.length;
+  const objectCount = snapshot.signals.minimapObjects.length;
+  const timerFactCount = snapshot.signals.timerFacts.length;
+  const screenTextFactCount = snapshot.signals.screenTextFacts.length;
+  const hasModelFacts = detectionCount > 0 || markerCount > 0 || objectCount > 0 || timerFactCount > 0 || screenTextFactCount > 0;
+  const rejected = snapshot.screen === "unknown" || snapshot.confidence < DETECTED_FACT_CONFIDENCE;
+  if (!hasModelFacts && !rejected) return;
+  const labels = [
+    ...snapshot.signals.yoloDetections.map((detection) => detection.className),
+    ...snapshot.signals.minimapObjects.map((object) => object.objectType),
+    ...snapshot.signals.timerFacts.map((fact) => fact.timerType),
+    ...snapshot.signals.screenTextFacts.map((fact) => fact.region),
+  ];
+  void recordVisionReflection({
+    category: "live_vision",
+    outcome: rejected ? "rejected" : "accepted",
+    source: snapshot.source,
+    screen: snapshot.screen,
+    confidence: snapshot.confidence,
+    reason: rejected
+      ? snapshot.screen === "unknown" ? "unknown_screen" : "confidence_below_trust_threshold"
+      : "model_facts_ingested",
+    timestamp: snapshot.timestamp,
+    detectionCount,
+    markerCount,
+    objectCount,
+    timerFactCount,
+    screenTextFactCount,
+    labels,
+    metadata: {
+      directorScene: snapshot.directorScene,
+      evidence: snapshot.evidence.slice(0, 6),
+    },
+  });
 }
 
 function normalizeMapObjects(value: unknown): MapObjectFact[] {
@@ -344,6 +397,35 @@ function normalizeTimerFacts(value: unknown): TimerFact[] {
       Number.isFinite(fact.confirmedAt) &&
       (Number.isFinite(fact.seconds) || Number.isFinite(fact.value)))
     .map((fact) => ({ ...fact, timerType: fact.timerType as TimerFact["timerType"], source: "timer-ocr" as const }))
+    .slice(0, 8);
+}
+
+function normalizeScreenTextFacts(value: unknown): ScreenTextFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((fact: any) => ({
+      region: String(fact?.region ?? "").trim(),
+      text: String(fact?.text ?? "").replace(/\s+/g, " ").trim(),
+      confidence: clamp01(fact?.confidence),
+      rect: normalizeBox(fact?.rect),
+      words: Array.isArray(fact?.words)
+        ? fact.words.map((word: any) => ({
+          text: String(word?.text ?? "").replace(/\s+/g, " ").trim(),
+          confidence: clamp01(word?.confidence),
+          bbox: word?.bbox,
+        })).filter((word: any) => word.text).slice(0, 16)
+        : [],
+      source: String(fact?.source ?? ""),
+      observedAt: Number(fact?.observedAt),
+    }))
+    .filter((fact) =>
+      Boolean(fact.region) &&
+      Boolean(fact.text) &&
+      fact.source === "paddleocr-screen" &&
+      fact.rect !== null &&
+      fact.confidence >= 0.45 &&
+      Number.isFinite(fact.observedAt))
+    .map((fact) => ({ ...fact, rect: fact.rect!, source: "paddleocr-screen" as const }))
     .slice(0, 8);
 }
 
