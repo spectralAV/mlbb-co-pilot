@@ -1,16 +1,29 @@
 {
   "state": {
-    "phase": "pick",
+    "phase": "ban",
     "timestamp": 1740000000000,
     "allyPicks": [
-      { "heroId": 11, "heroName": "Confirmed", "confidence": 0.92, "source": "draft-slot" },
-      { "heroId": 12, "heroName": "Too Weak", "confidence": 0.42, "source": "draft-slot" }
+      { "heroId": 14, "heroName": "Confirmed Pick", "slot": 3, "confidence": 0.97, "source": "draft-pick-portrait" }
     ],
     "enemyPicks": [
       { "heroId": 13, "heroName": "Manual", "confidence": 1, "source": "manual" }
     ],
-    "allyBans": [],
-    "enemyBans": []
+    "allyBans": [
+      { "heroId": 11, "heroName": "Confirmed Ban", "confidence": 0.92, "source": "draft-ban-icon" },
+      { "heroId": 12, "heroName": "Too Weak", "confidence": 0.42, "source": "draft-ban-icon" }
+    ],
+    "enemyBans": [],
+    "allySpells": [
+      { "spell": "Flicker", "slot": 3, "confidence": 0.93, "source": "draft-battle-spell-icon" },
+      { "spell": "Purify", "slot": 2, "confidence": 0.38, "source": "draft-battle-spell-icon" }
+    ],
+    "allyLanes": [
+      { "lane": "gold", "slot": 3, "confidence": 0.94, "source": "draft-lane-icon" },
+      { "lane": "jungle", "slot": 2, "confidence": 0.41, "source": "draft-lane-icon" }
+    ],
+    "selectedLane": { "value": "gold", "confidence": 0.9, "source": "draft-lane-icon" },
+    "selfSlot": { "value": 3, "confidence": 0.91, "source": "draft-self-highlight" },
+    "firstPickSide": { "value": "enemy", "confidence": 0.88, "source": "draft-first-pick-indicator" }
   },
   "analysis": { "bestPick": { "hero": "Confirmed Counter", "score": 83 } }
 }

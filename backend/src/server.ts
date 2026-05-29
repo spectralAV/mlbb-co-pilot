@@ -1,8 +1,9 @@
 import Fastify from "fastify";
+import { readFile } from "node:fs/promises";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
-import { PORT } from "./config.js";
+import { FRONTEND_PORT, HOST, LOCAL_DNS_HOSTNAMES, PORT } from "./config.js";
 import { cache } from "./services/cacheService.js";
 import { semanticRegistry } from "./services/semanticRegistry.js";
 import { mlbbIo } from "./services/mlbbIoService.js";
@@ -21,9 +22,22 @@ import { getMapRuntimeManifest, getMinimapProjection, getZones, mapPointToZone, 
 import { installModule, listModules, sdkDescription } from "./module-runtime/moduleRuntime.js";
 import { getLatestDraftRecognition, ingestDraftRecognition } from "./vision/draftRecognition.js";
 import { getHeroRecognitionManifest, getHeroRecognitionReference, heroRecognitionScenes } from "./vision/heroRecognition.js";
+import { getLaneRecognitionManifest, getLaneRecognitionReference } from "./vision/laneRecognition.js";
+import { compileSkinPortraitSignatures, fetchSkinPortrait, getSkinPortraitManifest, getSkinSignatureManifest, getSkinSignatureStatus, syncSkinPortraitManifest } from "./vision/skinPortraitRecognition.js";
 import { getLatestLiveVision, ingestLiveVisionFrame } from "./vision/liveVisionState.js";
+import { getScreenStateModel, getScreenStateTrainingStatus, trainScreenStateModel } from "./vision/screenStateTraining.js";
+import { getDraftHeroModel, getDraftHeroModelStatus, trainDraftHeroModel } from "./vision/draftHeroModelTraining.js";
 import { getLatestLiveReasoning, ingestLiveReasoning } from "./engines/liveReasoningEngine.js";
 import { getMatchState } from "./state/matchState.js";
+import { getPlayerProfile, savePlayerProfile } from "./services/playerProfile.js";
+import { getBattleSpellRecognitionManifest, getBattleSpellRecognitionReference } from "./vision/battleSpellRecognition.js";
+import { getEquipmentRecognitionManifest, getEquipmentRecognitionReference } from "./vision/equipmentRecognition.js";
+import { getUltralyticsStatus, inferUltralyticsFrame, installUltralyticsRuntime, mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects, trainUltralyticsModel } from "./vision/ultralyticsVision.js";
+import { firstNormalizedRegion, getActiveObsRegions } from "./services/obsCoachState.js";
+import { readMlbbAdbHeroHead, readMlbbAdbTexture } from "./services/mlbbAdbAssets.js";
+import { annotationImage, deleteAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset } from "./vision/cvAnnotation.js";
+import { getDinoIdentityStatus, indexDinoReferences, matchDinoIdentity } from "./vision/dinoIdentity.js";
+import { getTimerOcrStatus, inferTimerCrop, installTimerOcrRuntime, timerClasses } from "./vision/timerRecognition.js";
 
 const app = Fastify({ logger: true });
 
@@ -35,7 +49,23 @@ process.on("uncaughtException", (error) => {
   app.log.fatal({ error }, "Uncaught exception");
 });
 
-await app.register(cors, { origin: true });
+const allowedCorsOrigins = new Set([
+  `http://localhost:${FRONTEND_PORT}`,
+  `http://127.0.0.1:${FRONTEND_PORT}`,
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+  ...LOCAL_DNS_HOSTNAMES.flatMap((hostname) => [
+    `http://${hostname}:${FRONTEND_PORT}`,
+    `http://${hostname}:${PORT}`
+  ])
+]);
+
+await app.register(cors, {
+  origin(origin, callback) {
+    if (!origin || allowedCorsOrigins.has(origin)) return callback(null, true);
+    return callback(new Error(`CORS origin not allowed: ${origin}`), false);
+  }
+});
 await app.register(multipart);
 await app.register(websocket);
 await app.register(semanticRoutes);
@@ -58,6 +88,8 @@ app.get("/api/cache/:name", async (req) => { const { name } = req.params as {nam
 app.get("/api/cache/metadata", async () => ({ success:true, data: await cache.read("metadata.json", {}) }));
 
 app.post("/api/draft/analyze", async (req) => { const result = await analyzeDraft(req.body as any); eventBus.emit("draft_updated", result); return {success:true,data:result}; });
+app.get("/api/profile", async () => ({ success: true, data: await getPlayerProfile() }));
+app.post("/api/profile", async (req) => ({ success: true, data: await savePlayerProfile(req.body as any) }));
 app.post("/api/draft/recommend", async (req) => { const body=req.body as any; return {success:true,data: await mlbbIo.combinedRecommendations(body.allyHeroes??[], body.enemyHeroes??[])}; });
 app.post("/api/draft/counters", async (req) => { const body=req.body as any; return {success:true,data: await mlbbIo.counterPickSuggestions(body.enemyHeroes??[])}; });
 app.post("/api/draft/synergy", async (req) => { const body=req.body as any; const heroes = await cache.read<any[]>("compiled-heroes.json", []); const fallback = heroes.length ? heroes : await cache.read<any[]>("heroes.json", []); return {success:true,data:suggestHeroSynergies(fallback, body.allyHeroes??[], { lane: body.lane, role: body.role }).slice(0, 12)}; });
@@ -76,11 +108,203 @@ app.get("/api/vision/heroes/icon/:id", async (req, reply) => {
     .type(image.headers.get("content-type") ?? "image/png")
     .send(data);
 });
+app.get("/api/vision/heroes/draft-head/:id", async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const image = Number.isFinite(id) ? await readMlbbAdbHeroHead(id) : null;
+  if (!image) return reply.code(404).send({ success: false, error: "ADB draft head reference unavailable" });
+  return reply
+    .header("cache-control", "private, max-age=3600")
+    .type("image/png")
+    .send(image);
+});
+app.get("/api/vision/heroes/portrait/:id", async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const hero = Number.isFinite(id) ? await getHeroRecognitionReference(id) : null;
+  if (!hero?.portraitUrl) return reply.code(404).send({ success: false, error: "Unknown hero portrait reference" });
+  const image = await fetch(hero.portraitUrl);
+  if (!image.ok) return reply.code(502).send({ success: false, error: "Hero portrait unavailable" });
+  const data = Buffer.from(await image.arrayBuffer());
+  return reply
+    .header("cache-control", "public, max-age=86400")
+    .type(image.headers.get("content-type") ?? "image/png")
+    .send(data);
+});
+app.get("/api/vision/skins/manifest", async () => ({ success: true, data: await getSkinPortraitManifest() }));
+app.post("/api/vision/skins/sync", async () => ({ success: true, data: await syncSkinPortraitManifest() }));
+app.get("/api/vision/skins/signatures/status", async () => ({ success: true, data: await getSkinSignatureStatus() }));
+app.get("/api/vision/skins/signatures", async () => ({ success: true, data: await getSkinSignatureManifest() }));
+app.post("/api/vision/skins/signatures/compile", async () => {
+  await compileSkinPortraitSignatures();
+  return { success: true, data: await getSkinSignatureStatus() };
+});
+app.get("/api/vision/skins/portrait/:heroId/:skinId", async (req, reply) => {
+  const { heroId, skinId } = req.params as { heroId: string; skinId: string };
+  const image = await fetchSkinPortrait(Number(heroId), skinId);
+  if (!image) return reply.code(404).send({ success: false, error: "Unknown skin portrait reference" });
+  return reply
+    .header("cache-control", "public, max-age=86400")
+    .type(image.contentType)
+    .send(image.data);
+});
+app.get("/api/vision/lanes/manifest", async () => ({ success:true, data: await getLaneRecognitionManifest() }));
+app.get("/api/vision/lanes/icon/:id", async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const lane = Number.isFinite(id) ? getLaneRecognitionReference(id) : null;
+  if (!lane) return reply.code(404).send({ success: false, error: "Unknown lane reference" });
+  const data = await readMlbbAdbTexture(lane.texture);
+  if (!data) return reply.code(404).send({ success: false, error: "ADB lane reference unavailable" });
+  return reply
+    .header("cache-control", "private, max-age=3600")
+    .type("image/png")
+    .send(data);
+});
+app.get("/api/vision/spells/manifest", async () => ({ success: true, data: getBattleSpellRecognitionManifest() }));
+app.get("/api/vision/spells/icon/:id", async (req, reply) => {
+  const spell = getBattleSpellRecognitionReference((req.params as { id: string }).id);
+  if (!spell) return reply.code(404).send({ success: false, error: "Unknown battle spell reference" });
+  const data = await readMlbbAdbTexture(spell.texture);
+  if (!data) return reply.code(404).send({ success: false, error: "ADB battle spell reference unavailable" });
+  return reply
+    .header("cache-control", "private, max-age=3600")
+    .type("image/png")
+    .send(data);
+});
+app.get("/api/vision/equipment/manifest", async () => ({ success: true, data: getEquipmentRecognitionManifest() }));
+app.get("/api/vision/equipment/icon/:id", async (req, reply) => {
+  const item = getEquipmentRecognitionReference(Number((req.params as { id: string }).id));
+  if (!item) return reply.code(404).send({ success: false, error: "Unknown equipment reference" });
+  const data = await readMlbbAdbTexture(item.texture);
+  if (!data) return reply.code(404).send({ success: false, error: "ADB equipment reference unavailable" });
+  return reply
+    .header("cache-control", "private, max-age=3600")
+    .type("image/png")
+    .send(data);
+});
 app.get("/api/vision/scenes", async () => ({ success:true, data: heroRecognitionScenes }));
 app.get("/api/vision/draft/latest", async () => ({ success:true, data:getLatestDraftRecognition() }));
 app.post("/api/vision/draft/recognition", async (req) => ({ success:true, data:await ingestDraftRecognition(req.body as any) }));
 app.get("/api/vision/live/latest", async () => ({ success:true, data:getLatestLiveVision() }));
 app.post("/api/vision/live/frame", async (req) => ({ success:true, data:ingestLiveVisionFrame(req.body as any) }));
+app.get("/api/vision/models/screen-state", async () => ({ success: true, data: await getScreenStateModel() }));
+app.get("/api/vision/models/screen-state/status", async () => ({ success: true, data: await getScreenStateTrainingStatus() }));
+app.post("/api/vision/models/screen-state/train", async (_req, reply) => {
+  try {
+    return { success: true, data: await trainScreenStateModel() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "CV screen-state training failed" });
+  }
+});
+app.get("/api/vision/models/draft-heroes", async () => ({ success: true, data: await getDraftHeroModel() }));
+app.get("/api/vision/models/draft-heroes/status", async () => ({ success: true, data: await getDraftHeroModelStatus() }));
+app.post("/api/vision/models/draft-heroes/train", async (_req, reply) => {
+  try {
+    return { success: true, data: await trainDraftHeroModel() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Draft hero training failed" });
+  }
+});
+app.get("/api/vision/models/ultralytics/status", async () => ({ success: true, data: await getUltralyticsStatus() }));
+app.get("/api/vision/annotations/classes", async () => ({ success: true, data: getAnnotationClasses() }));
+app.get("/api/vision/annotations", async () => ({ success: true, data: await listAnnotations() }));
+app.get("/api/vision/annotations/:id/image", async (req, reply) => {
+  const file = await annotationImage((req.params as { id: string }).id);
+  if (!file) return reply.code(404).send({ success: false, error: "Annotation image not found." });
+  return reply.header("cache-control", "no-store").type("image/jpeg").send(await readFile(file));
+});
+app.delete("/api/vision/annotations/:id", async (req, reply) => {
+  const deleted = await deleteAnnotation((req.params as { id: string }).id);
+  return deleted ? { success: true } : reply.code(404).send({ success: false, error: "Annotation not found." });
+});
+app.post("/api/vision/annotations/sync", async () => ({ success: true, data: { samples: await syncSavedAnnotationsToDataset() } }));
+app.post("/api/vision/annotations", async (req, reply) => {
+  try {
+    let frame: Buffer | null = null;
+    let metadata: any = {};
+    for await (const part of (req as any).parts({ limits: { fileSize: 32 * 1024 * 1024, files: 1, fields: 2 } })) {
+      if (part.type === "file") frame = await part.toBuffer();
+      if (part.type === "field" && part.fieldname === "metadata") metadata = JSON.parse(String(part.value));
+    }
+    if (!frame) return reply.code(400).send({ success: false, error: "A captured frame is required." });
+    return { success: true, data: await saveAnnotation(frame, metadata) };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Annotation save failed." });
+  }
+});
+app.post("/api/vision/models/ultralytics/install", async (_req, reply) => {
+  try {
+    return { success: true, data: await installUltralyticsRuntime() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Ultralytics installation failed" });
+  }
+});
+app.post("/api/vision/models/ultralytics/train", async (req, reply) => {
+  try {
+    return { success: true, data: await trainUltralyticsModel(req.body as any) };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Ultralytics training failed" });
+  }
+});
+app.post("/api/vision/models/ultralytics/infer", async (req, reply) => {
+  try {
+    const upload = await (req as any).file({ limits: { fileSize: 12 * 1024 * 1024 } });
+    if (!upload) return reply.code(400).send({ success: false, error: "Frame image is required." });
+    const result = await inferUltralyticsFrame(await upload.toBuffer(), Number((upload.fields?.confidence as any)?.value ?? 0.55));
+    const regions = await getActiveObsRegions();
+    const minimap = firstNormalizedRegion(regions.minimap_norm) ?? undefined;
+    return { success: true, data: {
+      ...result,
+      minimapMarkers: mapUltralyticsMinimapMarkers(result.detections ?? [], minimap),
+      minimapObjects: mapUltralyticsMinimapObjects(result.detections ?? [], minimap),
+    } };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Ultralytics inference failed" });
+  }
+});
+app.get("/api/vision/models/dino/status", async () => ({ success: true, data: await getDinoIdentityStatus() }));
+app.post("/api/vision/models/dino/index", async (_req, reply) => {
+  try {
+    return { success: true, data: await indexDinoReferences() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "DINO reference indexing failed" });
+  }
+});
+app.post("/api/vision/models/dino/match", async (req, reply) => {
+  try {
+    let crop: Buffer | null = null;
+    let options: any = {};
+    for await (const part of (req as any).parts({ limits: { fileSize: 12 * 1024 * 1024, files: 1, fields: 2 } })) {
+      if (part.type === "file") crop = await part.toBuffer();
+      if (part.type === "field" && part.fieldname === "options") options = JSON.parse(String(part.value));
+    }
+    if (!crop) return reply.code(400).send({ success: false, error: "A hero crop is required." });
+    return { success: true, data: await matchDinoIdentity(crop, options) };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "DINO crop matching failed" });
+  }
+});
+app.get("/api/vision/models/timer-ocr/status", async () => ({ success: true, data: await getTimerOcrStatus() }));
+app.post("/api/vision/models/timer-ocr/install", async (_req, reply) => {
+  try {
+    return { success: true, data: await installTimerOcrRuntime() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Timer OCR installation failed" });
+  }
+});
+app.post("/api/vision/models/timer-ocr/infer", async (req, reply) => {
+  try {
+    let crop: Buffer | null = null;
+    let timerType: any = "enemy_respawn_timer";
+    for await (const part of (req as any).parts({ limits: { fileSize: 12 * 1024 * 1024, files: 1, fields: 2 } })) {
+      if (part.type === "file") crop = await part.toBuffer();
+      if (part.type === "field" && part.fieldname === "timerType") timerType = String(part.value);
+    }
+    if (!crop) return reply.code(400).send({ success: false, error: "A timer crop is required." });
+    if (!timerClasses.includes(timerType)) return reply.code(400).send({ success: false, error: "Unsupported timer target." });
+    return { success: true, data: await inferTimerCrop(crop, timerType) };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Timer OCR failed" });
+  }
+});
 app.get("/api/reasoning/live/latest", async () => ({ success:true, data:getLatestLiveReasoning() }));
 app.post("/api/reasoning/live/evaluate", async (req) => ({ success:true, data:ingestLiveReasoning(req.body as any) }));
 app.get("/api/match/state", async () => ({ success:true, data:getMatchState() }));
@@ -105,4 +329,4 @@ app.get("/api/events/recent", async () => ({ success:true, events:eventBus.recen
 
 app.get("/ws/events", { websocket:true }, (socket) => { const unsub = eventBus.subscribe((event)=>socket.send(JSON.stringify(event))); socket.on("close", unsub); });
 
-try { await app.listen({ port: PORT, host:"0.0.0.0" }); console.log(`MLBB Co-Pilot backend running on :${PORT}`); } catch(err) { app.log.error(err); process.exit(1); }
+try { await app.listen({ port: PORT, host: HOST }); console.log(`MLBB Co-Pilot backend running on ${HOST}:${PORT}`); } catch(err) { app.log.error(err); process.exit(1); }

@@ -1,0 +1,76 @@
+{
+  "capturedAtLocalDate": "2026-05-25",
+  "resolution": {
+    "width": 2856,
+    "height": 1280
+  },
+  "recordings": {
+    "legend": {
+      "source": "samples/legend-match.mp4",
+      "durationSeconds": 916.7082,
+      "draftProfile": "ranked_legend_5_ban",
+      "timeline": [
+        { "timestamp": "00:02:05", "state": "draft_ban", "factSurface": "top circular ban icons; yellow allied self row; ally first-pick indicator; Jungle self-lane icon candidate" },
+        { "timestamp": "00:02:50", "state": "draft_pick", "factSurface": "side portrait rails" },
+        { "timestamp": "00:05:05", "state": "draft_finalize", "factSurface": "selected ally rows, enlarged assigned-lane icon, and visible ally spell badges" },
+        { "timestamp": "00:05:15", "state": "live_hud", "factSurface": "minimap and HUD" }
+      ],
+      "banIconSlotsPerSide": 4,
+      "observedDraftContext": { "selfSlot": 4, "firstPickSide": "ally", "selfLaneVisual": "exp" }
+    },
+    "mythic": {
+      "source": "samples/mythic-match.mp4",
+      "durationSeconds": 892.8401,
+      "draftProfile": "ranked_mythic_10_ban",
+      "timeline": [
+        { "timestamp": "00:01:20", "state": "draft_ban", "factSurface": "top circular ban icons; yellow allied self row; enemy first-pick indicator" },
+        { "timestamp": "00:01:55", "state": "draft_pick", "factSurface": "side portrait rails" },
+        { "timestamp": "00:03:35", "state": "draft_finalize", "factSurface": "skin-design portrait rows, ally battle-spell badges, and explicit Proceed to: Gold Lane confirmation" },
+        { "timestamp": "00:03:45", "state": "live_hud", "factSurface": "minimap and HUD" }
+      ],
+      "banIconSlotsPerSide": 5,
+      "observedDraftContext": { "selfSlot": 3, "firstPickSide": "enemy", "selfLaneVisual": "gold" }
+    }
+  },
+  "regions": {
+    "sharedDraft": {
+      "allyBanIconRail": [0.035599, 0, 0.224919, 0.086652],
+      "enemyBanIconRail": [0.737055, 0, 0.222492, 0.088458],
+      "allyPickPortraitRail": [0, 0.083042, 0.162621, 0.832224],
+      "enemyPickPortraitRail": [0.842233, 0.084847, 0.157767, 0.828613],
+      "selfHighlightRail": [0, 0.1, 0.19, 0.88],
+      "allyLaneIconRail": [0.031, 0.1, 0.066, 0.84],
+      "allyBattleSpellRail": [0.107, 0.102, 0.026, 0.724],
+      "allyFirstPickIndicator": [0.278, 0.032, 0.052, 0.072],
+      "enemyFirstPickIndicator": [0.702, 0.032, 0.052, 0.072]
+    },
+    "liveHud": {
+      "minimap": [0.028361, 0, 0.140756, 0.314063],
+      "markerObservation": "Cyan-ring minimap markers indicate allied candidates; red-ring minimap markers indicate enemy candidates. Interior hero identity remains unclaimed until ring validation and tiny-icon matching are tested."
+    }
+  },
+  "assetContract": {
+    "icon": {
+      "availableInDatabase": true,
+      "detectNow": ["draft ban slots"],
+      "doNotUseFor": ["side pick portraits", "loading cards"]
+    },
+    "portrait": {
+      "availableInDatabase": true,
+      "detectNow": ["draft side pick rails with confidence gate"],
+      "neededFor": ["future loading screen team composition"],
+      "notes": ["Official current designs are supplemented by compiled Wiki skin face thumbnails for locked draft skin rows."]
+    }
+  },
+  "implementationDecision": [
+    "Run icon-template matching only on confirmed ban icon slots.",
+    "Do not populate allyPicks or enemyPicks from circular icon matching against portrait rails.",
+    "Store detected bans separately from picks in MatchState and Stream Pack.",
+    "Add a portrait/card reference catalog before enabling pick-rail or loading-card hero recognition.",
+    "Emit yellow allied-row and first-pick indicator results as confidence-scored draft context facts.",
+    "Match official lane SVG silhouettes in the yellow-highlighted row, including the expanded local-player layout in Legend finalize frames.",
+    "Match visible ally battle-spell badges against proxied spell references and preserve slot position.",
+    "Treat cyan/red minimap segmentation as team-position candidates until turret/ping rejection and inner hero-icon matching are validated.",
+    "After team composition recognition exists, match minimap interior icons only against the five detected heroes for that marker side."
+  ]
+}

@@ -1,27 +1,49 @@
 import { create } from "zustand";
-import { ingestLiveVisionFrame, startScrcpy, stopScrcpy } from "../api/client";
-import { queueDraftHeroRecognition } from "../vision/draftHeroDetector";
+import { getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startScrcpy, stopScrcpy } from "../api/client";
+import { detectDraftVisualContext } from "../vision/draftContextDetector";
+import { queueDraftBanIconRecognition } from "../vision/draftIconDetector";
+import { detectMinimapMarkerCandidatesFromRgba } from "../vision/minimapMarkerDetector";
+import { detectEquipmentItems, type DetectedEquipmentItem } from "../vision/equipmentDetector";
+import { classifyWithTrainedScreenStateModel, type TrainedScreenStateModel } from "../vision/trainedScreenStateModel";
+import { calibratedRect, calibratedRectForKeys, ensureActiveCalibrationRegions } from "../vision/calibrationRegions";
 
 export type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" | "minimap";
 export type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
 export type RegionMetrics = { mean: number; contrast: number; changed: number; active: boolean };
 export type CaptureSource = "adb" | "window" | "scrcpy" | "ndi" | "capture_card" | "obs";
-export type SourceMode = "idle" | "browser" | "adb" | "scrcpy" | "obs";
+export type SourceMode = "idle" | "browser" | "adb" | "scrcpy" | "obs" | "recording";
 export type ScrcpyVideoCodec = "h264" | "h265" | "av1";
 export type CaptureLogEntry = { time: number; level: "info" | "warn" | "error"; message: string };
+export type WindowContentCrop = { enabled: boolean; top: number; right: number; bottom: number; left: number };
 type NativeCrop = { time: number; key: RegionKey; width: number; height: number; bitmap: ImageBitmap };
 type FrameSummary = { time: number; sourceWidth: number; sourceHeight: number; regions: Record<RegionKey, RegionMetrics> };
 type ScrcpyFrameMeta = { type: "scrcpy_frame"; config?: boolean; key?: boolean; ptsUs?: number; size?: number };
 type PixelRegion = { x: number; y: number; w: number; h: number };
 type VisionProbe = { key: string; rect: [number, number, number, number] };
+type UltralyticsDetection = {
+  classId: number;
+  className: string;
+  confidence: number;
+  bbox: [number, number, number, number];
+  center: [number, number];
+  source: "ultralytics-yolo";
+};
+type MinimapObjectDetection = {
+  id: string;
+  objectType: "turtle" | "lord" | "ally_turret" | "enemy_turret";
+  minimap: [number, number];
+  confidence: number;
+  source: "ultralytics-yolo";
+};
 export type MinimapMarkerDetection = {
   id: string;
   side: "ally" | "enemy";
+  markerClass: "team-color-candidate";
   minimap: [number, number];
   confidence: number;
   sampledAt: number;
 };
-export type VisionScreenState = "unknown" | "draft" | "loading" | "live_hud" | "death_replay" | "scoreboard" | "item_shop";
+export type VisionScreenState = "unknown" | "lobby" | "draft" | "loading" | "live_hud" | "death_replay" | "scoreboard" | "item_shop";
 export type LiveVisionFrame = {
   screen: VisionScreenState;
   confidence: number;
@@ -29,16 +51,35 @@ export type LiveVisionFrame = {
   directorScene?: "main" | "map" | "text" | "counter" | "picks";
   timestamp: number;
   source?: string;
+  signals?: {
+    enemyItems?: string[];
+    enemyEquipment?: DetectedEquipmentItem[];
+    allyItems?: string[];
+    allyEquipment?: DetectedEquipmentItem[];
+    yoloDetections?: UltralyticsDetection[];
+    minimapObjects?: MinimapObjectDetection[];
+  };
+};
+export type VisionStabilityState = {
+  confirmed: LiveVisionFrame | null;
+  candidate: LiveVisionFrame | null;
+  candidateFrames: number;
 };
 
-export const regions: Region[] = [
-  { key: "equipment_window", label: "Equipment Window", rect: [0.58, 0.08, 0.38, 0.78] },
-  { key: "attributes_window", label: "Attributes Window", rect: [0.42, 0.08, 0.54, 0.78] },
+const scoreboardBodyRect: [number, number, number, number] = [0.1, 0.13, 0.8, 0.78];
+const defaultWindowContentCrop: WindowContentCrop = { enabled: false, top: 0.13, right: 0, bottom: 0.06, left: 0 };
+const windowContentCropStorageKey = "mlbb.capture.windowContentCrop.v1";
+
+const defaultRegions: Region[] = [
+  { key: "equipment_window", label: "Equipment Window", rect: scoreboardBodyRect },
+  { key: "attributes_window", label: "Attributes Window", rect: scoreboardBodyRect },
   { key: "scoreboard", label: "Top HUD", rect: [0.32, 0, 0.36, 0.08] },
   { key: "minimap", label: "Minimap", rect: [0.02521, 0, 0.146359, 0.326563] }
 ];
 
-const visionProbes: VisionProbe[] = [
+export const regions: Region[] = defaultRegions.map((region) => ({ ...region }));
+
+const defaultVisionProbes: VisionProbe[] = [
   { key: "top_hud", rect: [0.28, 0, 0.45, 0.08] },
   { key: "draft_left_rail", rect: [0, 0.08, 0.22, 0.84] },
   { key: "draft_right_rail", rect: [0.78, 0.08, 0.22, 0.84] },
@@ -46,10 +87,29 @@ const visionProbes: VisionProbe[] = [
   { key: "modal_body", rect: [0.1, 0.13, 0.8, 0.78] }
 ];
 
+function calibratedRuntimeRegions() {
+  const resolved = defaultRegions.map((region) => ({
+    ...region,
+    rect: calibratedRect(`${region.key}_norm`, region.rect),
+  }));
+  for (const [index, region] of resolved.entries()) regions[index].rect = region.rect;
+  return resolved;
+}
+
+function calibratedVisionProbes() {
+  return defaultVisionProbes.map((probe) => {
+    if (probe.key === "top_hud") return { ...probe, rect: calibratedRect("scoreboard_norm", probe.rect) };
+    if (probe.key === "draft_left_rail") return { ...probe, rect: calibratedRectForKeys(["ally_picks_norm", "ally_pick_portraits_norm"], probe.rect) };
+    if (probe.key === "draft_right_rail") return { ...probe, rect: calibratedRectForKeys(["enemy_picks_norm", "enemy_pick_portraits_norm"], probe.rect) };
+    if (probe.key === "modal_body") return { ...probe, rect: calibratedRectForKeys(["equipment_window_norm", "attributes_window_norm"], probe.rect) };
+    return probe;
+  });
+}
+
 export const maxBufferedFrames = 60;
 export const maxNativeCrops = 96;
-const scrcpyMaxFps = 60;
-const h264MaxDecodeQueue = 3;
+const scrcpyMaxFps = 15;
+const h264MaxDecodeQueue = 6;
 
 export const captureSources: Array<{
   id: CaptureSource;
@@ -74,6 +134,34 @@ export function emptyMetrics(): Record<RegionKey, RegionMetrics> {
   };
 }
 
+export function createVisionStabilityState(): VisionStabilityState {
+  return { confirmed: null, candidate: null, candidateFrames: 0 };
+}
+
+export function resolveWindowContentCrop(width: number, height: number, crop: WindowContentCrop) {
+  if (!crop.enabled) return { x: 0, y: 0, width, height };
+  const left = Math.round(width * Math.max(0, Math.min(0.4, crop.left)));
+  const right = Math.round(width * Math.max(0, Math.min(0.4, crop.right)));
+  const top = Math.round(height * Math.max(0, Math.min(0.4, crop.top)));
+  const bottom = Math.round(height * Math.max(0, Math.min(0.4, crop.bottom)));
+  return {
+    x: left,
+    y: top,
+    width: Math.max(1, width - left - right),
+    height: Math.max(1, height - top - bottom),
+  };
+}
+
+function loadWindowContentCrop(): WindowContentCrop {
+  if (typeof window === "undefined") return defaultWindowContentCrop;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(windowContentCropStorageKey) ?? "{}");
+    return { ...defaultWindowContentCrop, ...saved };
+  } catch {
+    return defaultWindowContentCrop;
+  }
+}
+
 type CaptureRuntimeState = {
   running: boolean;
   sourceMode: SourceMode;
@@ -91,8 +179,10 @@ type CaptureRuntimeState = {
   error: string;
   adbPreviewUrl: string;
   stream: MediaStream | null;
+  windowContentCrop: WindowContentCrop;
   setSelectedSource: (source: CaptureSource) => void;
   setSelectedCodec: (codec: ScrcpyVideoCodec) => void;
+  setWindowContentCrop: (next: Partial<WindowContentCrop>) => void;
 };
 
 export const useCaptureRuntimeStore = create<CaptureRuntimeState>((set) => ({
@@ -112,8 +202,16 @@ export const useCaptureRuntimeStore = create<CaptureRuntimeState>((set) => ({
   error: "",
   adbPreviewUrl: "",
   stream: null,
+  windowContentCrop: loadWindowContentCrop(),
   setSelectedSource: (selectedSource) => set({ selectedSource }),
-  setSelectedCodec: (selectedCodec) => set({ selectedCodec })
+  setSelectedCodec: (selectedCodec) => set({ selectedCodec }),
+  setWindowContentCrop: (next) => set((state) => {
+    const windowContentCrop = { ...state.windowContentCrop, ...next };
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(windowContentCropStorageKey, JSON.stringify(windowContentCrop));
+    }
+    return { windowContentCrop };
+  })
 }));
 
 function addCaptureLog(level: CaptureLogEntry["level"], message: string) {
@@ -152,6 +250,14 @@ const runtime = {
   lastFrameAt: 0,
   lastVisionPostedAt: 0,
   visionPostInFlight: false,
+  visionStability: createVisionStabilityState(),
+  trainedScreenModel: null as TrainedScreenStateModel | null,
+  trainedScreenModelLoading: false,
+  ultralyticsReady: false,
+  ultralyticsStatusLoading: false,
+  ultralyticsFrameInFlight: false,
+  lastUltralyticsAt: 0,
+  lastUltralyticsStatusAt: 0,
   raf: null as number | null,
   ageTimer: null as number | null
 };
@@ -159,9 +265,44 @@ const runtime = {
 export function attachCaptureRuntime(video: HTMLVideoElement | null, canvas: HTMLCanvasElement | null) {
   runtime.video = video;
   runtime.canvas = canvas;
+  if (video && canvas) {
+    void ensureActiveCalibrationRegions().then(() => {
+      calibratedRuntimeRegions();
+    });
+    void loadTrainedScreenModel();
+    void loadUltralyticsStatus();
+  }
   if (video && runtime.stream) {
     video.srcObject = runtime.stream;
     void video.play().catch(() => {});
+  }
+}
+
+async function loadUltralyticsStatus() {
+  if (runtime.ultralyticsStatusLoading || runtime.ultralyticsReady) return;
+  runtime.ultralyticsStatusLoading = true;
+  runtime.lastUltralyticsStatusAt = performance.now();
+  try {
+    const response = await getUltralyticsStatus();
+    runtime.ultralyticsReady = Boolean(response.data?.packageAvailable && response.data?.modelAvailable);
+  } catch {
+    runtime.ultralyticsReady = false;
+  } finally {
+    runtime.ultralyticsStatusLoading = false;
+  }
+}
+
+async function loadTrainedScreenModel() {
+  if (runtime.trainedScreenModel || runtime.trainedScreenModelLoading) return;
+  runtime.trainedScreenModelLoading = true;
+  try {
+    const response = await getScreenStateModel();
+    const model = response.data as TrainedScreenStateModel | null;
+    if (model?.validation?.accuracy >= 0.7) runtime.trainedScreenModel = model;
+  } catch {
+    // Runtime keeps its conservative visual rules when no trained model is available.
+  } finally {
+    runtime.trainedScreenModelLoading = false;
   }
 }
 
@@ -180,7 +321,20 @@ export async function captureCurrentRuntimeFrame(): Promise<{ blob: Blob; width:
   };
 }
 
-export function attachScrcpyPreviewCanvas(canvas: HTMLCanvasElement | null) {
+export async function analyzeCapturedFrameBlob(blob: Blob, source: SourceMode = "recording") {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = runtime.canvas ?? document.createElement("canvas");
+  const width = bitmap.width;
+  const height = bitmap.height;
+  canvas.width = width;
+  canvas.height = height;
+  updateSourceSize(width, height);
+  canvas.getContext("2d", { willReadFrequently: true })?.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return { width, height, vision: analyzeCanvas(canvas, width, height, source) };
+}
+
+export function attachCapturePreviewCanvas(canvas: HTMLCanvasElement | null) {
   runtime.previewCanvas = canvas;
 }
 
@@ -215,6 +369,7 @@ export function stopCaptureRuntime() {
   if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
   runtime.adbPreviewUrl = "";
   runtime.lastFrameAt = 0;
+  runtime.visionStability = createVisionStabilityState();
   runtime.nativeCropBuffer.splice(0).forEach((crop) => crop.bitmap.close());
   const mode = useCaptureRuntimeStore.getState().sourceMode;
   if (mode === "scrcpy") void stopScrcpy().catch(() => {});
@@ -262,8 +417,8 @@ async function startScrcpyCapture() {
     startAgeTimer();
     await stopScrcpy().catch(() => {});
     await startScrcpyH264Decode();
-    addCaptureLog("info", "Starting scrcpy H.264 raw Annex-B stream at 60 FPS.");
-    const result = await startScrcpy({ maxFps: scrcpyMaxFps, videoBitRate: 8000000, background: true, decoder: "h264", videoCodec: "h264", rawStream: true });
+    addCaptureLog("info", `Starting framed scrcpy H.264 stream at ${scrcpyMaxFps} FPS.`);
+    const result = await startScrcpy({ maxFps: scrcpyMaxFps, videoBitRate: 6000000, background: true, decoder: "h264", videoCodec: "h264", rawStream: false });
     if (!result?.status?.ok) throw new Error(result?.status?.message ?? "scrcpy did not start.");
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Could not start scrcpy.";
@@ -418,7 +573,14 @@ function shouldDropQueuedH264Frame(key: boolean) {
   if (!runtime.h264Decoder) return false;
   const queueSize = runtime.h264Decoder.decodeQueueSize ?? 0;
   if (queueSize <= h264MaxDecodeQueue) return false;
-  return !key;
+  if (key) return false;
+  try {
+    runtime.h264Decoder.reset();
+  } catch {}
+  runtime.h264Configured = false;
+  runtime.h264ReadyForKey = true;
+  addCaptureLog("warn", "Decoder backlog cleared; waiting for next key frame.");
+  return true;
 }
 
 function concatBytes(a: Uint8Array, b: Uint8Array) {
@@ -650,6 +812,7 @@ function resetBuffers() {
   runtime.lastFrameAt = 0;
   runtime.lastVisionPostedAt = 0;
   runtime.visionPostInFlight = false;
+  runtime.visionStability = createVisionStabilityState();
   useCaptureRuntimeStore.setState({ buffered: 0, nativeCrops: 0, fps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
 }
 
@@ -673,8 +836,9 @@ function processFrame() {
   const video = runtime.video;
   const canvas = runtime.canvas;
   if (!video || !canvas || !video.videoWidth || !video.videoHeight) return;
-  const width = video.videoWidth;
-  const height = video.videoHeight;
+  const crop = resolveWindowContentCrop(video.videoWidth, video.videoHeight, useCaptureRuntimeStore.getState().windowContentCrop);
+  const width = crop.width;
+  const height = crop.height;
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -682,7 +846,14 @@ function processFrame() {
   updateSourceSize(width, height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
-  ctx.drawImage(video, 0, 0, width, height);
+  ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
+  if (runtime.previewCanvas) {
+    if (runtime.previewCanvas.width !== width || runtime.previewCanvas.height !== height) {
+      runtime.previewCanvas.width = width;
+      runtime.previewCanvas.height = height;
+    }
+    runtime.previewCanvas.getContext("2d")?.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
+  }
   analyzeCanvas(canvas, width, height);
 }
 
@@ -762,21 +933,28 @@ async function pollObsBridgeFrame() {
   }
 }
 
-function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
+function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number, sourceOverride?: SourceMode) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
+  void ensureActiveCalibrationRegions();
+  const frameRegions = calibratedRuntimeRegions();
   const metrics = emptyMetrics();
-  for (const region of regions) metrics[region.key] = sampleRegion(ctx, width, height, region, runtime.previous[region.key]);
-  const probeMetrics = Object.fromEntries(visionProbes.map((probe) => [probe.key, sampleRegion(ctx, width, height, probe)]));
+  for (const region of frameRegions) metrics[region.key] = sampleRegion(ctx, width, height, region, runtime.previous[region.key]);
+  const probeMetrics = Object.fromEntries(calibratedVisionProbes().map((probe) => [probe.key, sampleRegion(ctx, width, height, probe)]));
   runtime.previous = metrics;
 
   const now = performance.now();
   runtime.lastFrameAt = now;
   runtime.frameBuffer.push({ time: now, sourceWidth: width, sourceHeight: height, regions: metrics });
   while (runtime.frameBuffer.length > maxBufferedFrames) runtime.frameBuffer.shift();
-  queueNativeWindowCrops(canvas, width, height, now, metrics);
-  const minimapDetections = detectMinimapMarkers(ctx, width, height, now);
-  const liveVision = classifyVisionFrame(metrics, probeMetrics, minimapDetections);
+  queueNativeWindowCrops(canvas, width, height, now, metrics, frameRegions);
+  const minimapDetections = detectMinimapMarkers(ctx, width, height, now, frameRegions);
+  const draftContext = detectDraftVisualContext(canvas);
+  const rawVision = classifyVisionFrame(metrics, probeMetrics, minimapDetections, Boolean(draftContext.selfSlot || draftContext.firstPickSide), runtime.trainedScreenModel);
+  const liveVision = sourceOverride === "recording"
+    ? rawVision
+    : stabilizeVisionFrame(rawVision, runtime.visionStability);
+  const trustedMinimapDetections = liveVision.screen === "draft" ? [] : minimapDetections;
 
   runtime.frameTimes.push(now);
   while (runtime.frameTimes.length && now - runtime.frameTimes[0] > 1000) runtime.frameTimes.shift();
@@ -787,11 +965,18 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number)
     nativeCrops: runtime.nativeCropBuffer.length,
     fps: runtime.frameTimes.length,
     lastFrameAge: 0,
-    minimapDetections,
+    minimapDetections: trustedMinimapDetections,
     liveVision
   });
-  queueLiveVisionFrame(liveVision, metrics, probeMetrics, minimapDetections);
-  queueDraftHeroRecognition(canvas, liveVision, useCaptureRuntimeStore.getState().sourceMode);
+  queueLiveVisionFrame(canvas, liveVision, metrics, probeMetrics, trustedMinimapDetections, sourceOverride);
+  if (!runtime.ultralyticsReady && !runtime.ultralyticsStatusLoading && now - runtime.lastUltralyticsStatusAt > 10000) {
+    void loadUltralyticsStatus();
+  }
+  if ((sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode) !== "obs") {
+    queueUltralyticsLiveFrame(canvas, liveVision);
+  }
+  queueDraftBanIconRecognition(canvas, liveVision, sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode);
+  return liveVision;
 }
 
 function sampleRegion(ctx: CanvasRenderingContext2D, width: number, height: number, region: Region | VisionProbe, previous?: RegionMetrics): RegionMetrics {
@@ -818,7 +1003,9 @@ function sampleRegion(ctx: CanvasRenderingContext2D, width: number, height: numb
 export function classifyVisionFrame(
   metrics: Record<RegionKey, RegionMetrics>,
   probes: Record<string, RegionMetrics>,
-  markers: MinimapMarkerDetection[]
+  markers: MinimapMarkerDetection[],
+  hasDraftContext = false,
+  learnedModel: TrainedScreenStateModel | null = null
 ): LiveVisionFrame {
   const evidence: string[] = [];
   const minimap = metrics.minimap;
@@ -828,12 +1015,54 @@ export function classifyVisionFrame(
   const center = probes.center_panel;
   const modal = probes.modal_body;
   const minimapVisible = minimap.contrast > 22 && minimap.mean > 12;
-  const modalVisible = modal.contrast > 42 && (metrics.equipment_window.contrast > 38 || metrics.attributes_window.contrast > 38);
+  const modalVisible =
+    modal.contrast > 30 &&
+    topHud.contrast < 20 &&
+    (metrics.equipment_window.contrast > 30 || metrics.attributes_window.contrast > 30);
   const railsVisible = leftRail.contrast > 28 && rightRail.contrast > 28;
+  const lobbyVisible =
+    minimapVisible &&
+    railsVisible &&
+    topHud.mean > 55 &&
+    center.mean > 95 &&
+    center.contrast > 35;
+  const contextualDraftVisible =
+    hasDraftContext &&
+    center.mean < 90 &&
+    center.contrast > 42 &&
+    (leftRail.mean < 75 || rightRail.mean < 75);
+  const completedDraftVisible =
+    railsVisible &&
+    center.contrast > 27 &&
+    center.mean < 85 &&
+    Math.max(leftRail.contrast, rightRail.contrast) > 38;
+  const learned = learnedModel
+    ? classifyWithTrainedScreenStateModel(learnedModel, metrics, probes)
+    : null;
 
-  if (modalVisible && minimapVisible) {
-    evidence.push("large modal over live HUD", "minimap remains visible");
-    return { screen: "scoreboard", confidence: 0.68, evidence, timestamp: Date.now() };
+  if (modalVisible) {
+    evidence.push("large scoreboard modal", "dimmed top HUD behind modal");
+    return { screen: "scoreboard", confidence: 0.78, evidence, timestamp: Date.now() };
+  }
+  if (lobbyVisible) {
+    evidence.push("bright lobby center composition", "side navigation panels visible");
+    return { screen: "lobby", confidence: 0.72, evidence, timestamp: Date.now() };
+  }
+  if (contextualDraftVisible) {
+    evidence.push("confirmed draft context marker");
+    return { screen: "draft", confidence: 0.78, evidence, timestamp: Date.now() };
+  }
+  if (learned?.accepted && learned.confidence >= 0.58) {
+    evidence.push(`trained screen model: ${learned.screen}`);
+    return { screen: learned.screen, confidence: learned.confidence, evidence, timestamp: Date.now() };
+  }
+  if (completedDraftVisible) {
+    evidence.push("completed draft portrait rails", "center preparation region");
+    return { screen: "draft", confidence: 0.72, evidence, timestamp: Date.now() };
+  }
+  if (railsVisible && center.mean < 90 && center.contrast > 27 && (leftRail.mean < 78 || rightRail.mean < 78)) {
+    evidence.push("draft side rails", "center selection region");
+    return { screen: "draft", confidence: 0.68, evidence, timestamp: Date.now() };
   }
   if (minimapVisible) {
     evidence.push("minimap texture detected");
@@ -844,10 +1073,6 @@ export function classifyVisionFrame(
     }
     return { screen: "live_hud", confidence: markers.length ? 0.74 : 0.6, evidence, timestamp: Date.now() };
   }
-  if (railsVisible && center.contrast > 30) {
-    evidence.push("draft side rails", "center selection region");
-    return { screen: "draft", confidence: 0.56, evidence, timestamp: Date.now() };
-  }
   if (center.contrast > 36 && topHud.contrast < 24) {
     evidence.push("large center composition without live HUD");
     return { screen: "loading", confidence: 0.4, evidence, timestamp: Date.now() };
@@ -856,26 +1081,108 @@ export function classifyVisionFrame(
   return { screen: "unknown", confidence: 0.2, evidence, timestamp: Date.now() };
 }
 
+function requiredStableFrames(current: VisionScreenState | null, next: VisionScreenState, confidence: number) {
+  if (!current) return confidence >= 0.7 ? 2 : 3;
+  if (next === "unknown") return 6;
+  if (next === "loading") return 4;
+  if (next === "draft" && confidence >= 0.75) return 2;
+  return 3;
+}
+
+function frameCanChallengeConfirmedState(frame: LiveVisionFrame) {
+  return frame.screen === "unknown" || frame.screen === "loading" || frame.confidence >= 0.52;
+}
+
+export function stabilizeVisionFrame(frame: LiveVisionFrame, state: VisionStabilityState): LiveVisionFrame {
+  const current = state.confirmed;
+  if (current?.screen === frame.screen) {
+    state.candidate = null;
+    state.candidateFrames = 0;
+    state.confirmed = {
+      ...frame,
+      confidence: Math.max(frame.confidence, current.confidence * 0.94)
+    };
+    return state.confirmed;
+  }
+
+  if (current && !frameCanChallengeConfirmedState(frame)) {
+    state.candidate = null;
+    state.candidateFrames = 0;
+    state.confirmed = {
+      ...current,
+      timestamp: frame.timestamp,
+      confidence: Math.max(0.55, current.confidence * 0.97),
+      evidence: [...current.evidence.slice(0, 2), `held ${current.screen} through weak ${frame.screen} signal`]
+    };
+    return state.confirmed;
+  }
+
+  state.candidateFrames = state.candidate?.screen === frame.screen ? state.candidateFrames + 1 : 1;
+  state.candidate = frame;
+  const required = requiredStableFrames(current?.screen ?? null, frame.screen, frame.confidence);
+
+  if (!current && (frame.screen === "unknown" || frame.screen === "loading")) {
+    return frame;
+  }
+
+  if (state.candidateFrames >= required) {
+    state.confirmed = {
+      ...frame,
+      evidence: [...frame.evidence, `screen state held for ${required} frames`]
+    };
+    state.candidate = null;
+    state.candidateFrames = 0;
+    return state.confirmed;
+  }
+
+  if (!current) {
+    return {
+      ...frame,
+      screen: "unknown",
+      confidence: Math.min(frame.confidence, 0.4),
+      evidence: [...frame.evidence, `confirming ${frame.screen} (${state.candidateFrames}/${required})`]
+    };
+  }
+
+  state.confirmed = {
+    ...current,
+    timestamp: frame.timestamp,
+    confidence: Math.max(0.55, current.confidence - 0.02),
+    evidence: [...current.evidence.slice(0, 2), `holding ${current.screen}; ${frame.screen} pending (${state.candidateFrames}/${required})`]
+  };
+  return state.confirmed;
+}
+
 function queueLiveVisionFrame(
+  canvas: HTMLCanvasElement,
   vision: LiveVisionFrame,
   metrics: Record<RegionKey, RegionMetrics>,
   probes: Record<string, RegionMetrics>,
-  minimapMarkers: MinimapMarkerDetection[]
+  minimapMarkers: MinimapMarkerDetection[],
+  sourceOverride?: SourceMode
 ) {
   const now = performance.now();
   if (runtime.visionPostInFlight || now - runtime.lastVisionPostedAt < 350) return;
   runtime.lastVisionPostedAt = now;
   runtime.visionPostInFlight = true;
-  const source = useCaptureRuntimeStore.getState().sourceMode;
-  void ingestLiveVisionFrame({
-    source,
-    timestamp: Date.now(),
-    screen: vision.screen,
-    confidence: vision.confidence,
-    evidence: vision.evidence,
-    regions: { ...metrics, ...probes },
-    minimapMarkers
-  }).then((result) => {
+  const source = sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode;
+  void (async () => {
+    const equipmentItems = vision.screen === "scoreboard" ? await detectEquipmentItems(canvas) : [];
+    const allyEquipment = equipmentItems.filter((item) => item.side === "ally");
+    const enemyEquipment = equipmentItems.filter((item) => item.side === "enemy");
+    return ingestLiveVisionFrame({
+      source,
+      timestamp: Date.now(),
+      screen: vision.screen,
+      confidence: vision.confidence,
+      evidence: equipmentItems.length
+        ? [...vision.evidence, `${allyEquipment.length} ally / ${enemyEquipment.length} enemy equipment icons confirmed`]
+        : vision.evidence,
+      regions: { ...metrics, ...probes },
+      minimapMarkers,
+      ...(equipmentItems.length ? { signals: { allyEquipment, enemyEquipment } } : {}),
+    });
+  })().then((result) => {
     const data = result.data ?? result;
     useCaptureRuntimeStore.setState({
       liveVision: {
@@ -884,7 +1191,8 @@ function queueLiveVisionFrame(
         evidence: data.evidence ?? vision.evidence,
         directorScene: data.directorScene,
         timestamp: Number(data.timestamp ?? vision.timestamp),
-        source: data.source ?? source
+        source: data.source ?? source,
+        signals: data.signals,
       }
     });
   }).catch(() => {}).finally(() => {
@@ -892,12 +1200,81 @@ function queueLiveVisionFrame(
   });
 }
 
-function detectMinimapMarkers(ctx: CanvasRenderingContext2D, width: number, height: number, sampledAt: number): MinimapMarkerDetection[] {
-  const region = regions.find((item) => item.key === "minimap");
+function queueUltralyticsLiveFrame(canvas: HTMLCanvasElement, vision: LiveVisionFrame) {
+  const now = performance.now();
+  if (!runtime.ultralyticsReady || runtime.ultralyticsFrameInFlight || now - runtime.lastUltralyticsAt < 1200) return;
+  runtime.lastUltralyticsAt = now;
+  runtime.ultralyticsFrameInFlight = true;
+  void canvasToBlob(canvas).then(async (blob) => {
+    const result = await inferUltralyticsFrame(blob);
+    const data = result.data ?? result;
+    const detections = Array.isArray(data.detections) ? data.detections as UltralyticsDetection[] : [];
+    const minimapMarkers = Array.isArray(data.minimapMarkers) ? data.minimapMarkers : [];
+    const minimapObjects = Array.isArray(data.minimapObjects) ? data.minimapObjects : [];
+    const surface = detectedYoloScreen(detections);
+    if (!detections.length && !surface) return;
+    const screen = surface?.screen ?? vision.screen;
+    const confidence = Math.max(Number(vision.confidence), Number(surface?.confidence ?? 0));
+    const response = await ingestLiveVisionFrame({
+      source: "ultralytics-yolo",
+      timestamp: Date.now(),
+      screen,
+      confidence,
+      evidence: [
+        ...vision.evidence,
+        ...(surface ? [`YOLO surface: ${surface.label}`] : []),
+        ...(minimapMarkers.length ? [`YOLO minimap markers: ${minimapMarkers.length}`] : []),
+        ...(minimapObjects.length ? [`YOLO minimap objects: ${minimapObjects.length}`] : []),
+      ],
+      minimapMarkers,
+      signals: { yoloDetections: detections, minimapObjects },
+    });
+    const ingested = response.data ?? response;
+    useCaptureRuntimeStore.setState({
+      liveVision: {
+        screen: ingested.screen ?? screen,
+        confidence: Number(ingested.confidence ?? confidence),
+        evidence: ingested.evidence ?? vision.evidence,
+        directorScene: ingested.directorScene,
+        timestamp: Number(ingested.timestamp ?? Date.now()),
+        source: ingested.source ?? "ultralytics-yolo",
+        signals: ingested.signals,
+      },
+    });
+  }).catch(() => {}).finally(() => {
+    runtime.ultralyticsFrameInFlight = false;
+  });
+}
+
+function detectedYoloScreen(detections: UltralyticsDetection[]) {
+  const mappings: Record<string, VisionScreenState> = {
+    minimap_panel: "live_hud",
+    draft_screen: "draft",
+    ally_pick_slot: "draft",
+    enemy_pick_slot: "draft",
+    ally_ban_slot: "draft",
+    enemy_ban_slot: "draft",
+    lane_marker: "draft",
+    battle_spell_marker: "draft",
+    equipment_scoreboard: "scoreboard",
+    attributes_scoreboard: "scoreboard",
+  };
+  const accepted = detections
+    .filter((detection) => mappings[detection.className] && detection.confidence >= 0.55)
+    .sort((left, right) => right.confidence - left.confidence)[0];
+  return accepted ? { screen: mappings[accepted.className], label: accepted.className, confidence: accepted.confidence } : null;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not encode frame.")), "image/jpeg", 0.82);
+  });
+}
+
+function detectMinimapMarkers(ctx: CanvasRenderingContext2D, width: number, height: number, sampledAt: number, frameRegions = calibratedRuntimeRegions()): MinimapMarkerDetection[] {
+  const region = frameRegions.find((item) => item.key === "minimap");
   if (!region) return [];
   const { x, y, w, h } = pixelRegion(width, height, region);
-  const gridW = 96;
-  const gridH = 96;
   let image: ImageData;
   try {
     image = ctx.getImageData(x, y, w, h);
@@ -905,31 +1282,7 @@ function detectMinimapMarkers(ctx: CanvasRenderingContext2D, width: number, heig
     return [];
   }
 
-  const allyMask = new Uint8Array(gridW * gridH);
-  const enemyMask = new Uint8Array(gridW * gridH);
-  for (let gy = 0; gy < gridH; gy += 1) {
-    const py = Math.min(h - 1, Math.floor((gy / gridH) * h));
-    for (let gx = 0; gx < gridW; gx += 1) {
-      const px = Math.min(w - 1, Math.floor((gx / gridW) * w));
-      const pixel = (py * w + px) * 4;
-      const r = image.data[pixel];
-      const g = image.data[pixel + 1];
-      const b = image.data[pixel + 2];
-      const a = image.data[pixel + 3];
-      if (a < 16) continue;
-      const index = gy * gridW + gx;
-      if (isAllyMinimapPixel(r, g, b)) allyMask[index] = 1;
-      else if (isEnemyMinimapPixel(r, g, b)) enemyMask[index] = 1;
-    }
-  }
-
-  return [
-    ...extractMarkerComponents("ally", allyMask, gridW, gridH, sampledAt),
-    ...extractMarkerComponents("enemy", enemyMask, gridW, gridH, sampledAt)
-  ]
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 10)
-    .map((marker, index) => ({ ...marker, id: `${marker.side}-${index}` }));
+  return detectMinimapMarkerCandidatesFromRgba(image.data, image.width, image.height, sampledAt);
 }
 
 function pixelRegion(width: number, height: number, region: Region | VisionProbe): PixelRegion {
@@ -949,65 +1302,8 @@ function pixelRegion(width: number, height: number, region: Region | VisionProbe
   };
 }
 
-function isAllyMinimapPixel(r: number, g: number, b: number) {
-  return b > 125 && g > 85 && r < 135 && b - r > 35;
-}
-
-function isEnemyMinimapPixel(r: number, g: number, b: number) {
-  return r > 145 && g < 145 && r - b > 35;
-}
-
-function extractMarkerComponents(side: "ally" | "enemy", mask: Uint8Array, gridW: number, gridH: number, sampledAt: number): MinimapMarkerDetection[] {
-  const visited = new Uint8Array(mask.length);
-  const detections: MinimapMarkerDetection[] = [];
-  const queue: number[] = [];
-
-  for (let start = 0; start < mask.length; start += 1) {
-    if (!mask[start] || visited[start]) continue;
-    queue.length = 0;
-    queue.push(start);
-    visited[start] = 1;
-    let area = 0;
-    let sumX = 0;
-    let sumY = 0;
-
-    for (let cursor = 0; cursor < queue.length; cursor += 1) {
-      const current = queue[cursor];
-      const cx = current % gridW;
-      const cy = Math.floor(current / gridW);
-      area += 1;
-      sumX += cx;
-      sumY += cy;
-
-      for (let dy = -1; dy <= 1; dy += 1) {
-        for (let dx = -1; dx <= 1; dx += 1) {
-          if (dx === 0 && dy === 0) continue;
-          const nx = cx + dx;
-          const ny = cy + dy;
-          if (nx < 0 || ny < 0 || nx >= gridW || ny >= gridH) continue;
-          const next = ny * gridW + nx;
-          if (!mask[next] || visited[next]) continue;
-          visited[next] = 1;
-          queue.push(next);
-        }
-      }
-    }
-
-    if (area < 4 || area > 450) continue;
-    detections.push({
-      id: `${side}-${detections.length}`,
-      side,
-      minimap: [sumX / area / (gridW - 1), sumY / area / (gridH - 1)],
-      confidence: Math.max(0.25, Math.min(0.98, area / 80)),
-      sampledAt
-    });
-  }
-
-  return detections;
-}
-
-function queueNativeWindowCrops(canvas: HTMLCanvasElement, width: number, height: number, time: number, metrics: Record<RegionKey, RegionMetrics>) {
-  for (const region of regions) {
+function queueNativeWindowCrops(canvas: HTMLCanvasElement, width: number, height: number, time: number, metrics: Record<RegionKey, RegionMetrics>, frameRegions = calibratedRuntimeRegions()) {
+  for (const region of frameRegions) {
     if (!region.key.includes("window")) continue;
     const item = metrics[region.key];
     if (!item.active && item.changed < 5) continue;

@@ -1,0 +1,208 @@
+import { access, mkdir, readFile, readdir, rm, writeFile, copyFile } from "node:fs/promises";
+import path from "node:path";
+import { nanoid } from "nanoid";
+import sharp from "sharp";
+
+export type AnnotationSplit = "train" | "val";
+export type AnnotationBox = {
+  classId: number;
+  className: string;
+  rect: [number, number, number, number];
+  heroId?: number;
+  heroName?: string;
+  transcript?: string;
+};
+
+export const ultralyticsClasses = [
+  "minimap_panel",
+  "draft_screen",
+  "equipment_scoreboard",
+  "attributes_scoreboard",
+  "ally_pick_slot",
+  "enemy_pick_slot",
+  "ally_ban_slot",
+  "enemy_ban_slot",
+  "lane_marker",
+  "battle_spell_marker",
+  "ally_hero_marker",
+  "enemy_hero_marker",
+  "turtle",
+  "lord",
+  "ally_turret",
+  "enemy_turret",
+  "turtle_respawn_timer",
+  "lord_respawn_timer",
+  "enemy_respawn_timer",
+  "ally_respawn_timer",
+  "minimap_objective_timer",
+  "score_counter",
+] as const;
+
+type AnnotationMetadata = {
+  id: string;
+  split: AnnotationSplit;
+  source: string;
+  width: number;
+  height: number;
+  boxes: AnnotationBox[];
+  imageName: string;
+  createdAt: string;
+};
+
+const projectRoot = path.resolve(process.cwd(), "..");
+const cvRoot = path.join(projectRoot, "data", "cv");
+const annotationRoot = path.join(cvRoot, "annotations");
+
+export function getAnnotationClasses() {
+  return ultralyticsClasses.map((name, id) => ({ id, name, group: groupForClass(name) }));
+}
+
+export async function listAnnotations() {
+  const annotations: AnnotationMetadata[] = [];
+  for (const split of ["train", "val"] as const) {
+    const directory = path.join(annotationRoot, "metadata", split);
+    if (!(await exists(directory))) continue;
+    for (const name of await readdir(directory)) {
+      if (!name.endsWith(".json")) continue;
+      const metadata = JSON.parse(await readFile(path.join(directory, name), "utf8")) as AnnotationMetadata;
+      annotations.push(metadata);
+    }
+  }
+  return annotations.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function saveAnnotation(
+  image: Buffer,
+  input: { split?: unknown; source?: unknown; boxes?: unknown },
+) {
+  const split: AnnotationSplit = input.split === "val" ? "val" : "train";
+  const boxes = normalizeAnnotationBoxes(input.boxes);
+  if (!boxes.length) throw new Error("Draw at least one annotation box before saving.");
+  const info = await sharp(image).metadata();
+  if (!info.width || !info.height) throw new Error("Could not read annotation image dimensions.");
+  const id = `user-${new Date().toISOString().replace(/[:.]/g, "-")}-${nanoid(6)}`;
+  const imageName = `${id}.jpg`;
+  const labelName = `${id}.txt`;
+  const metadata: AnnotationMetadata = {
+    id,
+    split,
+    source: String(input.source ?? "cv-lab"),
+    width: info.width,
+    height: info.height,
+    boxes,
+    imageName,
+    createdAt: new Date().toISOString(),
+  };
+  const canonicalImage = path.join(annotationRoot, "images", split, imageName);
+  const canonicalLabel = path.join(annotationRoot, "labels", split, labelName);
+  const metadataFile = path.join(annotationRoot, "metadata", split, `${id}.json`);
+  const activeImage = path.join(cvRoot, "images", split, imageName);
+  const activeLabel = path.join(cvRoot, "labels", split, labelName);
+  await Promise.all([
+    mkdir(path.dirname(canonicalImage), { recursive: true }),
+    mkdir(path.dirname(canonicalLabel), { recursive: true }),
+    mkdir(path.dirname(metadataFile), { recursive: true }),
+    mkdir(path.dirname(activeImage), { recursive: true }),
+    mkdir(path.dirname(activeLabel), { recursive: true }),
+  ]);
+  await sharp(image).jpeg({ quality: 94 }).toFile(canonicalImage);
+  const labels = boxes.map(toYoloLine).join("\n") + "\n";
+  await Promise.all([
+    writeFile(canonicalLabel, labels, "ascii"),
+    writeFile(metadataFile, JSON.stringify(metadata, null, 2) + "\n", "ascii"),
+  ]);
+  await Promise.all([copyFile(canonicalImage, activeImage), copyFile(canonicalLabel, activeLabel)]);
+  return metadata;
+}
+
+export async function syncSavedAnnotationsToDataset() {
+  const samples = await listAnnotations();
+  for (const sample of samples) {
+    const image = path.join(annotationRoot, "images", sample.split, sample.imageName);
+    const label = path.join(annotationRoot, "labels", sample.split, `${sample.id}.txt`);
+    if (!(await exists(image)) || !(await exists(label))) continue;
+    await mkdir(path.join(cvRoot, "images", sample.split), { recursive: true });
+    await mkdir(path.join(cvRoot, "labels", sample.split), { recursive: true });
+    await copyFile(image, path.join(cvRoot, "images", sample.split, sample.imageName));
+    await copyFile(label, path.join(cvRoot, "labels", sample.split, `${sample.id}.txt`));
+  }
+  return samples.length;
+}
+
+export async function deleteAnnotation(id: string) {
+  const safeId = path.basename(id);
+  const samples = await listAnnotations();
+  const sample = samples.find((entry) => entry.id === safeId);
+  if (!sample) return false;
+  await Promise.all([
+    rm(path.join(annotationRoot, "images", sample.split, sample.imageName), { force: true }),
+    rm(path.join(annotationRoot, "labels", sample.split, `${sample.id}.txt`), { force: true }),
+    rm(path.join(annotationRoot, "metadata", sample.split, `${sample.id}.json`), { force: true }),
+    rm(path.join(cvRoot, "images", sample.split, sample.imageName), { force: true }),
+    rm(path.join(cvRoot, "labels", sample.split, `${sample.id}.txt`), { force: true }),
+  ]);
+  return true;
+}
+
+export async function annotationImage(id: string) {
+  const safeId = path.basename(id);
+  const sample = (await listAnnotations()).find((entry) => entry.id === safeId);
+  if (!sample) return null;
+  const image = path.join(annotationRoot, "images", sample.split, sample.imageName);
+  return (await exists(image)) ? image : null;
+}
+
+export function normalizeAnnotationBoxes(value: unknown): AnnotationBox[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((box: any) => {
+    const classId = Number(box?.classId);
+    const rect = Array.isArray(box?.rect) ? box.rect.map(Number) : [];
+    if (!Number.isInteger(classId) || !ultralyticsClasses[classId] || rect.length !== 4) return [];
+    if (!rect.every((entry: number) => Number.isFinite(entry) && entry >= 0 && entry <= 1)) return [];
+    if (rect[2] < 0.001 || rect[3] < 0.001 || rect[0] + rect[2] > 1.000001 || rect[1] + rect[3] > 1.000001) return [];
+    const className = ultralyticsClasses[classId];
+    const annotation: AnnotationBox = { classId, className, rect: rect as [number, number, number, number] };
+    if (isHeroMarkerClass(className)) {
+      const heroId = Number(box?.heroId);
+      const heroName = String(box?.heroName ?? "").trim();
+      if (Number.isInteger(heroId) && heroId > 0 && heroName) {
+        annotation.heroId = heroId;
+        annotation.heroName = heroName.slice(0, 80);
+      }
+    }
+    if (isTranscriptClass(className)) {
+      const transcript = String(box?.transcript ?? "").trim();
+      if (/^\d{1,3}(?::\d{2})?$/.test(transcript)) annotation.transcript = transcript;
+    }
+    return [annotation];
+  });
+}
+
+function toYoloLine(box: AnnotationBox) {
+  const [x, y, width, height] = box.rect;
+  return `${box.classId} ${(x + width / 2).toFixed(6)} ${(y + height / 2).toFixed(6)} ${width.toFixed(6)} ${height.toFixed(6)}`;
+}
+
+function groupForClass(name: string) {
+  if (name.includes("respawn") || name.includes("counter") || name.includes("timer")) return "Counters";
+  if (name.includes("minimap") || name.includes("turret") || ["turtle", "lord"].includes(name)) return "Map";
+  if (name.includes("pick") || name.includes("ban") || name.includes("lane") || name.includes("spell") || name.includes("draft")) return "Draft";
+  return "HUD";
+}
+
+function isHeroMarkerClass(name: string) {
+  return name === "ally_hero_marker" || name === "enemy_hero_marker";
+}
+
+function isTranscriptClass(name: string) {
+  return name.includes("respawn") || name.includes("counter") || name.includes("timer");
+}
+
+async function exists(file: string) {
+  try {
+    await access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -1,14 +1,14 @@
-export type PortraitVariant = "normal" | "mirror-x";
-export type PortraitReference = {
+export type HeroPortraitReference = {
   heroId: number;
   heroName: string;
-  variant: PortraitVariant;
+  variant: "normal" | "mirror-x";
   signature: number[];
 };
-export type PortraitRanking = {
+
+export type HeroPortraitRanking = {
   heroId: number;
   heroName: string;
-  variant: PortraitVariant;
+  variant: "normal" | "mirror-x";
   confidence: number;
 };
 
@@ -16,24 +16,25 @@ export function portraitSignatureFromRgba(
   rgba: Uint8ClampedArray,
   width: number,
   height: number,
-  gridSize = 8,
+  columns = 6,
+  rows = 8,
 ) {
   const output: number[] = [];
-  for (let gy = 0; gy < gridSize; gy += 1) {
-    for (let gx = 0; gx < gridSize; gx += 1) {
+  for (let gy = 0; gy < rows; gy += 1) {
+    for (let gx = 0; gx < columns; gx += 1) {
       let red = 0;
       let green = 0;
       let blue = 0;
       let count = 0;
-      const startX = Math.floor((gx / gridSize) * width);
-      const endX = Math.max(startX + 1, Math.floor(((gx + 1) / gridSize) * width));
-      const startY = Math.floor((gy / gridSize) * height);
-      const endY = Math.max(startY + 1, Math.floor(((gy + 1) / gridSize) * height));
+      const startX = Math.floor((gx / columns) * width);
+      const endX = Math.max(startX + 1, Math.floor(((gx + 1) / columns) * width));
+      const startY = Math.floor((gy / rows) * height);
+      const endY = Math.max(startY + 1, Math.floor(((gy + 1) / rows) * height));
       for (let y = startY; y < Math.min(height, endY); y += 1) {
         for (let x = startX; x < Math.min(width, endX); x += 1) {
-          const dx = (x + 0.5) / width - 0.5;
-          const dy = (y + 0.5) / height - 0.5;
-          if (dx * dx + dy * dy > 0.245) continue;
+          const nx = (x + 0.5) / width;
+          const ny = (y + 0.5) / height;
+          if (nx < 0.14 || nx > 0.86 || ny < 0.08 || ny > 0.82) continue;
           const index = (y * width + x) * 4;
           if (rgba[index + 3] < 24) continue;
           red += rgba[index];
@@ -50,27 +51,83 @@ export function portraitSignatureFromRgba(
   return output;
 }
 
-export function mirrorPortraitSignature(signature: number[], gridSize = 8) {
+export function mirrorPortraitSignature(signature: number[], columns = 6, rows = 8) {
   const output: number[] = [];
-  const channels = 3;
-  for (let y = 0; y < gridSize; y += 1) {
-    for (let x = gridSize - 1; x >= 0; x -= 1) {
-      const start = (y * gridSize + x) * channels;
-      output.push(...signature.slice(start, start + channels));
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = columns - 1; x >= 0; x -= 1) {
+      const start = (y * columns + x) * 3;
+      output.push(...signature.slice(start, start + 3));
     }
   }
   return output;
 }
 
+export function draftBannerSignatureFromRgba(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  columns = 30,
+  rows = 20,
+) {
+  const luma: number[] = [];
+  for (let gy = 0; gy < rows; gy += 1) {
+    for (let gx = 0; gx < columns; gx += 1) {
+      let value = 0;
+      let count = 0;
+      const startX = Math.floor((gx / columns) * width);
+      const endX = Math.max(startX + 1, Math.floor(((gx + 1) / columns) * width));
+      const startY = Math.floor((gy / rows) * height);
+      const endY = Math.max(startY + 1, Math.floor(((gy + 1) / rows) * height));
+      for (let y = startY; y < Math.min(height, endY); y += 1) {
+        for (let x = startX; x < Math.min(width, endX); x += 1) {
+          const index = (y * width + x) * 4;
+          if (rgba[index + 3] < 24) continue;
+          value += rgba[index] * 0.299 + rgba[index + 1] * 0.587 + rgba[index + 2] * 0.114;
+          count += 1;
+        }
+      }
+      luma.push(count ? value / count : 0);
+    }
+  }
+  const mean = luma.reduce((sum, value) => sum + value, 0) / Math.max(1, luma.length);
+  const deviation = Math.sqrt(
+    luma.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, luma.length),
+  ) || 1;
+  return luma.map((value) => (value - mean) / deviation);
+}
+
+export function mirrorDraftBannerSignature(signature: number[], columns = 30, rows = 20) {
+  const output: number[] = [];
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = columns - 1; x >= 0; x -= 1) output.push(signature[y * columns + x]);
+  }
+  return output;
+}
+
+export function rankDraftBannerCandidates(signature: number[], references: HeroPortraitReference[]) {
+  return references
+    .map((reference) => {
+      let correlation = 0;
+      for (let index = 0; index < signature.length; index += 1) correlation += signature[index] * reference.signature[index];
+      correlation /= Math.max(1, signature.length);
+      return {
+        heroId: reference.heroId,
+        heroName: reference.heroName,
+        variant: reference.variant,
+        confidence: Math.max(0, Math.min(1, (correlation + 1) / 2)),
+      };
+    })
+    .sort((left, right) => right.confidence - left.confidence);
+}
+
 function similarity(a: number[], b: number[]) {
   if (!a.length || a.length !== b.length) return 0;
   let squaredError = 0;
-  for (let i = 0; i < a.length; i += 1) squaredError += (a[i] - b[i]) ** 2;
-  const rootMeanSquaredError = Math.sqrt(squaredError / a.length);
-  return Math.max(0, Math.min(1, 1 - rootMeanSquaredError * 1.5));
+  for (let index = 0; index < a.length; index += 1) squaredError += (a[index] - b[index]) ** 2;
+  return Math.max(0, Math.min(1, 1 - Math.sqrt(squaredError / a.length) * 1.65));
 }
 
-export function rankPortraitCandidates(signature: number[], references: PortraitReference[]) {
+export function rankPortraitCandidates(signature: number[], references: HeroPortraitReference[]) {
   return references
     .map((reference) => ({
       heroId: reference.heroId,
@@ -82,9 +139,9 @@ export function rankPortraitCandidates(signature: number[], references: Portrait
 }
 
 export function acceptPortraitMatch(
-  ranking: PortraitRanking[],
-  minimumConfidence = 0.76,
-  minimumMargin = 0.025,
+  ranking: HeroPortraitRanking[],
+  minimumConfidence = 0.8,
+  minimumMargin = 0.035,
 ) {
   const best = ranking[0];
   const second = ranking.find((candidate) => candidate.heroId !== best?.heroId);

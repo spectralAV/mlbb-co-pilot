@@ -16,6 +16,40 @@
       0.088458
     ]
   ],
+  "ally_pick_portraits_norm": [
+    [
+      0,
+      0.083042,
+      0.162621,
+      0.832224
+    ]
+  ],
+  "enemy_pick_portraits_norm": [
+    [
+      0.842233,
+      0.084847,
+      0.157767,
+      0.828613
+    ]
+  ],
+  "draft_self_highlight_rail_norm": [
+    0,
+    0.1,
+    0.19,
+    0.88
+  ],
+  "draft_first_pick_ally_indicator_norm": [
+    0.278,
+    0.032,
+    0.052,
+    0.072
+  ],
+  "draft_first_pick_enemy_indicator_norm": [
+    0.702,
+    0.032,
+    0.052,
+    0.072
+  ],
   "ally_picks_norm": [
     [
       0,
@@ -47,5 +81,20 @@
     ]
   ],
   "items_norm": [],
-  "attributes_window_norm": []
+  "equipment_window_norm": [
+    [
+      0.1,
+      0.13,
+      0.8,
+      0.78
+    ]
+  ],
+  "attributes_window_norm": [
+    [
+      0.1,
+      0.13,
+      0.8,
+      0.78
+    ]
+  ]
 }

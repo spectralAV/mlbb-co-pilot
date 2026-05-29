@@ -36,6 +36,8 @@ export type OverlayState = {
   picksSubtitle: string;
   allyPicks: string[];
   enemyPicks: string[];
+  allyBans: string[];
+  enemyBans: string[];
   updatedAt: string;
 };
 
@@ -74,9 +76,11 @@ let state: OverlayState = {
   counterLabel: "No confirmed warning",
   counterItems: [],
   picksTitle: "Detected Draft State",
-  picksSubtitle: "Awaiting confirmed portraits",
+  picksSubtitle: "Awaiting confirmed draft facts",
   allyPicks: [],
   enemyPicks: [],
+  allyBans: [],
+  enemyBans: [],
   updatedAt: new Date().toISOString()
 };
 

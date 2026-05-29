@@ -40,6 +40,9 @@ export function compileRuntime(directoryResponse: any, metaResponse: any): Runti
       channelId: Number(row.id),
       name: String(hero.name ?? `Hero ${heroId}`),
       icon: hero.smallmap,
+      head: hero.head,
+      portrait: hero.smallmap,
+      painting: hero.painting,
       roles: extractRoles(hero.sortid),
       lanes: extractLanes(hero.roadsort),
       relations: {

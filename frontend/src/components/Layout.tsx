@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, Boxes, Crosshair, Database, Radio, Radar, Settings, SlidersHorizontal } from "lucide-react";
+import { Activity, Boxes, Crosshair, Database, Images, Radio, Radar, ScanSearch, Settings, SlidersHorizontal } from "lucide-react";
 import { CaptureRuntimeHost } from "./CaptureRuntimeHost";
-const links=[["/","Status",Activity],["/capture","Live",Radar],["/draft","Draft",Crosshair],["/calibration","Calibration",SlidersHorizontal],["/build","Build Data",Boxes],["/mlbb-control","Stream Output",Radio],["/settings","Settings",Settings]] as const;
+const links=[["/","Status",Activity],["/capture","Live",Radar],["/draft","Draft",Crosshair],["/skins","Skins",Images],["/calibration","Calibration",SlidersHorizontal],["/cv-lab","CV Lab",ScanSearch],["/build","Build Data",Boxes],["/mlbb-control","Stream Output",Radio],["/settings","Settings",Settings]] as const;
 export function Layout(){return <div className="min-h-screen lg:grid lg:grid-cols-[260px_minmax(0,1fr)]">
   <CaptureRuntimeHost/>
   <aside className="hidden border-r border-white/10 bg-black/30 p-4 lg:block lg:h-screen lg:sticky lg:top-0">

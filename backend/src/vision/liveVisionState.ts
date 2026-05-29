@@ -1,9 +1,12 @@
 import { eventBus } from "../event-bus/eventBus.js";
 import { ingestLiveReasoning } from "../engines/liveReasoningEngine.js";
-import { updateMatchVision } from "../state/matchState.js";
+import { DETECTED_FACT_CONFIDENCE, getMatchState, updateMatchVision } from "../state/matchState.js";
+import { updateMinimapMonitor, type MinimapMonitorSnapshot } from "./minimapMonitor.js";
+import type { TimerFact } from "./timerRecognition.js";
 
 export type VisionScreenState =
   | "unknown"
+  | "lobby"
   | "draft"
   | "loading"
   | "live_hud"
@@ -16,8 +19,40 @@ export type VisionDirectorScene = "main" | "map" | "text" | "counter" | "picks";
 type NormalizedMarker = {
   id: string;
   side: "ally" | "enemy";
+  markerClass: "team-color-candidate" | "ultralytics-yolo";
   minimap: [number, number];
   confidence: number;
+  heroId?: number;
+  heroName?: string;
+  heroIcon?: string;
+  identityConfidence?: number;
+  identitySource?: "minimap-hero-identity";
+};
+
+type ModelDetectionFact = {
+  classId: number;
+  className: string;
+  confidence: number;
+  bbox: [number, number, number, number];
+  center: [number, number];
+  source: "ultralytics-yolo";
+};
+
+type MapObjectFact = {
+  objectType: "turtle" | "lord" | "ally_turret" | "enemy_turret";
+  minimap: [number, number];
+  confidence: number;
+  source: "ultralytics-yolo";
+};
+
+type EquipmentFact = {
+  itemId: number;
+  itemName: string;
+  side: "ally" | "enemy";
+  row: number;
+  slot: number;
+  confidence: number;
+  source: "equipment-item-icon";
 };
 
 type VisionFrameInput = {
@@ -40,6 +75,11 @@ type VisionFrameInput = {
     teamHasAntiHeal?: boolean;
     enemyHealingThreats?: string[];
     enemyItems?: string[];
+    enemyEquipment?: EquipmentFact[];
+    allyEquipment?: EquipmentFact[];
+    yoloDetections?: ModelDetectionFact[];
+    minimapObjects?: MapObjectFact[];
+    timerFacts?: TimerFact[];
   };
 };
 
@@ -63,23 +103,64 @@ export type LiveVisionSnapshot = {
     teamHasAntiHeal?: boolean;
     enemyHealingThreats: string[];
     enemyItems: string[];
+    enemyEquipment: EquipmentFact[];
+    allyItems: string[];
+    allyEquipment: EquipmentFact[];
+    yoloDetections: ModelDetectionFact[];
+    minimapObjects: MapObjectFact[];
+    mapMonitor: MinimapMonitorSnapshot;
+    timerFacts: TimerFact[];
   };
   directorScene: VisionDirectorScene;
   updatedAt: string;
 };
 
 let latest: LiveVisionSnapshot | null = null;
+let rememberedEnemyItems: string[] = [];
+let rememberedEnemyEquipment: EquipmentFact[] = [];
+let rememberedAllyItems: string[] = [];
+let rememberedAllyEquipment: EquipmentFact[] = [];
 
 export function ingestLiveVisionFrame(input: VisionFrameInput) {
+  const screen = normalizeScreen(input.screen);
+  const detectedEnemyEquipment = normalizeEquipmentFacts(input.signals?.enemyEquipment, "enemy");
+  const detectedAllyEquipment = normalizeEquipmentFacts(input.signals?.allyEquipment, "ally");
+  const detectedEnemyItems = normalizeStrings(input.signals?.enemyItems);
+  if (screen === "lobby" || screen === "draft" || screen === "loading") {
+    rememberedEnemyItems = [];
+    rememberedEnemyEquipment = [];
+    rememberedAllyItems = [];
+    rememberedAllyEquipment = [];
+  } else if (screen === "scoreboard" && detectedEnemyEquipment.length) {
+    rememberedEnemyEquipment = detectedEnemyEquipment;
+    rememberedEnemyItems = [...new Set(detectedEnemyEquipment.map((item) => item.itemName))];
+  } else if (screen === "scoreboard" && detectedEnemyItems.length) {
+    rememberedEnemyItems = detectedEnemyItems;
+  }
+  if (screen === "scoreboard" && detectedAllyEquipment.length) {
+    rememberedAllyEquipment = detectedAllyEquipment;
+    rememberedAllyItems = [...new Set(detectedAllyEquipment.map((item) => item.itemName))];
+  }
+  const allyItems = detectedAllyEquipment.length
+    ? [...new Set(detectedAllyEquipment.map((item) => item.itemName))]
+    : rememberedAllyItems;
+  const minimapMarkers = normalizeMarkers(input.minimapMarkers);
+  const minimapObjects = normalizeMapObjects(input.signals?.minimapObjects);
+  const mapMonitor = updateMinimapMonitor({
+    screen,
+    timestamp: Number.isFinite(Number(input.timestamp)) ? Number(input.timestamp) : Date.now(),
+    markers: minimapMarkers,
+    objects: minimapObjects,
+  });
   const snapshot: LiveVisionSnapshot = {
     frameId: String(input.frameId ?? `frame-${Date.now()}`),
     source: String(input.source ?? "capture"),
     timestamp: Number.isFinite(Number(input.timestamp)) ? Number(input.timestamp) : Date.now(),
-    screen: normalizeScreen(input.screen),
+    screen,
     confidence: clamp01(input.confidence),
     evidence: Array.isArray(input.evidence) ? input.evidence.map(String).slice(0, 12) : [],
     regions: normalizeRegions(input.regions),
-    minimapMarkers: normalizeMarkers(input.minimapMarkers),
+    minimapMarkers,
     signals: {
       objectiveSoon: Boolean(input.signals?.objectiveSoon),
       objectiveName: input.signals?.objectiveName ? String(input.signals.objectiveName) : undefined,
@@ -88,9 +169,20 @@ export function ingestLiveVisionFrame(input: VisionFrameInput) {
       missingEnemies: normalizeStrings(input.signals?.missingEnemies),
       riverVision: typeof input.signals?.riverVision === "boolean" ? input.signals.riverVision : undefined,
       warning: input.signals?.warning ? String(input.signals.warning) : undefined,
-      teamHasAntiHeal: typeof input.signals?.teamHasAntiHeal === "boolean" ? input.signals.teamHasAntiHeal : undefined,
+      teamHasAntiHeal: typeof input.signals?.teamHasAntiHeal === "boolean"
+        ? input.signals.teamHasAntiHeal
+        : allyItems.some(isAntiHealItem),
       enemyHealingThreats: normalizeStrings(input.signals?.enemyHealingThreats),
-      enemyItems: normalizeStrings(input.signals?.enemyItems)
+      enemyItems: detectedEnemyEquipment.length
+        ? [...new Set(detectedEnemyEquipment.map((item) => item.itemName))]
+        : detectedEnemyItems.length ? detectedEnemyItems : rememberedEnemyItems,
+      enemyEquipment: detectedEnemyEquipment.length ? detectedEnemyEquipment : rememberedEnemyEquipment,
+      allyItems,
+      allyEquipment: detectedAllyEquipment.length ? detectedAllyEquipment : rememberedAllyEquipment,
+      yoloDetections: normalizeModelDetections(input.signals?.yoloDetections),
+      minimapObjects,
+      mapMonitor,
+      timerFacts: normalizeTimerFacts(input.signals?.timerFacts),
     },
     directorScene: "main",
     updatedAt: new Date().toISOString()
@@ -108,19 +200,48 @@ export function getLatestLiveVision() {
 }
 
 function normalizeScreen(value?: VisionScreenState): VisionScreenState {
-  return ["unknown", "draft", "loading", "live_hud", "death_replay", "scoreboard", "item_shop"].includes(String(value))
+  return ["unknown", "lobby", "draft", "loading", "live_hud", "death_replay", "scoreboard", "item_shop"].includes(String(value))
     ? value as VisionScreenState
     : "unknown";
 }
 
 function normalizeMarkers(markers?: NormalizedMarker[]) {
   if (!Array.isArray(markers)) return [];
-  return markers.slice(0, 20).map((marker, index) => ({
-    id: String(marker.id ?? `${marker.side ?? "marker"}-${index}`),
-    side: marker.side === "enemy" ? "enemy" as const : "ally" as const,
-    minimap: [clamp01(marker.minimap?.[0]), clamp01(marker.minimap?.[1])] as [number, number],
-    confidence: clamp01(marker.confidence)
-  }));
+  const draft = getMatchState().draft;
+  return markers.slice(0, 20).map((marker, index) => {
+    const side = marker.side === "enemy" ? "enemy" as const : "ally" as const;
+    const normalized = {
+      id: String(marker.id ?? `${side}-${index}`),
+      side,
+      markerClass: marker.markerClass === "ultralytics-yolo" ? "ultralytics-yolo" as const : "team-color-candidate" as const,
+      minimap: [clamp01(marker.minimap?.[0]), clamp01(marker.minimap?.[1])] as [number, number],
+      confidence: clamp01(marker.confidence),
+    };
+    const roster = side === "enemy" ? draft?.enemyPicks : draft?.allyPicks;
+    const identity = acceptMarkerIdentity(marker, roster);
+    return identity ? { ...normalized, ...identity } : normalized;
+  });
+}
+
+function acceptMarkerIdentity(marker: NormalizedMarker, roster?: Array<{ heroId?: number; heroName?: string }>) {
+  const identityConfidence = clamp01(marker.identityConfidence);
+  if (marker.identitySource !== "minimap-hero-identity" || identityConfidence < DETECTED_FACT_CONFIDENCE || !roster?.length) {
+    return null;
+  }
+  const heroId = Number(marker.heroId);
+  const heroName = String(marker.heroName ?? "").trim().toLowerCase();
+  const match = roster.find((hero) =>
+    (Number.isFinite(heroId) && hero.heroId === heroId) ||
+    (Boolean(heroName) && String(hero.heroName ?? "").trim().toLowerCase() === heroName)
+  );
+  if (!match || (!match.heroId && !match.heroName)) return null;
+  return {
+    heroId: match.heroId,
+    heroName: match.heroName,
+    heroIcon: match.heroId ? `/api/vision/heroes/icon/${match.heroId}` : undefined,
+    identityConfidence,
+    identitySource: "minimap-hero-identity" as const,
+  };
 }
 
 function normalizeRegions(regions?: VisionFrameInput["regions"]) {
@@ -144,6 +265,102 @@ function optionalNumber(value: unknown) {
 
 function normalizeStrings(value: unknown) {
   return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 10) : [];
+}
+
+function normalizeEquipmentFacts(value: unknown, side: "ally" | "enemy"): EquipmentFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((fact: any) => ({
+      itemId: Number(fact?.itemId),
+      itemName: String(fact?.itemName ?? "").trim(),
+      side,
+      row: Number(fact?.row),
+      slot: Number(fact?.slot),
+      confidence: clamp01(fact?.confidence),
+      source: "equipment-item-icon" as const,
+    }))
+    .filter((fact) =>
+      Number.isFinite(fact.itemId) &&
+      Boolean(fact.itemName) &&
+      Number.isInteger(fact.row) && fact.row >= 1 && fact.row <= 5 &&
+      Number.isInteger(fact.slot) && fact.slot >= 1 && fact.slot <= 6 &&
+      fact.confidence >= DETECTED_FACT_CONFIDENCE)
+    .slice(0, 30);
+}
+
+function normalizeModelDetections(value: unknown): ModelDetectionFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((fact: any) => ({
+      classId: Number(fact?.classId),
+      className: String(fact?.className ?? "").trim(),
+      confidence: clamp01(fact?.confidence),
+      bbox: normalizeBox(fact?.bbox),
+      center: normalizePoint(fact?.center),
+      source: "ultralytics-yolo" as const,
+    }))
+    .filter((fact) =>
+      Number.isInteger(fact.classId) &&
+      Boolean(fact.className) &&
+      fact.bbox !== null &&
+      fact.center !== null &&
+      fact.confidence >= DETECTED_FACT_CONFIDENCE)
+    .map((fact) => ({ ...fact, bbox: fact.bbox!, center: fact.center! }))
+    .slice(0, 64);
+}
+
+function normalizeMapObjects(value: unknown): MapObjectFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((fact: any) => ({
+      objectType: String(fact?.objectType ?? ""),
+      minimap: normalizePoint(fact?.minimap),
+      confidence: clamp01(fact?.confidence),
+      source: "ultralytics-yolo" as const,
+    }))
+    .filter((fact): fact is MapObjectFact =>
+      ["turtle", "lord", "ally_turret", "enemy_turret"].includes(fact.objectType) &&
+      fact.minimap !== null &&
+      fact.confidence >= DETECTED_FACT_CONFIDENCE)
+    .slice(0, 24);
+}
+
+function normalizeTimerFacts(value: unknown): TimerFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((fact: any) => ({
+      timerType: String(fact?.timerType),
+      text: String(fact?.text ?? ""),
+      seconds: optionalNumber(fact?.seconds),
+      value: optionalNumber(fact?.value),
+      confidence: clamp01(fact?.confidence),
+      source: String(fact?.source ?? ""),
+      confirmedAt: Number(fact?.confirmedAt),
+    }))
+    .filter((fact) =>
+      ["turtle_respawn_timer", "lord_respawn_timer", "enemy_respawn_timer", "ally_respawn_timer", "minimap_objective_timer", "score_counter"].includes(fact.timerType) &&
+      fact.source === "timer-ocr" &&
+      fact.confidence >= DETECTED_FACT_CONFIDENCE &&
+      Number.isFinite(fact.confirmedAt) &&
+      (Number.isFinite(fact.seconds) || Number.isFinite(fact.value)))
+    .map((fact) => ({ ...fact, timerType: fact.timerType as TimerFact["timerType"], source: "timer-ocr" as const }))
+    .slice(0, 8);
+}
+
+function normalizePoint(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const normalized = value.map(clamp01);
+  return normalized.every((point) => Number.isFinite(point)) ? normalized as [number, number] : null;
+}
+
+function normalizeBox(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const normalized = value.map(clamp01);
+  return normalized.every((point) => Number.isFinite(point)) ? normalized as [number, number, number, number] : null;
+}
+
+function isAntiHealItem(item: string) {
+  return ["Dominance Ice", "Sea Halberd", "Glowing Wand"].includes(item);
 }
 
 function finiteOrZero(value: unknown) {

@@ -9,6 +9,7 @@ const DEVICE_SERVER_PATH = "/data/local/tmp/mlbb-copilot-scrcpy-server.jar";
 const SCRCPY_PORT = 27183;
 const MAX_CLIENT_BUFFERED_BYTES = 192 * 1024;
 type ScrcpyVideoCodec = "h264" | "h265" | "av1";
+type ScrcpyFrameMeta = { type: "scrcpy_frame"; config: boolean; key: boolean; ptsUs: number; size: number };
 
 let scrcpyProcess: ChildProcessWithoutNullStreams | null = null;
 let h264Shell: ChildProcessWithoutNullStreams | null = null;
@@ -22,6 +23,8 @@ let h264Buffer = Buffer.alloc(0);
 let codecMetaRead = false;
 let h264RawStream = false;
 let h264Stats = { frames: 0, bytes: 0, width: 0, height: 0, codec: "", lastFrameAt: null as string | null };
+let h264StreamMeta: { codec: string; width?: number; height?: number; raw?: boolean } | null = null;
+let h264ConfigFrame: { meta: ScrcpyFrameMeta; payload: Buffer } | null = null;
 const h264Clients = new Set<any>();
 const h264ClientState = new Map<any, { needsKeyframe: boolean }>();
 
@@ -79,7 +82,7 @@ export function startScrcpy(options: any = {}) {
     lastError = `${requestedCodec.toUpperCase()} scrcpy streaming is not wired into the low-latency browser decoder yet. Use H.264 for live capture.`;
     return { ...getScrcpyStatus(), ok: false, message: lastError };
   }
-  if (options.decoder === "h264" || options.directH264) return startScrcpyH264({ ...options, decoder: "h264", videoCodec: "h264", rawStream: true });
+  if (options.decoder === "h264" || options.directH264) return startScrcpyH264({ ...options, decoder: "h264", videoCodec: "h264", rawStream: false });
   if (scrcpyProcess && !scrcpyProcess.killed) return getScrcpyStatus();
   const scrcpy = resolveScrcpy();
   const background = options.background !== false;
@@ -130,6 +133,7 @@ export function attachScrcpyH264Client(socket: any) {
   h264Clients.add(socket);
   h264ClientState.set(socket, { needsKeyframe: true });
   socket.send(JSON.stringify({ type: "scrcpy_status", status: getScrcpyStatus() }));
+  if (h264StreamMeta) socket.send(JSON.stringify({ type: "scrcpy_stream_meta", ...h264StreamMeta }));
   socket.on("close", () => {
     h264Clients.delete(socket);
     h264ClientState.delete(socket);
@@ -150,7 +154,8 @@ function broadcastBinary(payload: Buffer) {
   }
 }
 
-function broadcastH264Frame(meta: { type: "scrcpy_frame"; config: boolean; key: boolean; ptsUs: number; size: number }, payload: Buffer) {
+function broadcastH264Frame(meta: ScrcpyFrameMeta, payload: Buffer) {
+  if (meta.config) h264ConfigFrame = { meta, payload: Buffer.from(payload) };
   const metaPayload = JSON.stringify(meta);
   for (const client of h264Clients) {
     if (client.readyState !== 1) continue;
@@ -163,6 +168,10 @@ function broadcastH264Frame(meta: { type: "scrcpy_frame"; config: boolean; key: 
       continue;
     }
 
+    if (!meta.config && state.needsKeyframe && meta.key && h264ConfigFrame) {
+      client.send(JSON.stringify(h264ConfigFrame.meta));
+      client.send(h264ConfigFrame.payload);
+    }
     client.send(metaPayload);
     client.send(payload);
     if (meta.key) state.needsKeyframe = false;
@@ -175,6 +184,8 @@ function stopScrcpyH264() {
   codecMetaRead = false;
   h264RawStream = false;
   h264Stats = { frames: 0, bytes: 0, width: 0, height: 0, codec: "", lastFrameAt: null };
+  h264StreamMeta = null;
+  h264ConfigFrame = null;
   h264Socket?.destroy();
   h264Socket = null;
   if (h264Shell && !h264Shell.killed) h264Shell.kill();
@@ -195,7 +206,7 @@ async function startScrcpyH264(options: any = {}) {
   const maxFps = String(options.maxFps ?? 60);
   const videoCodec = normalizeVideoCodec(options.videoCodec ?? options.decoder);
   const encoder = typeof options.videoEncoder === "string" ? options.videoEncoder : defaultVideoEncoder(videoCodec);
-  const rawStream = options.rawStream ?? videoCodec === "h264";
+  const rawStream = Boolean(options.rawStream);
   lastError = "";
   lastExit = null;
 
@@ -212,8 +223,11 @@ async function startScrcpyH264(options: any = {}) {
     "tunnel_forward=true",
     "audio=false",
     "control=false",
-    "cleanup=false",
-    `raw_stream=${rawStream ? "true" : "false"}`,
+    "cleanup=true",
+    "send_dummy_byte=false",
+    "send_device_meta=false",
+    `send_frame_meta=${rawStream ? "false" : "true"}`,
+    `send_stream_meta=${rawStream ? "false" : "true"}`,
     `video_codec=${videoCodec}`,
     `video_bit_rate=${bitRate}`,
     `max_fps=${maxFps}`
@@ -222,7 +236,7 @@ async function startScrcpyH264(options: any = {}) {
   lastArgs = serverArgs;
   h264Stats.codec = videoCodec;
   h264RawStream = Boolean(rawStream);
-  broadcastJson({ type: "scrcpy_log", message: `Starting scrcpy ${videoCodec.toUpperCase()} stream, raw=${rawStream}, max_fps=${maxFps}, bitrate=${bitRate}.` });
+  broadcastJson({ type: "scrcpy_log", message: `Starting scrcpy ${videoCodec.toUpperCase()} stream, framed=${!rawStream}, max_fps=${maxFps}, bitrate=${bitRate}.` });
   h264Shell = spawn(adb, serverArgs, { windowsHide: true });
   startedAt = new Date().toISOString();
   h264Shell.stdout.on("data", (data) => {
@@ -306,7 +320,8 @@ function parseScrcpyBytes(chunk: Buffer) {
     if (!codecMetaRead) {
       codecMetaRead = true;
       h264Stats.codec ||= "h264";
-      broadcastJson({ type: "scrcpy_stream_meta", codec: h264Stats.codec, raw: true });
+      h264StreamMeta = { codec: h264Stats.codec, raw: true };
+      broadcastJson({ type: "scrcpy_stream_meta", ...h264StreamMeta });
     }
     broadcastBinary(chunk);
     return;
@@ -317,7 +332,8 @@ function parseScrcpyBytes(chunk: Buffer) {
     h264Stats.codec = codec;
     codecMetaRead = true;
     h264Buffer = h264Buffer.subarray(4);
-    broadcastJson({ type: "scrcpy_stream_meta", codec });
+    h264StreamMeta = { codec };
+    broadcastJson({ type: "scrcpy_stream_meta", ...h264StreamMeta });
   }
 
   while (h264Buffer.length >= 12) {
@@ -327,7 +343,8 @@ function parseScrcpyBytes(chunk: Buffer) {
       h264Buffer = h264Buffer.subarray(12);
       h264Stats.width = width;
       h264Stats.height = height;
-      broadcastJson({ type: "scrcpy_stream_meta", codec: h264Stats.codec, width, height });
+      h264StreamMeta = { codec: h264Stats.codec, width, height };
+      broadcastJson({ type: "scrcpy_stream_meta", ...h264StreamMeta });
       continue;
     }
     const ptsFlags = h264Buffer.readBigUInt64BE(0);

@@ -1,0 +1,5 @@
+# Ultralytics pulls PyTorch. For NVIDIA GPU acceleration, replace the CPU
+# PyTorch wheel in data/cv/.venv with the CUDA build from pytorch.org first.
+ultralytics>=8.3,<9
+onnx>=1.16,<2
+onnxruntime-directml>=1.20,<2

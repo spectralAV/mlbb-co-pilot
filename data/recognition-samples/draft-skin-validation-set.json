@@ -1,0 +1,15 @@
+{
+  "version": "0.1",
+  "purpose": "Human-confirmed finalized draft rail identities for validating official installed-game SkinHead matching.",
+  "samples": [
+    {
+      "id": "mythic-final-ally-slot-3-lesley",
+      "frame": "samples/video-analysis/mythic/keyframes/draft-final.png",
+      "group": "allyPicks",
+      "slot": 3,
+      "expectedHeroId": 53,
+      "expectedHeroName": "Lesley",
+      "evidence": "Highlighted local row; center selected skin card visibly reads Angelic Agent and match header confirms Gold Lane."
+    }
+  ]
+}

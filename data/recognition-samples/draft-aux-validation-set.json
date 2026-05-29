@@ -1,0 +1,20 @@
+{
+  "version": "0.1",
+  "purpose": "Human-confirmed lane and ally battle-spell facts visible in finalized draft frames.",
+  "samples": [
+    {
+      "id": "mythic-final-local-context",
+      "frame": "samples/video-analysis/mythic/keyframes/draft-final.png",
+      "selfSlot": 3,
+      "expectedSelectedLane": "gold",
+      "expectedAllySpells": [
+        { "slot": 1, "spell": "Retribution" },
+        { "slot": 2, "spell": "Execute" },
+        { "slot": 3, "spell": "Flicker" },
+        { "slot": 4, "spell": "Flicker" },
+        { "slot": 5, "spell": "Flicker" }
+      ],
+      "evidence": "The finalized ally rail visibly contains each spell badge; the center banner explicitly states Proceed to: Gold Lane for the yellow-highlighted local slot."
+    }
+  ]
+}

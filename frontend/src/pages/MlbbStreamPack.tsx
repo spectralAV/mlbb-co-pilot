@@ -1,10 +1,12 @@
-import { type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Copy, Eye, EyeOff, Hash, MessageSquareText, Radio, RotateCcw, Shield, Swords, Timer, Trophy } from "lucide-react";
+import { type ChangeEvent, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Copy, Eye, EyeOff, Film, Hash, MessageSquareText, Radio, RotateCcw, Shield, Swords, Timer, Trash2, Trophy, Upload } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { apiGet, getMatchState, getOverlayState, updateOverlayState } from "../api/client";
+import { apiGet, deleteOverlayMedia, getMatchState, getOverlayMediaConfig, getOverlayState, updateOverlayMediaConfig, updateOverlayState, uploadOverlayMedia } from "../api/client";
+import { CaptureRuntimeHost } from "../components/CaptureRuntimeHost";
 import { BattlefieldMap, type TacticalMapMarker } from "../components/game/BattlefieldMap";
 import { type MapZoneState, defaultMapZones } from "../lib/gameTypes";
-import { resolveHeroIcon } from "../utils/assetResolver";
+import { startSelectedCaptureRuntime, stopCaptureRuntime, useCaptureRuntimeStore } from "../runtime/captureRuntime";
+import { resolveHeroIcon, resolveSpellIcon } from "../utils/assetResolver";
 
 type Scene = "hidden" | "draft" | "matchup" | "objective" | "alert" | "build";
 type Accent = "cyan" | "emerald" | "violet" | "amber" | "red";
@@ -47,6 +49,15 @@ type LocalOverlayState = {
   picksSubtitle: string;
   allyPicks: string[];
   enemyPicks: string[];
+  allyBans: string[];
+  enemyBans: string[];
+  allyLanes: string[];
+  selectedLane: string;
+  selfSlot: string;
+  firstPickSide: string;
+  detectedSpell: string;
+  recommendedSpell: string;
+  spellReason: string;
   updatedAt: string;
 };
 
@@ -56,6 +67,45 @@ type HeroVisual = {
   roles: string[];
   lanes: string[];
   specialties: string[];
+};
+
+type OverlayMediaSlotId = "logo" | "sponsor";
+type OverlayMediaSlot = {
+  enabled: boolean;
+  fileName: string;
+  mediaType: "video" | "image" | "";
+  mimeType: string;
+  chromaKey: {
+    enabled: boolean;
+    color: string;
+    tolerance: number;
+    softness: number;
+  };
+};
+type OverlayMediaConfig = {
+  bandEnabled: boolean;
+  bandOpacity: number;
+  logo: OverlayMediaSlot;
+  sponsor: OverlayMediaSlot;
+  updatedAt: string;
+};
+
+function defaultMediaSlot(): OverlayMediaSlot {
+  return {
+    enabled: true,
+    fileName: "",
+    mediaType: "",
+    mimeType: "",
+    chromaKey: { enabled: false, color: "#00ff00", tolerance: 78, softness: 30 },
+  };
+}
+
+const defaultMediaConfig: OverlayMediaConfig = {
+  bandEnabled: true,
+  bandOpacity: 0.93,
+  logo: defaultMediaSlot(),
+  sponsor: defaultMediaSlot(),
+  updatedAt: "",
 };
 
 const defaultState: LocalOverlayState = {
@@ -93,9 +143,18 @@ const defaultState: LocalOverlayState = {
   counterLabel: "No confirmed warning",
   counterItems: [],
   picksTitle: "Detected Draft State",
-  picksSubtitle: "Awaiting confirmed portraits",
+  picksSubtitle: "Awaiting confirmed draft facts",
   allyPicks: [],
   enemyPicks: [],
+  allyBans: [],
+  enemyBans: [],
+  allyLanes: [],
+  selectedLane: "",
+  selfSlot: "",
+  firstPickSide: "",
+  detectedSpell: "",
+  recommendedSpell: "",
+  spellReason: "",
   updatedAt: new Date().toISOString()
 };
 
@@ -125,7 +184,10 @@ function mergeState(next: Partial<LocalOverlayState>) {
     mapPlan: Array.isArray(next.mapPlan) ? next.mapPlan : defaultState.mapPlan,
     counterItems: Array.isArray(next.counterItems) ? next.counterItems : defaultState.counterItems,
     allyPicks: Array.isArray(next.allyPicks) ? next.allyPicks : defaultState.allyPicks,
-    enemyPicks: Array.isArray(next.enemyPicks) ? next.enemyPicks : defaultState.enemyPicks
+    enemyPicks: Array.isArray(next.enemyPicks) ? next.enemyPicks : defaultState.enemyPicks,
+    allyBans: Array.isArray(next.allyBans) ? next.allyBans : defaultState.allyBans,
+    enemyBans: Array.isArray(next.enemyBans) ? next.enemyBans : defaultState.enemyBans,
+    allyLanes: Array.isArray(next.allyLanes) ? next.allyLanes : defaultState.allyLanes,
   };
 }
 
@@ -161,6 +223,80 @@ function useOverlayState() {
   return { state, matchState, patch, saving };
 }
 
+function normalizeMediaConfig(value: any): OverlayMediaConfig {
+  return {
+    ...defaultMediaConfig,
+    ...value,
+    logo: { ...defaultMediaConfig.logo, ...(value?.logo ?? {}), chromaKey: { ...defaultMediaConfig.logo.chromaKey, ...(value?.logo?.chromaKey ?? {}) } },
+    sponsor: { ...defaultMediaConfig.sponsor, ...(value?.sponsor ?? {}), chromaKey: { ...defaultMediaConfig.sponsor.chromaKey, ...(value?.sponsor?.chromaKey ?? {}) } },
+  };
+}
+
+function useOverlayMedia() {
+  const [config, setConfig] = useState<OverlayMediaConfig>(defaultMediaConfig);
+  const [busy, setBusy] = useState<OverlayMediaSlotId | "settings" | "">("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const result = await getOverlayMediaConfig();
+        if (active) setConfig(normalizeMediaConfig(result.data));
+      } catch (caught) {
+        if (active) setError(caught instanceof Error ? caught.message : "Could not load overlay media.");
+      }
+    }
+    void load();
+    const timer = window.setInterval(load, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  async function patch(next: Partial<OverlayMediaConfig>) {
+    setBusy("settings");
+    setError("");
+    try {
+      const result = await updateOverlayMediaConfig(next);
+      setConfig(normalizeMediaConfig(result.data));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save overlay media settings.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function upload(slot: OverlayMediaSlotId, file: File) {
+    setBusy(slot);
+    setError("");
+    try {
+      const result = await uploadOverlayMedia(slot, file);
+      setConfig(normalizeMediaConfig(result.data));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Media upload failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function remove(slot: OverlayMediaSlotId) {
+    setBusy(slot);
+    setError("");
+    try {
+      const result = await deleteOverlayMedia(slot);
+      setConfig(normalizeMediaConfig(result.data));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not remove media.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return { config, busy, error, patch, upload, remove };
+}
+
 function currentMatch(matchState: any) {
   const receivedAt = Date.parse(String(matchState?.updatedAt ?? ""));
   return Number.isFinite(receivedAt) && Date.now() - receivedAt < 12000 ? matchState : null;
@@ -173,9 +309,7 @@ function currentReasoning(matchState: any) {
 
 function currentDraft(matchState: any) {
   const current = currentMatch(matchState);
-  const detectedAt = Number(current?.draft?.detectedAt ?? 0);
-  const fresh = Number.isFinite(detectedAt) && Date.now() - detectedAt < 8000;
-  return current?.confidence?.draftTrusted && current?.lifecycle?.screen === "draft" && fresh ? current.draft : null;
+  return current?.confidence?.draftTrusted && current?.lifecycle?.screen === "draft" ? current.draft : null;
 }
 
 function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverlayState {
@@ -183,8 +317,20 @@ function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverla
   const live = currentReasoning(current);
   const draft = currentDraft(current);
   const topPick = draft?.analysis?.bestPick;
-  const ally = (draft?.allyPicks?.length ? draft.allyPicks : draft?.allyBans ?? []).map((slot: any) => slot.heroName).filter(Boolean);
-  const enemy = (draft?.enemyPicks?.length ? draft.enemyPicks : draft?.enemyBans ?? []).map((slot: any) => slot.heroName).filter(Boolean);
+  const ally = positionedPicks(draft?.allyPicks);
+  const enemy = positionedPicks(draft?.enemyPicks);
+  const allyBans = (draft?.allyBans ?? []).map((slot: any) => slot.heroName).filter(Boolean);
+  const enemyBans = (draft?.enemyBans ?? []).map((slot: any) => slot.heroName).filter(Boolean);
+  const allyLanes = [...(draft?.allyLanes ?? [])]
+    .sort((left: any, right: any) => Number(left.slot) - Number(right.slot))
+    .map((fact: any) => `P${fact.slot} ${String(fact.lane).toUpperCase()}`);
+  const selectedLane = String(draft?.selectedLane?.value ?? "");
+  const selfSlot = draft?.selfSlot?.value ? `Ally slot ${draft.selfSlot.value}` : "";
+  const firstPickSide = draft?.firstPickSide?.value === "ally"
+    ? "Ally first pick"
+    : draft?.firstPickSide?.value === "enemy" ? "Enemy first pick" : "";
+  const detectedSpell = String(draft?.allySpells?.find((fact: any) => fact.slot === draft?.selfSlot?.value)?.spell ?? "");
+  const spellRecommendation = draft?.analysis?.battleSpells?.recommendations?.[0];
   const missingCount = Number(live?.observation?.missingEnemyCount);
   const plan = live ? [live.recommendedAction, live.reason].filter((line, index, list) => line && list.indexOf(line) === index) : [];
   const activeScene: Scene = draft ? "draft" : live?.scene === "text" || live?.scene === "counter" ? "alert" : "hidden";
@@ -194,14 +340,14 @@ function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverla
     activeScene,
     bestPick: topPick?.hero || "Awaiting detected picks",
     confidence: Number(topPick?.score ?? 0),
-    reason: topPick?.reasons?.[0] || "Waiting for confirmed draft portrait matches.",
+    reason: topPick?.reasons?.[0] || "Waiting for confirmed draft facts.",
     warning: live?.callout || "",
     matchPhase: draft ? `Detected ${draft.phase}` : current?.lifecycle?.screen ? `Detected ${current.lifecycle.screen}` : "Awaiting detection",
     timer: "--:--",
     objective: String(live?.observation?.objectiveName ?? "Objective"),
     objectiveTimer: Number.isFinite(Number(live?.observation?.objectiveSpawnsInSec)) ? `${live.observation.objectiveSpawnsInSec}s` : "--:--",
     lowerTitle: "Detected state",
-    lowerSubtitle: live?.callout || (draft ? "Confirmed draft portraits" : "Waiting for reliable frame"),
+    lowerSubtitle: live?.callout || (draft ? "Confirmed draft facts" : "Waiting for reliable frame"),
     ticker: live ? [live.callout, live.recommendedAction].filter(Boolean) : [],
     buildPath: live?.itemAdjustment ? [live.itemAdjustment] : [],
     mapTitle: String(live?.observation?.objectiveName ?? "Detected map state"),
@@ -218,10 +364,34 @@ function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverla
     counterLabel: live?.callout || "No confirmed warning",
     counterItems: live ? [live.recommendedAction, live.reason, ...(live.itemAdjustment ? [live.itemAdjustment] : [])].filter(Boolean) : [],
     picksTitle: "Detected Draft State",
-    picksSubtitle: draft ? `${Math.round(Number(draft.confidence) * 100)}% portrait confidence` : "Awaiting confirmed portraits",
+    picksSubtitle: draft ? `${Math.round(Number(draft.confidence) * 100)}% fact confidence` : "Awaiting confirmed draft facts",
     allyPicks: ally,
     enemyPicks: enemy,
+    allyBans,
+    enemyBans,
+    allyLanes,
+    selectedLane,
+    selfSlot,
+    firstPickSide,
+    detectedSpell,
+    recommendedSpell: String(spellRecommendation?.spell ?? ""),
+    spellReason: String(spellRecommendation?.reason ?? ""),
   };
+}
+
+function positionedPicks(detected: any[] | undefined) {
+  if (!detected?.length) return [];
+  const picks = Array.from({ length: 5 }, () => "");
+  for (const fact of detected) {
+    const hero = String(fact?.heroName ?? "").trim();
+    if (!hero) continue;
+    const index = Number(fact?.slot) - 1;
+    const destination = Number.isInteger(index) && index >= 0 && index < picks.length
+      ? index
+      : picks.indexOf("");
+    if (destination >= 0) picks[destination] = hero;
+  }
+  return picks;
 }
 
 function OutputShell({ children, bg }: { children: ReactNode; bg: string }) {
@@ -262,6 +432,7 @@ function DraftPanel({ state }: { state: LocalOverlayState; key?: string }) {
         <div className={`text-xs font-black uppercase tracking-[0.24em] ${accent.text}`}>Best pick call</div>
         <h1 className="mt-2 text-6xl font-black uppercase leading-none tracking-normal">{state.bestPick}</h1>
         <p className="mt-3 max-w-xl text-lg font-semibold text-slate-200">{state.reason}</p>
+        {state.recommendedSpell && <p className="mt-3 text-sm font-bold uppercase text-cyan-100">Spell: {state.recommendedSpell} <span className="normal-case text-slate-300">{state.spellReason}</span></p>}
       </div>
       <div className={`grid h-24 w-24 shrink-0 place-items-center border ${accent.border} ${accent.bg}`}>
         <div className="text-center">
@@ -386,9 +557,17 @@ export function MlbbTacticalMapOutput() {
   const [mapRuntime, setMapRuntime] = useState<any>(null);
   const accent = accentClasses[display.accent];
   const match = currentMatch(matchState);
-  const markers: TacticalMapMarker[] = match?.confidence?.visionTrusted
-    ? (match.vision?.minimapMarkers ?? []).filter((marker: TacticalMapMarker) => Number(marker.confidence ?? 0) >= Number(match.confidence.minimum ?? 0.55))
+  const mapVisionActive = match?.confidence?.visionTrusted && ["live_hud", "death_replay", "scoreboard"].includes(String(match?.lifecycle?.screen ?? ""));
+  const mapMonitor = match?.vision?.signals?.mapMonitor;
+  const markers: TacticalMapMarker[] = mapVisionActive
+    ? (mapMonitor?.markers ?? match.vision?.minimapMarkers ?? []).filter((marker: TacticalMapMarker) => Number(marker.confidence ?? 0) >= Number(match.confidence.minimum ?? 0.55))
     : [];
+  const allyMarkers = markers.filter((marker) => marker.side === "ally" && marker.status !== "last_seen").length;
+  const enemyMarkers = markers.filter((marker) => marker.side === "enemy" && marker.status !== "last_seen").length;
+  const lastSeenEnemies = markers.filter((marker) => marker.side === "enemy" && marker.status === "last_seen").length;
+  const identifiedEnemies = [...new Set(markers.filter((marker) => marker.side === "enemy" && marker.heroName).map((marker) => marker.heroName!))];
+  const visibleObjects = mapVisionActive ? (mapMonitor?.objects ?? []).filter((object: any) => object.status === "visible") : [];
+  const visibleObjective = visibleObjects.find((object: any) => object.objectType === "lord" || object.objectType === "turtle")?.objectType;
 
   useTransparentOutputBody();
 
@@ -433,8 +612,11 @@ export function MlbbTacticalMapOutput() {
           <div className={`text-xs font-black uppercase tracking-[0.26em] ${accent.text}`}>Live formation</div>
           <h2 className="mt-2 line-clamp-5 text-2xl font-black uppercase leading-tight">{display.mapCallout}</h2>
           <div className="mt-4 grid gap-2">
-            <MapStat label="Visible pins" value={String(markers.length)} tone="text-cyan-200" />
-            <MapStat label="Objective" value={display.objectiveTimer} tone="text-amber-200" />
+            <MapStat label="Visible allies" value={String(allyMarkers)} tone="text-cyan-200" />
+            <MapStat label="Visible enemies" value={String(enemyMarkers)} tone="text-red-200" />
+            <MapStat label="Enemy last seen" value={String(lastSeenEnemies)} tone="text-amber-200" />
+            <MapStat label="Identified enemies" value={identifiedEnemies.join(" / ") || "-"} tone="text-red-200" />
+            <MapStat label="Objective visible" value={visibleObjective ? visibleObjective.toUpperCase() : "-"} tone="text-amber-200" />
             <MapStat label="Pressure" value={display.mapFocus} tone="text-red-200" />
           </div>
         </div>
@@ -541,8 +723,36 @@ function HeroPickCard({ hero, index, side, accent, meta }: { hero: string; index
 }
 
 function pickList(detected: string[]) {
-  const picks = detected;
+  const picks = detected.map((hero) => hero || "-");
   return [...picks, "-", "-", "-", "-", "-"].slice(0, 5);
+}
+
+function BanRow({ label, heroes, side, catalog }: { label: string; heroes: string[]; side: "ally" | "enemy"; catalog: Map<string, HeroVisual> }) {
+  const tone = side === "ally" ? "border-cyan-300/30 bg-cyan-500/10 text-cyan-100" : "border-red-300/30 bg-red-500/10 text-red-100";
+  return <div className="flex min-w-0 items-center gap-2">
+    <span className={`shrink-0 text-xs font-black uppercase tracking-[0.2em] ${side === "ally" ? "text-cyan-200" : "text-red-200"}`}>{label}</span>
+    {(heroes.length ? heroes : ["-"]).map((hero, index) => {
+      const meta = catalog.get(heroKey(hero));
+      return <span key={`${side}-ban-${hero}-${index}`} className={`flex min-h-10 items-center gap-2 border px-2.5 py-1.5 text-sm font-black uppercase ${tone}`}>
+        {meta?.icon && <img className="h-7 w-7 rounded-full object-cover" src={meta.icon} alt="" />}
+        {hero}
+      </span>;
+    })}
+  </div>;
+}
+
+function DraftContextRow({ state }: { state: LocalOverlayState }) {
+  const facts = [
+    state.selectedLane ? `My lane: ${state.selectedLane}` : "",
+    state.selfSlot ? `My position: ${state.selfSlot}` : "",
+    state.firstPickSide,
+    state.detectedSpell ? `My spell: ${state.detectedSpell}` : "",
+    state.recommendedSpell ? `Recommend spell: ${state.recommendedSpell}` : "",
+    state.allyLanes.length ? `Ally lanes: ${state.allyLanes.join(" / ")}` : "",
+  ].filter(Boolean);
+  return <div className="flex flex-wrap justify-center gap-2">
+    {(facts.length ? facts : ["Draft context pending"]).map((fact) => <span key={fact} className="border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-slate-200">{fact}</span>)}
+  </div>;
 }
 
 export function MlbbTextPanelOutput() {
@@ -617,7 +827,7 @@ export function MlbbHeroPicksOutput() {
 
   return <OutputShell bg={bg}>
     <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_20%,rgba(34,211,238,.16),transparent_24%),radial-gradient(circle_at_85%_76%,rgba(248,113,113,.14),transparent_24%)]" />
-    <div className="relative z-10 grid h-full grid-rows-[auto_minmax(0,1fr)] gap-5 p-6">
+    <div className="relative z-10 grid h-full grid-rows-[auto_auto_minmax(0,1fr)] gap-5 p-6">
       <header className={`grid grid-cols-[1fr_auto_1fr] items-center border ${accent.border} bg-slate-950/90 px-6 py-4 shadow-2xl ${accent.glow}`}>
         <div>
           <div className={`text-xs font-black uppercase tracking-[0.28em] ${accent.text}`}>MLBB draft board</div>
@@ -629,6 +839,11 @@ export function MlbbHeroPicksOutput() {
         </div>
         <div className="text-right text-lg font-black uppercase tracking-[0.16em] text-slate-300">{display.picksSubtitle}</div>
       </header>
+      <section className={`flex flex-wrap items-center justify-between gap-5 border ${accent.border} bg-slate-950/85 px-5 py-3`}>
+        <BanRow label="Ally bans" heroes={display.allyBans} side="ally" catalog={heroCatalog} />
+        <DraftContextRow state={display} />
+        <BanRow label="Enemy bans" heroes={display.enemyBans} side="enemy" catalog={heroCatalog} />
+      </section>
       <section className="grid min-h-0 grid-cols-[minmax(0,1fr)_380px_minmax(0,1fr)] gap-5">
         <div className="space-y-2.5">
           <div className="text-sm font-black uppercase tracking-[0.24em] text-cyan-200">{display.teamBlue}</div>
@@ -648,7 +863,10 @@ export function MlbbHeroPicksOutput() {
             </div>
             <div className="mx-auto mt-5 grid h-24 w-24 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-4xl font-black">{display.confidence}</div>
           </div>
-          <p className="text-base font-bold leading-snug text-slate-300">{display.reason}</p>
+          <div>
+            <p className="text-base font-bold leading-snug text-slate-300">{display.reason}</p>
+            {display.recommendedSpell && <p className="mt-3 border border-cyan-300/25 bg-cyan-500/10 p-3 text-sm font-bold text-cyan-100">{display.recommendedSpell}: {display.spellReason}</p>}
+          </div>
         </div>
         <div className="space-y-2.5">
           <div className="text-right text-sm font-black uppercase tracking-[0.24em] text-red-200">{display.teamRed}</div>
@@ -659,27 +877,285 @@ export function MlbbHeroPicksOutput() {
   </OutputShell>;
 }
 
-type LiveOutputScene = "main" | "map" | "text" | "counter" | "picks";
+type NativeSurface = "waiting" | "draft" | "live" | "scoreboard";
+type DetectedEquipmentFact = {
+  itemId: number;
+  itemName: string;
+  side: "ally" | "enemy";
+  row: number;
+  slot: number;
+  confidence: number;
+};
 
-function selectLiveOutputScene(matchState: any): LiveOutputScene {
+function selectNativeSurface(matchState: any): NativeSurface {
   const match = currentMatch(matchState);
-  if (!match) return "main";
-  if (currentDraft(match)) return "picks";
-  const decision = currentReasoning(match);
-  if (decision?.ruleId === "draft_state") return "main";
-  if (decision && ["main", "map", "text", "counter", "picks"].includes(decision.scene)) return decision.scene as LiveOutputScene;
-  return "main";
+  if (currentDraft(match)) return "draft";
+  if (!match?.confidence?.visionTrusted) return "waiting";
+  if (match.lifecycle?.screen === "scoreboard") return "scoreboard";
+  return ["live_hud", "death_replay"].includes(String(match.lifecycle?.screen ?? "")) ? "live" : "waiting";
+}
+
+function DraftNativeOverlay({ state, heroCatalog }: { state: LocalOverlayState; heroCatalog: Map<string, HeroVisual> }) {
+  const bestMeta = heroCatalog.get(heroKey(state.bestPick));
+  const hasRecommendation = state.bestPick !== "Awaiting detected picks";
+  const spellName = state.recommendedSpell || state.detectedSpell;
+  const spellIcon = resolveSpellIcon(spellName);
+
+  return <motion.section
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    className="pointer-events-none absolute z-10"
+    style={{ left: "18.2%", top: "13%", width: "61.6%", height: "56.5%" }}
+  >
+    <div className="absolute inset-x-[10%] top-0 flex justify-center">
+      {state.firstPickSide && <div className="min-w-[240px] border-x border-b border-[#d6ac67]/45 bg-[#101e35]/66 px-6 py-2 text-center text-[12px] font-bold uppercase text-[#f8de9c] backdrop-blur-[2px]">
+        {state.firstPickSide}
+      </div>}
+    </div>
+    <div className="absolute inset-x-[4%] bottom-0 overflow-hidden border border-[#52cddf]/45 bg-[#061326]/78 shadow-[0_15px_46px_rgba(0,0,0,.38)] backdrop-blur-[3px]" style={{ clipPath: "polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%, 0 16px)" }}>
+      <div className="absolute inset-x-0 top-0 h-[2px] bg-[linear-gradient(90deg,transparent,#53d4ec_22%,#f0c878_50%,#53d4ec_78%,transparent)]" />
+      <div className="grid min-h-[112px] grid-cols-[100px_minmax(0,1fr)_210px] items-center gap-4 px-5 py-4">
+        <div className="grid place-items-center">
+          {hasRecommendation ? <HeroPortrait hero={state.bestPick} meta={bestMeta} side="ally" accent="cyan" /> : <div className="grid h-[76px] w-[76px] place-items-center border border-cyan-200/35 bg-[#122743]/70">
+            <Swords className="h-7 w-7 text-cyan-100" />
+          </div>}
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase text-[#f0cc81]">Recommended pick</div>
+          <div className="mt-1 truncate text-[32px] font-black uppercase leading-none text-white">{hasRecommendation ? state.bestPick : "Pending"}</div>
+          <div className="mt-2 flex gap-2 text-[11px] font-semibold uppercase text-cyan-100/90">
+            {state.selectedLane && <span className="border border-cyan-200/25 bg-cyan-400/10 px-2 py-1">{state.selectedLane} lane</span>}
+            {state.selfSlot && <span className="border border-cyan-200/25 bg-cyan-400/10 px-2 py-1">{state.selfSlot}</span>}
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 border-l border-white/10 pl-5">
+          {spellIcon && spellName && <img src={spellIcon} className="h-11 w-11 rounded-full border border-[#ecd08a]/60 object-cover" alt="" />}
+          <div className="min-w-0 text-right">
+            <div className="text-[10px] font-bold uppercase text-slate-300">Battle spell</div>
+            <div className="mt-1 truncate text-[18px] font-black uppercase text-cyan-100">{spellName || "Pending"}</div>
+            <div className="mt-2 text-[11px] font-bold uppercase text-[#edcc83]">Score {hasRecommendation ? state.confidence : "-"}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </motion.section>;
+}
+
+function NativeLiveOverlay({ state }: { state: LocalOverlayState }) {
+  if (!state.warning && state.objectiveTimer === "--:--") return null;
+  return <div className="pointer-events-none absolute left-1/2 top-[9.5%] w-[min(620px,46vw)] -translate-x-1/2">
+    <motion.section initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="overflow-hidden border border-[#d0ad6c]/45 bg-[#07152b]/76 shadow-[0_14px_34px_rgba(0,0,0,.3)] backdrop-blur-[3px]">
+      <div className="h-[2px] bg-[linear-gradient(90deg,transparent,#4dcfe4_20%,#eac676_50%,#4dcfe4_80%,transparent)]" />
+      <div className="flex min-h-16 items-center gap-4 px-5 py-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[#e7c878]/55 bg-[#122947]/85 text-[#f4d18b]"><Timer className="h-5 w-5" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold uppercase text-[#efcf91]">{state.objective} {state.objectiveTimer !== "--:--" ? state.objectiveTimer : ""}</div>
+          <div className="mt-1 truncate text-[17px] font-bold uppercase text-white">{state.warning || state.textTitle}</div>
+        </div>
+      </div>
+    </motion.section>
+  </div>;
+}
+
+function EquipmentFactRow({ label, items, side }: { label: string; items: DetectedEquipmentFact[]; side: "ally" | "enemy" }) {
+  const tone = side === "ally" ? "text-cyan-100 border-cyan-200/30" : "text-rose-100 border-rose-200/30";
+  return <div className="flex items-center gap-3">
+    <div className={`w-[82px] shrink-0 text-[11px] font-bold uppercase ${tone.split(" ")[0]}`}>{label}</div>
+    <div className="flex min-w-0 gap-2">
+      {items.slice(0, 6).map((item) => <div key={`${side}-${item.row}-${item.slot}-${item.itemId}`} className={`flex h-12 min-w-[126px] items-center gap-2 border bg-[#0b182e]/78 px-2 ${tone}`}>
+        <img className="h-9 w-9 shrink-0 object-cover" src={`/api/vision/equipment/icon/${item.itemId}`} alt="" />
+        <div className="min-w-0">
+          <div className="truncate text-[10px] font-bold uppercase text-white">{item.itemName}</div>
+          <div className="text-[10px] font-semibold text-slate-300">{Math.round(item.confidence * 100)}%</div>
+        </div>
+      </div>)}
+    </div>
+  </div>;
+}
+
+function NativeScoreboardOverlay({ matchState }: { matchState: any }) {
+  const match = currentMatch(matchState);
+  const signals = match?.vision?.signals;
+  const ally = (signals?.allyEquipment ?? []) as DetectedEquipmentFact[];
+  const enemy = (signals?.enemyEquipment ?? []) as DetectedEquipmentFact[];
+  if (!ally.length && !enemy.length) return null;
+  return <div className="pointer-events-none absolute bottom-[22.5%] left-1/2 min-w-[560px] max-w-[92vw] -translate-x-1/2">
+    <motion.section initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="overflow-hidden border border-[#d3b06d]/45 bg-[#071326]/84 px-5 py-4 shadow-[0_12px_36px_rgba(0,0,0,.38)] backdrop-blur-[4px]">
+      <div className="absolute inset-x-0 top-0 h-[2px] bg-[linear-gradient(90deg,transparent,#4bd2e8_22%,#f1c875_50%,#4bd2e8_78%,transparent)]" />
+      <div className="mb-3 text-center text-[11px] font-bold uppercase text-[#f1d28c]">Detected Equipment</div>
+      <div className="space-y-2">
+        {ally.length ? <EquipmentFactRow label="Ally" items={ally} side="ally" /> : null}
+        {enemy.length ? <EquipmentFactRow label="Enemy" items={enemy} side="enemy" /> : null}
+      </div>
+    </motion.section>
+  </div>;
+}
+
+function NativeGameOverlay({ state, surface, heroCatalog, matchState }: { state: LocalOverlayState; surface: NativeSurface; heroCatalog: Map<string, HeroVisual>; matchState: any }) {
+  if (surface === "draft") return <DraftNativeOverlay state={state} heroCatalog={heroCatalog} />;
+  if (surface === "live") return <NativeLiveOverlay state={state} />;
+  if (surface === "scoreboard") return <NativeScoreboardOverlay matchState={matchState} />;
+  return null;
+}
+
+function mediaUrl(slot: OverlayMediaSlotId, updatedAt: string) {
+  return `/api/overlay/media/${slot}/file?v=${encodeURIComponent(updatedAt)}`;
+}
+
+function parseKeyColor(color: string) {
+  const normalized = /^#[0-9a-f]{6}$/i.test(color) ? color : "#00ff00";
+  return [
+    Number.parseInt(normalized.slice(1, 3), 16),
+    Number.parseInt(normalized.slice(3, 5), 16),
+    Number.parseInt(normalized.slice(5, 7), 16),
+  ];
+}
+
+function ChromaKeyCanvas({ source, slot }: { source: string; slot: OverlayMediaSlot }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    let animation = 0;
+    let disposed = false;
+    const media = slot.mediaType === "video" ? document.createElement("video") : new Image();
+    const key = parseKeyColor(slot.chromaKey.color);
+
+    function renderFrame() {
+      if (disposed || !canvasRef.current) return;
+      const bounds = canvas.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.round(bounds.width * scale));
+      const height = Math.max(1, Math.round(bounds.height * scale));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const naturalWidth = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
+      const naturalHeight = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
+      if (!naturalWidth || !naturalHeight) return;
+      const fit = Math.min(width / naturalWidth, height / naturalHeight);
+      const drawWidth = naturalWidth * fit;
+      const drawHeight = naturalHeight * fit;
+      const left = (width - drawWidth) / 2;
+      const top = (height - drawHeight) / 2;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(media, left, top, drawWidth, drawHeight);
+      const pixels = context.getImageData(0, 0, width, height);
+      const data = pixels.data;
+      const tolerance = slot.chromaKey.tolerance;
+      const softness = Math.max(1, slot.chromaKey.softness);
+      for (let index = 0; index < data.length; index += 4) {
+        const distance = Math.sqrt(
+          (data[index] - key[0]) ** 2
+          + (data[index + 1] - key[1]) ** 2
+          + (data[index + 2] - key[2]) ** 2,
+        );
+        if (distance <= tolerance) {
+          data[index + 3] = 0;
+        } else if (distance < tolerance + softness) {
+          data[index + 3] = Math.round(data[index + 3] * ((distance - tolerance) / softness));
+        }
+      }
+      context.putImageData(pixels, 0, 0);
+    }
+
+    if (media instanceof HTMLVideoElement) {
+      media.muted = true;
+      media.loop = true;
+      media.autoplay = true;
+      media.playsInline = true;
+      media.src = source;
+      media.addEventListener("loadeddata", () => void media.play().catch(() => undefined));
+      const drawVideo = () => {
+        renderFrame();
+        animation = window.requestAnimationFrame(drawVideo);
+      };
+      media.addEventListener("playing", drawVideo, { once: true });
+    } else {
+      media.src = source;
+      media.addEventListener("load", renderFrame, { once: true });
+    }
+
+    const resize = new ResizeObserver(renderFrame);
+    resize.observe(canvas);
+    return () => {
+      disposed = true;
+      window.cancelAnimationFrame(animation);
+      resize.disconnect();
+      if (media instanceof HTMLVideoElement) {
+        media.pause();
+        media.src = "";
+      }
+    };
+  }, [source, slot.chromaKey.color, slot.chromaKey.softness, slot.chromaKey.tolerance, slot.mediaType]);
+
+  return <canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" />;
+}
+
+function StudioMedia({ id, config }: { id: OverlayMediaSlotId; config: OverlayMediaConfig }) {
+  const slot = config[id];
+  if (!slot.enabled || !slot.fileName) return null;
+  const source = mediaUrl(id, config.updatedAt);
+  if (slot.chromaKey.enabled) return <ChromaKeyCanvas source={source} slot={slot} />;
+  if (slot.mediaType === "video") return <video key={source} src={source} autoPlay loop muted playsInline className="h-full w-full object-contain" />;
+  return <img src={source} alt="" className="h-full w-full object-contain" />;
+}
+
+function ObsStudioBand({ config }: { config: OverlayMediaConfig }) {
+  if (!config.bandEnabled) return null;
+  const hasLogo = config.logo.enabled && Boolean(config.logo.fileName);
+  return <section
+    data-testid="obs-studio-band"
+    className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
+    style={{ height: "19.7%", backgroundColor: `rgba(0, 0, 0, ${config.bandOpacity})` }}
+  >
+    <div className="absolute inset-x-0 top-0 h-[2px] bg-[linear-gradient(90deg,#2fd9f2_0%,#2fd9f2_15%,transparent_30%,transparent_100%)]" />
+    <div className="absolute inset-y-[10%] left-[1.5%] w-[17%]">
+      {hasLogo ? <StudioMedia id="logo" config={config} /> : <div className="flex h-full items-center border-r border-cyan-300/18 px-5">
+        <div>
+          <div className="text-[10px] font-semibold uppercase text-cyan-200">Ranked Stream</div>
+          <div className="mt-1 text-[26px] font-black uppercase leading-[0.92] text-white">MLBB<br />Co-Pilot</div>
+        </div>
+      </div>}
+    </div>
+    <div className="absolute inset-y-[10%] left-[23%] w-[34%]">
+      <StudioMedia id="sponsor" config={config} />
+    </div>
+  </section>;
 }
 
 export function MlbbLiveOutput() {
-  const { matchState } = useOverlayState();
-  const scene = selectLiveOutputScene(matchState);
+  const { state, matchState } = useOverlayState();
+  const { config: mediaConfig } = useOverlayMedia();
+  const display = useMemo(() => getDisplayState(state, matchState), [state, matchState]);
+  const heroCatalog = useHeroCatalog();
+  const surface = selectNativeSurface(matchState);
+  const search = new URLSearchParams(window.location.search);
+  const bg = search.get("bg") ?? "transparent";
+  const previewOnly = search.get("preview") === "1";
+  useTransparentOutputBody();
 
-  if (scene === "picks") return <MlbbHeroPicksOutput />;
-  if (scene === "counter") return <MlbbCounterOutput />;
-  if (scene === "map") return <MlbbTacticalMapOutput />;
-  if (scene === "text") return <MlbbTextPanelOutput />;
-  return <MlbbStreamOutput />;
+  useEffect(() => {
+    if (previewOnly) return;
+    const store = useCaptureRuntimeStore.getState();
+    if (!store.running) {
+      store.setSelectedSource("obs");
+      startSelectedCaptureRuntime();
+    }
+    return () => {
+      if (useCaptureRuntimeStore.getState().sourceMode === "obs") stopCaptureRuntime();
+    };
+  }, [previewOnly]);
+
+  return <OutputShell bg={bg}>
+    <CaptureRuntimeHost />
+    <NativeGameOverlay state={display} surface={surface} heroCatalog={heroCatalog} matchState={matchState} />
+    <ObsStudioBand config={mediaConfig} />
+  </OutputShell>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -701,8 +1177,76 @@ function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className={`input min-h-28 w-full resize-y ${props.className ?? ""}`} />;
 }
 
+function MediaSlotControl({
+  id,
+  title,
+  media,
+}: {
+  id: OverlayMediaSlotId;
+  title: string;
+  media: ReturnType<typeof useOverlayMedia>;
+}) {
+  const slot = media.config[id];
+
+  function updateSlot(next: Partial<OverlayMediaSlot>) {
+    void media.patch({ [id]: { ...slot, ...next } } as Partial<OverlayMediaConfig>);
+  }
+
+  function updateKey(next: Partial<OverlayMediaSlot["chromaKey"]>) {
+    updateSlot({ chromaKey: { ...slot.chromaKey, ...next } });
+  }
+
+  function selectFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) void media.upload(id, file);
+    event.target.value = "";
+  }
+
+  return <div className="border border-white/10 bg-black/20 p-3">
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2 text-sm font-black uppercase text-white"><Film className="h-4 w-4 text-cyan-200" />{title}</div>
+      <button
+        className={`min-h-9 border px-3 text-xs font-bold uppercase ${slot.enabled ? "border-cyan-300/35 bg-cyan-500/10 text-cyan-100" : "border-white/10 bg-white/5 text-slate-300"}`}
+        onClick={() => updateSlot({ enabled: !slot.enabled })}
+      >
+        {slot.enabled ? "Shown" : "Hidden"}
+      </button>
+    </div>
+    <div className="mb-3 truncate text-xs text-slate-400">{slot.fileName || "No media selected"}</div>
+    {slot.fileName && <div className="mb-3 h-20 overflow-hidden border border-white/10 bg-black">
+      <StudioMedia id={id} config={media.config} />
+    </div>}
+    <div className="mb-4 flex gap-2">
+      <label className="btn flex min-h-10 cursor-pointer items-center bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25">
+        <Upload className="mr-2 h-4 w-4" />{media.busy === id ? "Loading" : "Add Media"}
+        <input type="file" accept=".mp4,.webm,.png,.webp,video/mp4,video/webm,image/png,image/webp" className="sr-only" onChange={selectFile} disabled={Boolean(media.busy)} />
+      </label>
+      {slot.fileName && <button className="btn flex min-h-10 items-center bg-white/5 text-slate-200 hover:bg-red-500/15 hover:text-red-100" onClick={() => void media.remove(id)} disabled={Boolean(media.busy)}>
+        <Trash2 className="mr-2 h-4 w-4" />Remove
+      </button>}
+    </div>
+    <label className="mb-3 flex min-h-10 items-center justify-between border border-white/10 bg-white/[0.04] px-3 text-sm font-bold text-slate-200">
+      Chroma key background
+      <input type="checkbox" checked={slot.chromaKey.enabled} onChange={(event) => updateKey({ enabled: event.target.checked })} className="h-4 w-4 accent-cyan-400" />
+    </label>
+    <div className="grid gap-3 sm:grid-cols-[100px_minmax(0,1fr)]">
+      <Field label="Key color">
+        <input type="color" value={slot.chromaKey.color} onChange={(event) => updateKey({ color: event.target.value })} className="input h-11 w-full cursor-pointer p-1" />
+      </Field>
+      <Field label={`Tolerance ${slot.chromaKey.tolerance}`}>
+        <input type="range" min={0} max={255} value={slot.chromaKey.tolerance} onChange={(event) => updateKey({ tolerance: Number(event.target.value) })} className="mt-3 w-full accent-cyan-400" />
+      </Field>
+      <div />
+      <Field label={`Edge soften ${slot.chromaKey.softness}`}>
+        <input type="range" min={0} max={120} value={slot.chromaKey.softness} onChange={(event) => updateKey({ softness: Number(event.target.value) })} className="mt-3 w-full accent-cyan-400" />
+      </Field>
+    </div>
+  </div>;
+}
+
 export function MlbbStreamControl() {
   const { state, matchState, patch, saving } = useOverlayState();
+  const media = useOverlayMedia();
   const display = useMemo(() => getDisplayState(state, matchState), [state, matchState]);
   const liveOutputUrl = `${window.location.origin}/mlbb-live-output`;
   const outputUrl = `${window.location.origin}/mlbb-output`;
@@ -728,16 +1272,22 @@ export function MlbbStreamControl() {
         <h2 className="text-sm font-black uppercase tracking-[0.2em] text-cyan-200">Detected state</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <MapStat label="Screen" value={display.matchPhase} />
-          <MapStat label="Draft portrait confidence" value={display.picksSubtitle} tone="text-cyan-200" />
+          <MapStat label="Draft fact confidence" value={display.picksSubtitle} tone="text-cyan-200" />
           <MapStat label="Callout" value={display.textTitle} tone="text-amber-200" />
-          <MapStat label="Output scene" value={selectLiveOutputScene(matchState)} tone="text-emerald-200" />
+          <MapStat label="Output surface" value={selectNativeSurface(matchState)} tone="text-emerald-200" />
+          <MapStat label="My lane" value={display.selectedLane || "Pending"} tone="text-cyan-200" />
+          <MapStat label="Pick order" value={display.firstPickSide || "Pending"} tone="text-amber-200" />
+          <MapStat label="My position" value={display.selfSlot || "Pending"} tone="text-emerald-200" />
+          <MapStat label="Detected spell" value={display.detectedSpell || "Pending"} tone="text-cyan-200" />
+          <MapStat label="Recommended spell" value={display.recommendedSpell || "Pending"} tone="text-emerald-200" />
+          <MapStat label="Ally lanes" value={display.allyLanes.join(" / ") || "Pending"} tone="text-cyan-200" />
         </div>
         <div className="mt-5 border border-white/10 bg-black/25 p-4">
-          <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Confirmed draft heroes</div>
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Confirmed draft identities</div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {[...display.allyPicks, ...display.enemyPicks].length
-              ? [...display.allyPicks, ...display.enemyPicks].map((hero) => <span key={hero} className="border border-cyan-300/35 bg-cyan-500/10 px-3 py-2 text-sm font-bold">{hero}</span>)
-              : <span className="text-sm text-slate-400">No portrait has crossed the detection gate.</span>}
+            {[...display.allyPicks, ...display.enemyPicks, ...display.allyBans, ...display.enemyBans].filter(Boolean).length
+              ? [...display.allyPicks, ...display.enemyPicks, ...display.allyBans, ...display.enemyBans].filter(Boolean).map((hero) => <span key={hero} className="border border-cyan-300/35 bg-cyan-500/10 px-3 py-2 text-sm font-bold">{hero}</span>)
+              : <span className="text-sm text-slate-400">No icon has crossed the detection gate.</span>}
           </div>
         </div>
       </div>
@@ -761,7 +1311,28 @@ export function MlbbStreamControl() {
           <select className="input w-full" value={state.accent} onChange={(event) => void patch({ accent: event.target.value as Accent })}>
             {Object.keys(accentClasses).map((accent) => <option key={accent} value={accent}>{accent}</option>)}
           </select>
-          <p className="mt-3 text-xs text-slate-400">{saving ? "Saving presentation." : "Color only; detection owns all output content."}</p>
+          <p className="mt-3 text-xs text-slate-400">{saving ? "Saving presentation." : "Detected graphics remain fact-driven; branding media is configured below."}</p>
+        </div>
+        <div className="card p-4">
+          <h2 className="mb-3 text-sm font-black uppercase tracking-[0.2em] text-cyan-200">OBS lower band</h2>
+          <button
+            className={`mb-4 min-h-11 w-full border px-3 text-left font-bold ${media.config.bandEnabled ? "border-cyan-300/35 bg-cyan-500/10 text-cyan-100" : "border-white/10 bg-white/5 text-slate-300"}`}
+            onClick={() => void media.patch({ bandEnabled: !media.config.bandEnabled })}
+          >
+            {media.config.bandEnabled ? "Brand and sponsor band visible" : "Band hidden"}
+          </button>
+          <Field label={`Band opacity ${Math.round(media.config.bandOpacity * 100)}%`}>
+            <input type="range" min={0} max={100} value={Math.round(media.config.bandOpacity * 100)} onChange={(event) => void media.patch({ bandOpacity: Number(event.target.value) / 100 })} className="mt-2 w-full accent-cyan-400" />
+          </Field>
+          <div className="mt-4 grid gap-3">
+            <MediaSlotControl id="logo" title="My logo" media={media} />
+            <MediaSlotControl id="sponsor" title="Sponsor" media={media} />
+          </div>
+          {media.error && <p className="mt-3 border border-red-300/30 bg-red-500/10 p-2 text-xs font-semibold text-red-100">{media.error}</p>}
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-bold">
+            <a className="border border-white/10 bg-white/5 px-3 py-2 text-center text-slate-200 hover:bg-white/10" href="/mlbb-live-output?bg=black&preview=1" target="_blank">Preview black</a>
+            <a className="border border-white/10 bg-white/5 px-3 py-2 text-center text-slate-200 hover:bg-white/10" href="/mlbb-live-output?bg=green&preview=1" target="_blank">Preview green key</a>
+          </div>
         </div>
       </div>
     </section>

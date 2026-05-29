@@ -1,8 +1,12 @@
 {
   "name": "mlbb-co-pilot-frontend",
   "version": "0.4.0",
+  "private": true,
+  "author": "SpectralAV",
+  "license": "Apache-2.0",
+  "copyright": "Copyright 2026 SpectralAV",
   "type": "module",
-  "scripts": { "dev": "vite --host 0.0.0.0", "build": "tsc -b && vite build", "preview": "vite preview" },
+  "scripts": { "dev": "vite", "build": "tsc -b && vite build", "preview": "vite preview" },
   "dependencies": { "@tanstack/react-query": "^5.62.8", "@vitejs/plugin-react": "^4.3.4", "framer-motion": "^11.15.0", "lucide-react": "^0.468.0", "react": "^18.3.1", "react-dom": "^18.3.1", "react-router-dom": "^7.1.1", "zustand": "^5.0.2" },
   "devDependencies": { "autoprefixer": "^10.4.20", "postcss": "^8.4.49", "tailwindcss": "^3.4.17", "typescript": "^5.6.3", "vite": "^6.0.5" }
 }

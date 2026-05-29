@@ -2,6 +2,8 @@ import { cache } from "../services/cacheService.js";
 import { readRuntime } from "../runtime/RuntimeStore.js";
 import { suggestBans } from "./banEngine.js";
 import { scoreDraftHero } from "./scoreHero.js";
+import { recommendBattleSpells } from "./battleSpellEngine.js";
+import { getPlayerProfile, type DraftLane } from "../services/playerProfile.js";
 
 function normalize(value: unknown) {
   return String(value ?? "").toLowerCase();
@@ -24,6 +26,7 @@ function legacyDraftResponse(state: any, allHeroes: any[], ally: any[], enemy: a
 }
 
 export async function analyzeDraft(state:any) {
+  const profile = await getPlayerProfile();
   const heroes = await cache.read<any[]>("compiled-heroes.json", []);
   const allHeroes = heroes.length ? heroes : await cache.read<any[]>("heroes.json", []);
   const runtime = await readRuntime();
@@ -32,11 +35,15 @@ export async function analyzeDraft(state:any) {
   const enemy = allHeroes.filter(h => (state.enemyPicks ?? []).some((pick: unknown) => matchesPick(h, pick)));
   const picked = new Set([...(state.allyPicks??[]), ...(state.enemyPicks??[]), ...(state.allyBans??[]), ...(state.enemyBans??[]), ...(state.bans??[])].map(normalize));
   const candidates = allHeroes.filter((h) => !picked.has(normalize(h.id)) && !picked.has(normalize(h.name ?? h.hero_name)));
+  const selectedLane = (state.selectedLane ?? profile.preferredLane) as DraftLane | undefined;
+  const comfortHeroes = state.myHeroPool?.length ? state.myHeroPool : profile.comfortHeroes;
   const scored = candidates.map((hero) => scoreDraftHero(hero, {
     allies: ally,
     enemies: enemy,
-    heroPool: state.myHeroPool ?? [],
-    role: state.myRole,
+    heroPool: comfortHeroes,
+    role: state.myRole ?? state.selectedRole,
+    lane: selectedLane,
+    laneDetected: Boolean(state.selectedLane),
     runtimeHero: runtimeByName.get(normalize(hero.name ?? hero.hero_name))
   })).sort((a, b) => b.score - a.score);
 
@@ -52,6 +59,19 @@ export async function analyzeDraft(state:any) {
     backupPicks: scored.slice(1, 4).map(({ hero, score }) => ({ hero, score })),
     avoidPicks,
     banSuggestions: suggestBans(state, enemy),
+    context: {
+      selectedLane,
+      selectedLaneSource: state.selectedLane ? "detected" : "profile",
+      selfSlot: state.selfSlot ?? null,
+      comfortHeroes,
+    },
+    battleSpells: recommendBattleSpells({
+      selectedLane,
+      enemies: enemy,
+      allies: ally,
+      allySpells: state.allySpells,
+      selfSlot: state.selfSlot,
+    }),
     ...legacyDraftResponse(state, allHeroes, ally, enemy)
   };
 }

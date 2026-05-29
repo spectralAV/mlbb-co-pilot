@@ -10,7 +10,7 @@ export async function fetchHeroDirectory(client: GmsClient) {
       { field: '<hero.data.roadsort>', operator: 'hasAnyOf', value: [1, 2, 3, 4, 5] }
     ],
     sorts: [{ data: { field: 'hero_id', order: 'desc' }, type: 'sequence' }],
-    fields: ['id', 'hero_id', 'hero.data.name', 'hero.data.smallmap', 'hero.data.sortid', 'hero.data.roadsort', 'relation'],
+    fields: ['id', 'hero_id', 'hero.data.name', 'hero.data.head', 'hero.data.smallmap', 'hero.data.painting', 'hero.data.sortid', 'hero.data.roadsort', 'relation'],
     object: []
   });
 }

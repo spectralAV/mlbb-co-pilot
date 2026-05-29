@@ -21,6 +21,9 @@ export type HeroRuntime = {
   channelId?: number;
   name: string;
   icon?: string;
+  head?: string;
+  portrait?: string;
+  painting?: string;
   roles: Role[];
   lanes: Lane[];
   relations: HeroRelation;

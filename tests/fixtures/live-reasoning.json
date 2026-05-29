@@ -32,5 +32,28 @@
     },
     "expectedRule": "anti_heal_gap",
     "expectedScene": "text"
+  },
+  {
+    "name": "ally markers and untrusted enemy color stay neutral",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.74,
+      "minimapMarkers": [
+        { "side": "ally", "confidence": 0.98 },
+        { "side": "enemy", "confidence": 0.53 }
+      ]
+    },
+    "expectedRule": "stable_state",
+    "expectedScene": "main"
+  },
+  {
+    "name": "trusted enemy map marker becomes rotation alert",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.74,
+      "minimapMarkers": [{ "side": "enemy", "confidence": 0.72 }]
+    },
+    "expectedRule": "minimap_activity",
+    "expectedScene": "map"
   }
 ]

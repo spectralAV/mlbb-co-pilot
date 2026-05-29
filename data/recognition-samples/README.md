@@ -44,6 +44,19 @@ This set adds coverage for:
 
 Use this set to build a first-pass screen-state classifier before attempting OCR or deeper recognition. The same `2856x1280` region scale applies to the existing region maps.
 
+## Ranked Match Video Set
+
+`ranked-video-analysis-20260525.json` compares the full Legend and Mythic recordings in `samples/`.
+
+The videos establish two distinct draft asset surfaces:
+
+- circular hero icons: top ban slots and the selectable hero grid
+- portrait/card art: selected pick rails and the loading screen
+
+Official recognition references now distinguish circular `head` icons from tall current portraits, so revamped base hero designs are sourced from Mobile Legends directly. The local Skin Gallery adds cosmetics portraits and compact face thumbnails from the community-maintained Mobile Legends Wiki. Live CV may use confirmed ban icons and confidence-gated compiled rail matches; in the Mythic fixture, the visible `Angelic Agent` card validates Lesley. It must not treat the center selection grid as picked facts or emit low-margin matches.
+
+At draft finalize, selected rails can switch to skin designs while retaining the same hero identities. The Mythic fixture confirms the highlighted local slot as Gold Lane through its on-screen lane message; the Legend fixture confirms the expanded highlighted slot as EXP. Visible ally circular battle-spell badges are now separate confidence-gated draft facts.
+
 ## Battlefield Guide Sample Set
 
 `../map/battlefield_mechanics_20260522.json` indexes a 38-screenshot set copied from the in-game battlefield guide. The raw PNGs live under `raw/20260522-battlefield-guide/` and are intentionally ignored by Git.

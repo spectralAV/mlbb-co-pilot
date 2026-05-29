@@ -12,13 +12,17 @@ function compactSlots(slots: DraftSlots) {
 }
 
 function slotIds(slots?: any[]) {
-  const next = (slots ?? []).map((slot) => {
-    if (typeof slot === "number") return slot;
-    const heroId = Number(slot?.heroId);
-    return Number.isFinite(heroId) ? heroId : null;
-  });
-  while (next.length < 5) next.push(null);
-  return next.slice(0, 5);
+  const next: Array<number | null> = Array.from({ length: 5 }, () => null);
+  for (const [index, slot] of (slots ?? []).entries()) {
+    const heroId = typeof slot === "number" ? slot : Number(slot?.heroId);
+    if (!Number.isFinite(heroId)) continue;
+    const detectedIndex = Number(slot?.slot) - 1;
+    const destination = Number.isInteger(detectedIndex) && detectedIndex >= 0 && detectedIndex < 5
+      ? detectedIndex
+      : index;
+    if (destination < 5) next[destination] = heroId;
+  }
+  return next;
 }
 
 function recognizedKey(state: any) {
@@ -143,6 +147,7 @@ export function DraftRoom() {
       allyBans: slotIds(state.allyBans),
       enemyBans: slotIds(state.enemyBans)
     });
+    draft.setLane(state.selectedLane?.value);
     setLatestRecognition(payload);
     setRealtimeAnalysis(payload.analysis ?? null);
     setRealtimeStatus(`Updated from ${state.frameId ?? "live draft"}${state.timestamp ? ` at ${new Date(state.timestamp).toLocaleTimeString()}` : ""}`);
@@ -202,6 +207,22 @@ export function DraftRoom() {
       <div className="card p-4">
         <h3 className="mb-3 font-bold">Strategy Brain</h3>
         {strategyData ? <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 text-sm">
+            {strategyData.context?.selectedLane && <span className="chip">{strategyData.context.selectedLaneSource === "detected" ? "Detected lane" : "Preferred lane"}: {strategyData.context.selectedLane}</span>}
+            {strategyData.context?.selfSlot && <span className="chip">My slot: {strategyData.context.selfSlot}</span>}
+            {strategyData.battleSpells?.detectedSelfSpell && <span className="chip">Spell detected: {strategyData.battleSpells.detectedSelfSpell}</span>}
+          </div>
+          {strategyData.bestPick && <div>
+            <div className="text-sm text-slate-400">Best pick for my lane and pool</div>
+            <div className="mt-2 rounded-lg border border-cyan-300/20 bg-cyan-500/10 p-3">
+              <div className="flex justify-between gap-3"><b>{strategyData.bestPick.hero}</b><span className="text-cyan-200">{strategyData.bestPick.score}</span></div>
+              <div className="mt-2 flex flex-wrap gap-1">{strategyData.bestPick.reasons?.map((reason: string) => <span className="chip" key={reason}>{reason}</span>)}</div>
+            </div>
+          </div>}
+          {strategyData.battleSpells?.recommendations?.length > 0 && <div>
+            <div className="text-sm text-slate-400">Battle spell options</div>
+            {strategyData.battleSpells.recommendations.map((option: any) => <div key={option.spell} className="mt-2 rounded-lg border border-white/10 bg-white/5 p-3"><b>{option.spell}</b><p className="text-sm text-slate-300">{option.reason}</p></div>)}
+          </div>}
           <div><div className="text-sm text-slate-400">Recommendations</div>{strategyData.recommendations?.map((result: any) => { const hero = heroes.find((item) => item.id === result.heroId); return <div key={result.heroId} className="mt-2 rounded-lg border border-white/10 bg-white/5 p-3"><div className="flex justify-between gap-3"><span className="truncate">{hero?.name ?? result.heroId}</span><span className="text-violet-300">{result.score}</span></div><div className="mt-2 flex flex-wrap gap-1">{result.reasons?.map((reason: string) => <span className="chip" key={reason}>{reason}</span>)}</div></div>; })}</div>
           <div><div className="text-sm text-slate-400">Warnings</div>{strategyData.warnings?.map((warning: any) => <div key={warning.id} className="mt-2 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3"><b>{warning.title}</b><p className="text-sm text-slate-300">{warning.message}</p></div>)}</div>
           <div><div className="text-sm text-slate-400">Ally Identity</div><div className="mt-2 flex flex-wrap gap-1">{strategyData.allyIdentity?.map((item: string) => <span className="chip" key={item}>{item}</span>)}</div></div>

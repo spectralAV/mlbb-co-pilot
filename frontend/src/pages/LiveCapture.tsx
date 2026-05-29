@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
-import { CircleStop, Database, Gauge, MonitorUp, ScanLine, Smartphone, Tv } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CircleStop, Crop, Database, Gauge, MonitorUp, ScanLine, Smartphone, Tv } from "lucide-react";
+import { getNativeObsVisionStatus } from "../api/client";
 import {
-  attachScrcpyPreviewCanvas,
+  attachCapturePreviewCanvas,
   captureSources,
   maxBufferedFrames,
   maxNativeCrops,
@@ -15,7 +16,8 @@ import {
 
 export function LiveCapture() {
   const previewRef = useRef<HTMLVideoElement | null>(null);
-  const scrcpyCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const capturePreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [nativeObsStatus, setNativeObsStatus] = useState<any>(null);
   const {
     running,
     sourceMode,
@@ -33,7 +35,9 @@ export function LiveCapture() {
     error,
     adbPreviewUrl,
     captureLog,
-    stream
+    stream,
+    windowContentCrop,
+    setWindowContentCrop
   } = useCaptureRuntimeStore();
 
   useEffect(() => {
@@ -42,7 +46,29 @@ export function LiveCapture() {
     if (stream) void previewRef.current.play().catch(() => {});
   }, [stream, sourceMode]);
 
-  useEffect(() => () => attachScrcpyPreviewCanvas(null), []);
+  useEffect(() => () => attachCapturePreviewCanvas(null), []);
+
+  useEffect(() => {
+    if (selectedSource !== "obs" && sourceMode !== "obs") {
+      setNativeObsStatus(null);
+      return;
+    }
+    let active = true;
+    async function refresh() {
+      try {
+        const result = await getNativeObsVisionStatus();
+        if (active) setNativeObsStatus(result);
+      } catch {
+        if (active) setNativeObsStatus(null);
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [selectedSource, sourceMode]);
 
   const activeWindows = regions.filter((region) => metrics[region.key]?.active && region.key.includes("window"));
   const selected = captureSources.find((source) => source.id === selectedSource) ?? captureSources[0];
@@ -108,10 +134,36 @@ export function LiveCapture() {
       {selectedCodec.toUpperCase()} is selectable for device/encoder testing, but live preview and CV are disabled for it right now so the app does not fall into the slow ADB frame path.
     </div>}
 
+    {selectedSource === "window" && <section className="card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 font-bold"><Crop className="h-4 w-4 text-cyan-300" />Window Content Crop</h3>
+          <p className="mt-1 text-sm text-slate-400">{windowContentCrop.enabled ? "Applied to preview and CV" : "Full captured window"}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold">
+            <input type="checkbox" checked={windowContentCrop.enabled} onChange={(event) => setWindowContentCrop({ enabled: event.target.checked })} />
+            Crop
+          </label>
+          <button className="min-h-10 rounded-lg border border-cyan-300/25 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-100" onClick={() => setWindowContentCrop({ enabled: true, top: 0.13, bottom: 0.06, left: 0, right: 0 })}>Stream Pop-out</button>
+          <button className="min-h-10 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold" onClick={() => setWindowContentCrop({ enabled: false, top: 0, bottom: 0, left: 0, right: 0 })}>Full Frame</button>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-4">
+        {(["top", "bottom", "left", "right"] as const).map((edge) => <label key={edge} className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-400">
+            <span>{edge}</span>
+            <span>{Math.round(windowContentCrop[edge] * 100)}%</span>
+          </div>
+          <input className="mt-3 w-full accent-cyan-300" type="range" min="0" max="30" step="1" value={Math.round(windowContentCrop[edge] * 100)} onChange={(event) => setWindowContentCrop({ enabled: true, [edge]: Number(event.target.value) / 100 })} />
+        </label>)}
+      </div>
+    </section>}
+
     <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
       <section className="card overflow-hidden">
         <div className="relative bg-black" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "scrcpy" ? <canvas ref={(node) => { scrcpyCanvasRef.current = node; attachScrcpyPreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+          {sourceMode === "scrcpy" || sourceMode === "browser" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
@@ -132,10 +184,23 @@ export function LiveCapture() {
             <Metric label="Latency" value={lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`} />
             <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
             <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : selectedSource === "obs" ? "Native decoded" : "-"} />
-            <Metric className="col-span-2" label="Native Source" value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
+            <Metric className="col-span-2" label={sourceMode === "browser" ? "CV Surface" : "Native Source"} value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
             <Metric className="col-span-2" label="Native ROI Crops" value={`${nativeCrops}/${maxNativeCrops}`} />
           </div>
         </div>
+
+        {selectedSource === "obs" && <div className="card p-4">
+          <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Native OBS Ultralytics</h3>
+          <p className="mt-2 text-sm text-slate-300">Frames pass from the OBS plugin straight to the backend inference worker. This panel only monitors it.</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+            <Metric label="Bridge" value={nativeObsStatus?.bridge?.connected ? "Live" : "Waiting"} />
+            <Metric label="Model" value={nativeObsStatus?.ultralytics?.modelAvailable ? "Loaded" : "No weights"} />
+            <Metric label="Queued" value={nativeObsStatus?.ultralytics?.queuedFrames ?? 0} />
+            <Metric label="Processed" value={nativeObsStatus?.ultralytics?.processedFrames ?? 0} />
+            <Metric label="Dropped stale" value={nativeObsStatus?.ultralytics?.droppedFrames ?? 0} />
+            <Metric label="Inference" value={nativeObsStatus?.ultralytics?.lastLatencyMs == null ? "-" : `${nativeObsStatus.ultralytics.lastLatencyMs}ms`} />
+          </div>
+        </div>}
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><ScanLine className="h-4 w-4 text-cyan-300" />Fast Popup ROIs</h3>
@@ -170,12 +235,42 @@ export function LiveCapture() {
             <div className="mt-3 space-y-1 text-sm text-slate-300">
               {liveVision.evidence.map((line) => <div key={line}>- {line}</div>)}
             </div>
+            {liveVision.signals?.allyEquipment?.length ? <div className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-500/5 p-3">
+              <div className="text-xs font-black uppercase tracking-[0.18em] text-cyan-200">Confirmed Ally Equipment</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {liveVision.signals.allyEquipment.map((item) => (
+                  <span key={`${item.row}-${item.slot}`} className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100">
+                    {item.itemName} <span className="text-slate-400">R{item.row}.{item.slot} {Math.round(item.confidence * 100)}%</span>
+                  </span>
+                ))}
+              </div>
+            </div> : null}
+            {liveVision.signals?.enemyEquipment?.length ? <div className="mt-3 rounded-lg border border-rose-300/20 bg-rose-500/5 p-3">
+              <div className="text-xs font-black uppercase tracking-[0.18em] text-rose-200">Confirmed Enemy Equipment</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {liveVision.signals.enemyEquipment.map((item) => (
+                  <span key={`${item.row}-${item.slot}`} className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100">
+                    {item.itemName} <span className="text-slate-400">R{item.row}.{item.slot} {Math.round(item.confidence * 100)}%</span>
+                  </span>
+                ))}
+              </div>
+            </div> : null}
+            {liveVision.signals?.yoloDetections?.length ? <div className="mt-3 rounded-lg border border-violet-300/20 bg-violet-500/5 p-3">
+              <div className="text-xs font-black uppercase tracking-[0.18em] text-violet-200">Ultralytics Visible Facts</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {liveVision.signals.yoloDetections.map((fact, index) => (
+                  <span key={`${fact.className}-${index}`} className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-100">
+                    {fact.className.replace(/_/g, " ")} <span className="text-slate-400">{Math.round(fact.confidence * 100)}%</span>
+                  </span>
+                ))}
+              </div>
+            </div> : null}
           </> : <p className="mt-3 text-sm text-slate-400">Start capture to emit screen-state snapshots for the live overlay director.</p>}
         </div>
 
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Database className="h-4 w-4 text-cyan-300" />Runtime Design</h3>
-          <p className="mt-2 text-sm text-slate-300">Capture is owned by the app shell instead of the current page. Native OBS bridge frames, direct scrcpy H.264 fallback, ADB still-frame testing, map trainer, and overlays consume the same runtime state.</p>
+          <p className="mt-2 text-sm text-slate-300">OBS plugin frames now feed backend Ultralytics directly, even when this page is closed. This preview still runs the browser-based draft and popup detectors until those are migrated behind the same native bridge.</p>
           <div className="mt-3 rounded-lg bg-white/5 p-3 text-sm text-slate-300">{activeWindows.length ? `${activeWindows.map((item) => item.label).join(", ")} active in current frame.` : "No popup candidate in the current frame."}</div>
         </div>
 

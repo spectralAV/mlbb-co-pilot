@@ -1,6 +1,6 @@
 [
   {
-    "name": "distinct top template is accepted",
+    "name": "distinct circular icon template is accepted",
     "observed": [0.1, 0.2, 0.3, 0.8, 0.7, 0.6],
     "references": [
       { "heroId": 101, "heroName": "Alpha", "variant": "normal", "signature": [0.1, 0.2, 0.3, 0.8, 0.7, 0.6] },
@@ -9,7 +9,7 @@
     "expectedHeroId": 101
   },
   {
-    "name": "near tie is rejected",
+    "name": "near-tied circular icons are rejected",
     "observed": [0.1, 0.2, 0.3, 0.8, 0.7, 0.6],
     "references": [
       { "heroId": 101, "heroName": "Alpha", "variant": "normal", "signature": [0.1, 0.2, 0.3, 0.8, 0.7, 0.6] },

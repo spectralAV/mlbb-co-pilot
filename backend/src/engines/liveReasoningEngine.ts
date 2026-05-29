@@ -1,4 +1,5 @@
 import { eventBus } from "../event-bus/eventBus.js";
+import { DETECTED_FACT_CONFIDENCE } from "../state/matchState.js";
 
 export type ReasoningScene = "main" | "map" | "text" | "counter" | "picks";
 export type ReasoningPriority = "low" | "medium" | "high";
@@ -66,7 +67,7 @@ export function evaluateLiveReasoning(input: LiveReasoningInput): LiveReasoningO
   const signals = input.signals ?? {};
   const screen = String(input.screen ?? "unknown");
   const confidence = clamp01(input.confidence);
-  const enemyMarkerCount = (input.minimapMarkers ?? []).filter((marker) => marker.side === "enemy" && clamp01(marker.confidence) >= 0.45).length;
+  const enemyMarkerCount = (input.minimapMarkers ?? []).filter((marker) => marker.side === "enemy" && clamp01(marker.confidence) >= DETECTED_FACT_CONFIDENCE).length;
   const missingEnemies = toStringArray(signals.missingEnemies);
   const missingEnemyCount = finiteOptional(signals.missingEnemyCount) ?? (missingEnemies.length || undefined);
   const objectiveSpawnsInSec = finiteOptional(signals.objectiveSpawnsInSec);

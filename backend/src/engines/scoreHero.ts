@@ -23,7 +23,11 @@ function flexibilityScore(hero: any, runtimeHero?: any) {
   return clamp(45 + count * 8);
 }
 
-export function scoreDraftHero(hero: any, context: { allies: any[]; enemies: any[]; heroPool: string[]; role?: string; runtimeHero?: any }) {
+function laneKey(value: unknown) {
+  return normalize(value).replace(/\s+lane$/, "");
+}
+
+export function scoreDraftHero(hero: any, context: { allies: any[]; enemies: any[]; heroPool: string[]; role?: string; lane?: string; laneDetected?: boolean; runtimeHero?: any }) {
   const matchup = matchupQuality(hero, context.enemies);
   const synergy = teamSynergy(hero, context.allies);
   const name = normalize(hero?.name ?? hero?.hero_name);
@@ -33,10 +37,17 @@ export function scoreDraftHero(hero: any, context: { allies: any[]; enemies: any
   const flexibility = flexibilityScore(hero, context.runtimeHero);
   const roleText = normalize([hero?.role, ...(hero?.roles ?? []).map((r: any) => r?.title ?? r)].join(" "));
   const rolePenalty = context.role && roleText && !roleText.includes(normalize(context.role)) ? 6 : 0;
-  const score = clamp(matchup.score * 0.35 + comfort * 0.25 + synergy.score * 0.2 + meta * 0.1 + flexibility * 0.1 - rolePenalty);
+  const heroLanes = (hero?.lanes ?? context.runtimeHero?.lanes ?? []).map((lane: any) => laneKey(lane?.title ?? lane));
+  const requestedLane = laneKey(context.lane);
+  const laneMatches = Boolean(requestedLane) && heroLanes.includes(requestedLane);
+  const laneAdjustment = requestedLane ? laneMatches ? 12 : -18 : 0;
+  const score = clamp(matchup.score * 0.35 + comfort * 0.25 + synergy.score * 0.2 + meta * 0.1 + flexibility * 0.1 - rolePenalty + laneAdjustment);
   const reasons = [...matchup.reasons, ...synergy.reasons];
   if (pool.includes(name)) reasons.unshift("Good comfort-pick match");
+  if (laneMatches) reasons.unshift(`Fits ${context.laneDetected ? "detected" : "preferred"} ${requestedLane} lane`);
   if (meta >= 65) reasons.push("Strong current meta profile");
+  const risks = [...matchup.risks];
+  if (requestedLane && !laneMatches) risks.unshift(`Does not match ${context.laneDetected ? "detected" : "preferred"} ${requestedLane} lane`);
   if (!reasons.length) reasons.push("Balanced fit for the current draft");
 
   return {
@@ -44,6 +55,6 @@ export function scoreDraftHero(hero: any, context: { allies: any[]; enemies: any
     score,
     confidence: score >= 80 ? "high" : score >= 65 ? "medium" : "low",
     reasons: reasons.slice(0, 5),
-    risks: matchup.risks
+    risks
   };
 }

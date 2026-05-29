@@ -6,6 +6,8 @@ const ROOT = path.resolve(process.cwd(), "..");
 const OBS_DIR = path.resolve(ROOT, "data", "obs");
 const REGIONS_FILE = path.join(OBS_DIR, "screen_regions.json");
 const CONFIG_FILE = path.join(OBS_DIR, "obs_config.json");
+export type NormalizedRect = [number, number, number, number];
+type RegionMap = Record<string, unknown>;
 
 type CoachState = {
   role: string;
@@ -28,6 +30,7 @@ let state: CoachState = {
 };
 
 let obsRealtime = false;
+let activeRegionsCache: RegionMap | null = null;
 
 async function ensureObsDir() {
   await fs.mkdir(OBS_DIR, { recursive: true });
@@ -146,6 +149,7 @@ export async function getObsRegions() {
 
 export async function saveObsRegions(regions: unknown) {
   await writeJson(REGIONS_FILE, regions);
+  activeRegionsCache = null;
   return regions;
 }
 
@@ -177,5 +181,25 @@ export async function getObsConfig() {
 
 export async function saveObsConfig(config: unknown) {
   await writeJson(CONFIG_FILE, config);
+  activeRegionsCache = null;
   return config;
+}
+
+export function firstNormalizedRegion(value: unknown): NormalizedRect | null {
+  const isRect = (candidate: unknown): candidate is NormalizedRect => Array.isArray(candidate)
+    && candidate.length === 4
+    && candidate.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 1);
+  if (isRect(value)) return value;
+  if (Array.isArray(value)) return value.find(isRect) ?? null;
+  return null;
+}
+
+export async function getActiveObsRegions() {
+  if (activeRegionsCache) return activeRegionsCache;
+  const [config, savedRegions] = await Promise.all([getObsConfig() as Promise<any>, getObsRegions()]);
+  const presets = Array.isArray(config?.calibrationPresets) ? config.calibrationPresets : [];
+  const preset = presets.find((item: any) => item?.id === config?.activeCalibrationPresetId) ?? presets[0];
+  const resolved = preset?.regions && typeof preset.regions === "object" ? preset.regions : savedRegions;
+  activeRegionsCache = resolved as RegionMap;
+  return activeRegionsCache;
 }

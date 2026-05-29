@@ -1,0 +1,25 @@
+MLBB Co-Pilot
+Copyright 2026 SpectralAV
+
+This product includes software developed by SpectralAV.
+
+MLBB Co-Pilot is an independent tactical assistant project. It is not affiliated
+with, endorsed by, sponsored by, or approved by Moonton, ByteDance, or the
+Mobile Legends: Bang Bang rights holders.
+
+Mobile Legends: Bang Bang, MLBB, hero names, item names, artwork, game imagery,
+icons, screenshots, and related game assets are trademarks, copyrighted works,
+or other intellectual property of their respective owners. Any local references
+to those materials are used only for interoperability, recognition, calibration,
+and private analysis within this project.
+
+Third-party software dependencies retain their own notices and license terms.
+The Node dependency graph is recorded in package-lock.json files. Python CV
+runtime dependencies are installed from backend/cv/requirements.txt into the
+managed environment under data/cv/.venv. Generated, extracted, cached, or
+downloaded assets under data/ are not relicensed by this project.
+
+Ultralytics YOLO and related model/runtime files are governed by Ultralytics'
+own license terms, including AGPL-3.0 or a commercial license where applicable.
+ONNX, ONNX Runtime, DirectML, PyTorch, React, Vite, Fastify, Sharp, and other
+third-party components remain governed by their respective upstream licenses.

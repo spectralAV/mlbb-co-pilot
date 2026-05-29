@@ -1,0 +1,27 @@
+path: .
+train: images/train
+val: images/val
+
+names:
+  0: minimap_panel
+  1: draft_screen
+  2: equipment_scoreboard
+  3: attributes_scoreboard
+  4: ally_pick_slot
+  5: enemy_pick_slot
+  6: ally_ban_slot
+  7: enemy_ban_slot
+  8: lane_marker
+  9: battle_spell_marker
+  10: ally_hero_marker
+  11: enemy_hero_marker
+  12: turtle
+  13: lord
+  14: ally_turret
+  15: enemy_turret
+  16: turtle_respawn_timer
+  17: lord_respawn_timer
+  18: enemy_respawn_timer
+  19: ally_respawn_timer
+  20: minimap_objective_timer
+  21: score_counter

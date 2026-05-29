@@ -1,0 +1,30 @@
+{
+  "version": "0.1",
+  "purpose": "Human-readable ground truth for recorded Mythic draft replay fixtures and calibrated transition portrait surfaces.",
+  "evidence": {
+    "labelFrame": "samples/video-analysis/mythic/keyframes/candidate-loading-225.png",
+    "enemyOriginalTrainingFrame": "samples/video-analysis/mythic/draft-036.jpg",
+    "enemyOriginalValidationFrame": "samples/video-analysis/mythic/draft-037.jpg",
+    "skinTrainingFrames": [
+      "samples/video-analysis/mythic/draft-038.jpg",
+      "samples/video-analysis/mythic/draft-039.jpg",
+      "samples/video-analysis/mythic/draft-040.jpg"
+    ],
+    "skinValidationFrame": "samples/video-analysis/mythic/draft-041.jpg",
+    "note": "The loading cards explicitly print each hero and skin name; adjacent draft frames retain the same player order and artwork."
+  },
+  "allyPicks": [
+    { "slot": 1, "heroId": 8, "heroName": "Karina", "skinName": "Phantom Blade" },
+    { "slot": 2, "heroId": 16, "heroName": "Zilong", "skinName": "Christmas Carnival" },
+    { "slot": 3, "heroId": 53, "heroName": "Lesley", "skinName": "Angelic Agent" },
+    { "slot": 4, "heroId": 83, "heroName": "X.Borg", "skinName": "Blue Storm" },
+    { "slot": 5, "heroId": 91, "heroName": "Cecilion", "skinName": "Wisteria Count" }
+  ],
+  "enemyPicks": [
+    { "slot": 1, "heroId": 46, "heroName": "Odette", "skinName": "Sage of the Currents" },
+    { "slot": 2, "heroId": 60, "heroName": "Hanabi", "skinName": "V.E.N.O.M. Nephila" },
+    { "slot": 3, "heroId": 90, "heroName": "Silvanna", "skinName": "Classroom Charm" },
+    { "slot": 4, "heroId": 27, "heroName": "Sun", "skinName": "Battle Buddha" },
+    { "slot": 5, "heroId": 7, "heroName": "Alucard", "skinName": "Lone Hero" }
+  ]
+}

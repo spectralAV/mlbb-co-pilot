@@ -3,14 +3,14 @@
   "port": 4455,
   "password": "",
   "sourceName": "MLBB_SOURCE",
-  "captureRatio": "2856:1280",
+  "captureRatio": "1834:904",
   "screenshotWidth": 1600,
   "screenshotHeight": 720,
   "activeCalibrationPresetId": "default",
   "calibrationPresets": [
     {
       "id": "default",
-      "name": "Default Device",
+      "name": "Pixel 10 Pro",
       "source": "adb",
       "width": 2856,
       "height": 1280,
@@ -31,6 +31,40 @@
             0.222492,
             0.088458
           ]
+        ],
+        "ally_pick_portraits_norm": [
+          [
+            0,
+            0.083042,
+            0.162621,
+            0.832224
+          ]
+        ],
+        "enemy_pick_portraits_norm": [
+          [
+            0.842233,
+            0.084847,
+            0.157767,
+            0.828613
+          ]
+        ],
+        "draft_self_highlight_rail_norm": [
+          0,
+          0.1,
+          0.19,
+          0.88
+        ],
+        "draft_first_pick_ally_indicator_norm": [
+          0.278,
+          0.032,
+          0.052,
+          0.072
+        ],
+        "draft_first_pick_enemy_indicator_norm": [
+          0.702,
+          0.032,
+          0.052,
+          0.072
         ],
         "ally_picks_norm": [
           [
@@ -63,9 +97,24 @@
           ]
         ],
         "items_norm": [],
-        "attributes_window_norm": []
+        "equipment_window_norm": [
+          [
+            0.1,
+            0.13,
+            0.8,
+            0.78
+          ]
+        ],
+        "attributes_window_norm": [
+          [
+            0.1,
+            0.13,
+            0.8,
+            0.78
+          ]
+        ]
       },
-      "updatedAt": "2026-05-23T15:45:09.992Z"
+      "updatedAt": "2026-05-26T00:00:00.000Z"
     },
     {
       "id": "window-share-1600x720-mpibdfl6",
@@ -119,8 +168,116 @@
         ]
       },
       "updatedAt": "2026-05-23T14:10:05.738Z"
+    },
+    {
+      "id": "adb-phone-2856x1280-mpngkwaq",
+      "name": "Twitch Stream",
+      "source": "window",
+      "width": 1834,
+      "height": 904,
+      "regions": {
+        "comment": "Coordinates are normalized [x,y,w,h] 0..1 relative to the OBS source screenshot.",
+        "ally_bans_norm": [
+          [
+            0.035599,
+            0,
+            0.224919,
+            0.086652
+          ]
+        ],
+        "enemy_bans_norm": [
+          [
+            0.737055,
+            0,
+            0.222492,
+            0.088458
+          ]
+        ],
+        "ally_pick_portraits_norm": [
+          [
+            0,
+            0.083042,
+            0.162621,
+            0.832224
+          ]
+        ],
+        "enemy_pick_portraits_norm": [
+          [
+            0.842233,
+            0.084847,
+            0.157767,
+            0.828613
+          ]
+        ],
+        "draft_self_highlight_rail_norm": [
+          0,
+          0.1,
+          0.19,
+          0.88
+        ],
+        "draft_first_pick_ally_indicator_norm": [
+          0.278,
+          0.032,
+          0.052,
+          0.072
+        ],
+        "draft_first_pick_enemy_indicator_norm": [
+          0.702,
+          0.032,
+          0.052,
+          0.072
+        ],
+        "ally_picks_norm": [
+          [
+            0,
+            0.083042,
+            0.162621,
+            0.832224
+          ]
+        ],
+        "enemy_picks_norm": [
+          [
+            0.842233,
+            0.084847,
+            0.157767,
+            0.828613
+          ]
+        ],
+        "minimap_norm": [
+          0.028361,
+          0,
+          0.140756,
+          0.314063
+        ],
+        "scoreboard_norm": [
+          [
+            0.31877,
+            0,
+            0.366505,
+            0.0686
+          ]
+        ],
+        "items_norm": [],
+        "equipment_window_norm": [
+          [
+            0.1,
+            0.13,
+            0.8,
+            0.78
+          ]
+        ],
+        "attributes_window_norm": [
+          [
+            0.1,
+            0.13,
+            0.8,
+            0.78
+          ]
+        ]
+      },
+      "updatedAt": "2026-05-27T02:45:16.875Z"
     }
   ],
-  "sourceWidth": 2856,
-  "sourceHeight": 1280
+  "sourceWidth": 1834,
+  "sourceHeight": 904
 }

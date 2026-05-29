@@ -21,6 +21,40 @@ Frontend: http://localhost:5173
 
 Backend health: http://localhost:8787/api/health
 
+Optional local DNS URL after setup: http://mlbb.local:5173
+
+## Local DNS
+
+MLBB Co-Pilot can run behind friendly local hostnames for browser and OBS sources:
+
+```text
+http://mlbb.local:5173
+http://api.mlbb.local:8787/api/health
+http://obs.mlbb.local:5173/mlbb-live-output
+```
+
+Install the Windows hosts-file entries from an elevated PowerShell:
+
+```powershell
+npm run local-dns:install
+```
+
+Check or remove them:
+
+```powershell
+npm run local-dns:status
+npm run local-dns:remove
+```
+
+Override the defaults with a comma-separated host list when needed:
+
+```powershell
+$env:LOCAL_DNS_HOSTNAMES="mlbb.local,api.mlbb.local,obs.mlbb.local"
+npm run dev
+```
+
+Backend and frontend dev servers bind to `127.0.0.1` by default. For a deliberate LAN test session, set `HOST` and `FRONTEND_HOST` before starting the app.
+
 ## Build
 
 ```powershell
@@ -41,6 +75,80 @@ Frontend-only build:
 cd frontend
 npm run build
 ```
+
+## CV Runtime
+
+Ultralytics YOLO runs through the managed Python environment in `data/cv/.venv`.
+
+```powershell
+npm run cv:status
+```
+
+Bootstrap or refresh the local YOLO dataset:
+
+```powershell
+npm run cv:bootstrap
+```
+
+This rebuilds `data/cv/images` and `data/cv/labels` from reviewed screen frames, local CV Lab annotations, and the already-synced `data/adb-assets` HUD sprites. It does not bypass protection or decompile game code; third-party game assets remain governed by their own terms.
+
+Extract all frames from recorded gameplay footage for CV review and training intake:
+
+```powershell
+npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01"
+```
+
+By default this writes frames under `data/cv/footage/<name>/frames` with a manifest and CSV index, without adding them to the active YOLO dataset. Use `-DatasetSplit train` only when you deliberately want the extracted frames added as empty-label background negatives. Running `cv:prepare` rebuilds the active dataset, so footage exports should stay in `data/cv/footage` until frames are reviewed or intentionally copied into training.
+
+The backend selects `ULTRALYTICS_DEVICE=auto` by default. Auto uses ONNX Runtime DirectML for Windows AMD/DirectX 12 GPUs when available, CUDA when the managed PyTorch runtime exposes an NVIDIA CUDA GPU, then falls back to CPU. This is the preferred live inference path on AMD Windows because the DirectML worker has lower warm-frame latency than the WSL ROCm/PyTorch path. You can override it before starting:
+
+```powershell
+$env:ULTRALYTICS_DEVICE="directml"
+npm run dev
+```
+
+For AMD Windows inference, the worker exports `data/cv/models/mlbb-detect.pt` to `data/cv/models/mlbb-detect.onnx` and runs it with `onnxruntime-directml`. Training uses the Ultralytics PyTorch path. For NVIDIA GPU training/inference, install a CUDA-enabled PyTorch build into `data/cv/.venv` using the selector at https://pytorch.org/get-started/locally/.
+
+### WSL ROCm Runtime
+
+For AMD ROCm training or Torch inference, use Ubuntu 24.04 in WSL. The WSL path uses AMD's ROCDXG bridge through `/dev/dxg`, not the Windows DirectML worker.
+
+```powershell
+npm run cv:wsl:bootstrap
+npm run cv:wsl:status
+```
+
+The bootstrap script creates `$HOME/.mlbb-copilot/cv-rocm` in Ubuntu, installs ROCm/PyTorch dependencies, builds a user-local `librocdxg` when needed, and validates that PyTorch can see the AMD GPU through its CUDA-compatible API. WSL ROCm training is available, but it is experimental on Radeon 780M under WSL and can stress the Windows display driver.
+
+Keep the backend on the default Windows runtime for live DirectML inference. Start the backend against WSL only when you specifically want PyTorch ROCm inference instead of DirectML:
+
+```powershell
+$env:ULTRALYTICS_RUNTIME="wsl"
+$env:ULTRALYTICS_WSL_DISTRO="Ubuntu-24.04"
+npm run dev
+```
+
+The default training command uses the conservative Windows CPU path:
+
+```powershell
+npm run cv:train
+```
+
+The ROCm training command must be launched explicitly. It uses reduced WSL pressure by default (`imgsz=640`, `batch=2`, `workers=0`, `amp=false`):
+
+```powershell
+npm run cv:train:rocm
+```
+
+Docker Desktop on Windows does not expose AMD ROCm through the normal `/dev/kfd` and `/dev/dri` Linux path. If a ROCm container is used from WSL, it must use the ROCDXG `/dev/dxg` flags and mount `libdxcore.so` plus `librocdxg.so`.
+
+## Legal
+
+Copyright 2026 SpectralAV.
+
+This is an independent project and is not affiliated with, endorsed by, sponsored by, or approved by Moonton, ByteDance, or the Mobile Legends: Bang Bang rights holders.
+
+Original project code is licensed under the Apache License, Version 2.0. Third-party packages, models, trademarks, game assets, screenshots, artwork, and extracted/cached data remain governed by their own license terms. See `LICENSE` and `NOTICE`.
 
 ## Data Sync
 

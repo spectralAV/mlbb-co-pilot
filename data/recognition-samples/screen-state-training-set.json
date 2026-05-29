@@ -1,0 +1,48 @@
+{
+  "version": "0.1",
+  "purpose": "Conservative replay labels for the first trained screen-state CV model. Ambiguous transition frames are intentionally excluded.",
+  "classes": ["draft", "loading", "live_hud"],
+  "recordings": [
+    {
+      "id": "legend",
+      "file": "samples/legend-match.mp4",
+      "samples": [
+        { "second": 130, "label": "draft", "split": "train" },
+        { "second": 170, "label": "draft", "split": "train" },
+        { "second": 210, "label": "draft", "split": "train" },
+        { "second": 250, "label": "draft", "split": "train" },
+        { "second": 285, "label": "draft", "split": "train" },
+        { "second": 150, "label": "draft", "split": "validation" },
+        { "second": 270, "label": "draft", "split": "validation" },
+        { "second": 315, "label": "loading", "split": "train" },
+        { "second": 330, "label": "loading", "split": "train" },
+        { "second": 322, "label": "loading", "split": "validation" },
+        { "second": 390, "label": "live_hud", "split": "train" },
+        { "second": 420, "label": "live_hud", "split": "train" },
+        { "second": 500, "label": "live_hud", "split": "train" },
+        { "second": 600, "label": "live_hud", "split": "train" },
+        { "second": 460, "label": "live_hud", "split": "validation" }
+      ]
+    },
+    {
+      "id": "mythic",
+      "file": "samples/mythic-match.mp4",
+      "samples": [
+        { "second": 85, "label": "draft", "split": "train" },
+        { "second": 125, "label": "draft", "split": "train" },
+        { "second": 165, "label": "draft", "split": "train" },
+        { "second": 200, "label": "draft", "split": "train" },
+        { "second": 105, "label": "draft", "split": "validation" },
+        { "second": 188, "label": "draft", "split": "validation" },
+        { "second": 218, "label": "loading", "split": "train" },
+        { "second": 225, "label": "loading", "split": "train" },
+        { "second": 221, "label": "loading", "split": "validation" },
+        { "second": 240, "label": "live_hud", "split": "train" },
+        { "second": 300, "label": "live_hud", "split": "train" },
+        { "second": 420, "label": "live_hud", "split": "train" },
+        { "second": 600, "label": "live_hud", "split": "train" },
+        { "second": 270, "label": "live_hud", "split": "validation" }
+      ]
+    }
+  ]
+}

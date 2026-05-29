@@ -14,11 +14,14 @@ type MinimapProjectionLike = {
 export type TacticalMapMarker = {
   id: string;
   side: "ally" | "enemy";
+  markerClass?: "team-color-candidate" | "hero-ring" | "ultralytics-yolo";
   minimap?: Point;
   tactical?: Point;
   heroIcon?: string;
   heroName?: string;
   confidence?: number;
+  status?: "visible" | "last_seen";
+  ageMs?: number;
 };
 
 type Zone = {
@@ -104,9 +107,10 @@ function TacticalHeroMarker({ marker, projection }: { key?: string; marker: Tact
   const point = marker.tactical ?? (marker.minimap ? projectMinimapPoint(marker.minimap, projection) : null);
   if (!point) return null;
   const shell = markerShells[marker.side];
-  const label = marker.heroName ?? `${marker.side} hero`;
+  const lastSeen = marker.status === "last_seen";
+  const label = marker.heroName ?? `${marker.side} ${lastSeen ? "last seen" : "visible"} minimap candidate`;
   return <div
-    className="pointer-events-none absolute z-20 h-14 w-14 -translate-x-1/2 -translate-y-full drop-shadow-[0_7px_10px_rgba(0,0,0,0.55)] sm:h-16 sm:w-16"
+    className={`pointer-events-none absolute z-20 h-14 w-14 -translate-x-1/2 -translate-y-full drop-shadow-[0_7px_10px_rgba(0,0,0,0.55)] sm:h-16 sm:w-16 ${lastSeen ? "opacity-45 grayscale" : ""}`}
     style={{ left: `${point[0] * 100}%`, top: `${point[1] * 100}%` }}
     title={label}
   >
@@ -119,6 +123,9 @@ function TacticalHeroMarker({ marker, projection }: { key?: string; marker: Tact
     />}
     {typeof marker.confidence === "number" && <span className="absolute -right-1 top-1 rounded-full bg-black/70 px-1 text-[9px] font-bold text-white">
       {Math.round(marker.confidence * 100)}
+    </span>}
+    {lastSeen && <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap border border-amber-300/40 bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-200">
+      Last seen
     </span>}
   </div>;
 }

@@ -9,6 +9,8 @@ import { BuildLab } from "./pages/BuildLab";
 import { LiveCapture } from "./pages/LiveCapture";
 import { Settings } from "./pages/Settings";
 import { Calibration } from "./pages/Calibration";
+import { SkinGallery } from "./pages/SkinGallery";
+import { CvLab } from "./pages/CvLab";
 import { MlbbCounterOutput, MlbbHeroPicksOutput, MlbbLiveOutput, MlbbStreamControl, MlbbStreamOutput, MlbbTacticalMapOutput, MlbbTextPanelOutput } from "./pages/MlbbStreamPack";
 import "./styles.css";
 
@@ -26,10 +28,12 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: "draft", element: <DraftRoom /> },
+      { path: "skins", element: <SkinGallery /> },
       { path: "build", element: <BuildLab /> },
       { path: "capture", element: <LiveCapture /> },
       { path: "mlbb-control", element: <MlbbStreamControl /> },
       { path: "calibration", element: <Calibration /> },
+      { path: "cv-lab", element: <CvLab /> },
       { path: "settings", element: <Settings /> }
     ]
   }
