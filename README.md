@@ -9,11 +9,17 @@ It combines a local web app, Electron desktop shell, backend tactical engines, a
 At a high level, it includes:
 
 *Draft intelligence: recommends picks, bans, counters, synergies, and role-aware hero choices.
+
 *Build and item guidance: suggests builds and counter-items based on enemy heroes and match context.
+
 *Live capture/CV pipeline: supports ADB, scrcpy, OBS bridge, screen classification, minimap markers, scoreboard/equipment detection, OCR hooks, and YOLO/Ultralytics model support.
+
 *Tactical map/runtime tools: map zones, minimap projection, objective context, lane pressure, gank risk, and live reasoning.
+
 *Stream/OBS tools: overlay pages and stream output panels for live coaching.
+
 *Desktop packaging: Electron-based Windows package and GHCR container package.
+
 *Data/runtime sync: local compiled runtime data, MLBB hero/item/emblem/talent metadata, and safe module update handling.
 
 ## Install
