@@ -2,8 +2,6 @@
 
 Semantic tactical intelligence system for Mobile Legends: Bang Bang.
 
-MLBB Co-Pilot is a tactical assistant for Mobile Legends: Bang Bang.
-
 It combines a local web app, Electron desktop shell, backend tactical engines, and computer-vision tooling to help with draft decisions, build choices, live match awareness, OBS overlays, and post-game/gameplay analysis.
 
 At a high level, it includes:
