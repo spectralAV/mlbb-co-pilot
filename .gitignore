@@ -4,6 +4,8 @@ dist-electron/
 
 backend/node_modules/
 backend/dist/
+backend/tools/ndi-direct/bin/
+backend/tools/ndi-direct/obj/
 frontend/node_modules/
 frontend/dist/
 
@@ -26,6 +28,7 @@ backups/
 __pycache__/
 
 data/cache/*.json
+data/cache/*.hevc
 !data/cache/.gitkeep
 data/capture/*
 !data/capture/.gitkeep
