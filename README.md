@@ -13,6 +13,7 @@
   <a href="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/publish-container.yml"><img alt="Container package" src="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/publish-container.yml/badge.svg"></a>
   <a href="https://github.com/spectralAV/mlbb-co-pilot/releases"><img alt="Release" src="https://img.shields.io/github/v/release/spectralAV/mlbb-co-pilot?include_prereleases&label=release"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/spectralAV/mlbb-co-pilot"></a>
+  <a href="https://streamelements.com/martianost/tip"><img alt="Tip on StreamElements" src="https://img.shields.io/badge/tip-StreamElements-9146FF"></a>
   <img alt="Node.js" src="https://img.shields.io/badge/node-22%20LTS-339933?logo=node.js&logoColor=white">
   <img alt="Electron" src="https://img.shields.io/badge/electron-desktop-47848F?logo=electron&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/typescript-app-3178C6?logo=typescript&logoColor=white">
@@ -201,6 +202,7 @@ npm run cv:wsl:status
 ## Community And Support
 
 - Use [GitHub Issues](https://github.com/spectralAV/mlbb-co-pilot/issues/new/choose) for bugs, feature requests, documentation fixes, and capture/CV diagnostics.
+- Support the project with an optional tip through [StreamElements](https://streamelements.com/martianost/tip).
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - Read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 - Keep logs, screenshots, gameplay footage, auth headers, and third-party assets private unless you are sure they can be shared.
