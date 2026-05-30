@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Save, ShieldCheck } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 import { getPlayerProfile, savePlayerProfile } from "../api/client";
 import { useAdvancedSurfacesVisible } from "../runtime/uiPreferences";
 import { DataSync } from "./Settings/DataSync";
@@ -22,6 +22,7 @@ export function Settings(){
     <div>
       <h2>Settings</h2>
       <p className="mt-3 max-w-3xl text-slate-400">Profile, official data sync, runtime cache, CV module uploads, and developer controls.</p>
+      <Link className="capture-secondary-button mt-4 inline-flex" to="/setup"><ShieldCheck size={16} /> First Run Setup</Link>
     </div>
     <div className="card flex flex-wrap gap-2 p-2">{tabs.map((name)=><button key={name} className={`min-h-10 rounded-full border px-4 py-2 text-sm font-bold ${tab===name?"border-cyan-300/35 bg-cyan-400/15 text-cyan-50":"border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]"}`} onClick={()=>setSearchParams({ tab: tabSlug(name) })}>{name}</button>)}</div>
     {tab==="Profile"&&<PlayerProfileSettings/>}

@@ -30,6 +30,7 @@ export async function apiPostAuth<T>(path:string, token:string, body:unknown={})
 export { API_BASE, apiUrl, apiWsUrl };
 export const syncOfficialData = (authorization: string) => apiPost<any>("/api/sync/official", { authorization });
 export const getRoneStatus = () => apiGet<any>("/api/rone/status");
+export const getSetupStatus = () => apiGet<any>("/api/setup/status");
 export const getRoneSnapshot = () => apiGet<any>("/api/rone/snapshot");
 export const saveRoneSnapshot = (body: unknown) => apiPost<any>("/api/rone/snapshot", body);
 export const deleteRoneSnapshot = () => apiDelete<any>("/api/rone/snapshot");

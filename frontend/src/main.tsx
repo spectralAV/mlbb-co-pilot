@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
+import { Setup } from "./pages/Setup";
 import { DraftRoom } from "./pages/DraftRoom";
 import { BuildLab } from "./pages/BuildLab";
 import { LiveCapture } from "./pages/LiveCapture";
@@ -29,6 +30,7 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "setup", element: <Setup /> },
       { path: "draft", element: <DraftRoom /> },
       { path: "skins", element: <SkinGallery /> },
       { path: "build", element: <BuildLab /> },

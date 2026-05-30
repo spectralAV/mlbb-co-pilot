@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Activity, Boxes, Crosshair, Database, Film, Images, Radio, Radar, ScanSearch, Settings, SlidersHorizontal, UserRound } from "lucide-react";
+import { Activity, Boxes, Crosshair, Database, Film, Images, Radio, Radar, ScanSearch, Settings, ShieldCheck, SlidersHorizontal, UserRound } from "lucide-react";
 import { CaptureRuntimeHost } from "./CaptureRuntimeHost";
 import { PerformanceTelemetryHost } from "./PerformanceTelemetryHost";
 import { getPlayerProfile } from "../api/client";
@@ -8,6 +8,7 @@ import { useAdvancedSurfacesVisible } from "../runtime/uiPreferences";
 import packageJson from "../../package.json";
 
 const links = [
+  { to: "/setup", label: "First Run", icon: ShieldCheck },
   { to: "/capture", label: "Live Capture", icon: Radar },
   { to: "/calibration", label: "Screen Setup", icon: SlidersHorizontal },
   { to: "/draft", label: "Draft Assistant", icon: Crosshair },

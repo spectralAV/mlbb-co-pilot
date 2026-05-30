@@ -43,6 +43,8 @@ Backend health: http://localhost:8787/api/health
 
 Electron desktop mode is wired for a Windows-first local app shell and has packaging targets declared for Windows, macOS, and Linux.
 
+The path to `1.0.0` is tracked in [Roadmap To 1.0.0](docs/roadmap-1.0.md).
+
 Run the desktop app against the dev servers:
 
 ```powershell
