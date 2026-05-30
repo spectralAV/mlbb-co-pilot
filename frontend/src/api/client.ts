@@ -11,11 +11,38 @@ async function responseError(res: Response, path: string) {
 }
 export async function apiGet<T>(path:string):Promise<T>{ const res=await fetch(apiUrl(path), { cache: "no-store" }); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 export async function apiPost<T>(path:string, body:unknown={}):Promise<T>{ const res=await fetch(apiUrl(path),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
+export async function apiDelete<T>(path:string):Promise<T>{ const res=await fetch(apiUrl(path),{method:"DELETE"}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
+function bearer(token: string) { return token.startsWith("Bearer ") ? token : `Bearer ${token}`; }
+function queryString(params: Record<string, unknown> = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value == null || value === "") return;
+    query.set(key, String(value));
+  });
+  const text = query.toString();
+  return text ? `?${text}` : "";
+}
+function ronePath(path: string) {
+  return path.replace(/^\/?api\//, "").replace(/^\/+/, "");
+}
+export async function apiGetAuth<T>(path:string, token:string):Promise<T>{ const res=await fetch(apiUrl(path), { cache: "no-store", headers: { authorization: bearer(token) } }); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
+export async function apiPostAuth<T>(path:string, token:string, body:unknown={}):Promise<T>{ const res=await fetch(apiUrl(path),{method:"POST",headers:{"content-type":"application/json",authorization:bearer(token)},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 export { API_BASE, apiUrl, apiWsUrl };
 export const syncOfficialData = (authorization: string) => apiPost<any>("/api/sync/official", { authorization });
+export const getRoneStatus = () => apiGet<any>("/api/rone/status");
+export const getRoneSnapshot = () => apiGet<any>("/api/rone/snapshot");
+export const saveRoneSnapshot = (body: unknown) => apiPost<any>("/api/rone/snapshot", body);
+export const deleteRoneSnapshot = () => apiDelete<any>("/api/rone/snapshot");
+export const getRonePublic = (path: string, params: Record<string, unknown> = {}) => apiGet<any>(`/api/rone/public/${ronePath(path)}${queryString(params)}`);
+export const sendRoneVerificationCode = (roleId: number, zoneId: number) => apiPost<any>("/api/rone/user/auth/send-vc", { role_id: roleId, zone_id: zoneId });
+export const loginRoneUser = (roleId: number, zoneId: number, vc: number) => apiPost<any>("/api/rone/user/auth/login", { role_id: roleId, zone_id: zoneId, vc });
+export const getRoneUser = (path: string, token: string, params: Record<string, unknown> = {}) => apiGetAuth<any>(`/api/rone/user/${ronePath(path).replace(/^user\//, "")}${queryString(params)}`, token);
+export const postRoneUser = (path: string, token: string, body: unknown = {}, params: Record<string, unknown> = {}) => apiPostAuth<any>(`/api/rone/user/${ronePath(path).replace(/^user\//, "")}${queryString(params)}`, token, body);
 export const getAdbAssetStatus = () => apiGet<any>("/api/sync/adb-assets/status");
 export const syncAdbAssets = (scope: "draft" | "vision" | "ui" = "draft") => apiPost<any>("/api/sync/adb-assets", { scope });
 export const getRuntimeStatus = () => apiGet<any>("/api/runtime/status");
+export const getPerformanceSnapshot = () => apiGet<any>("/api/performance/snapshot");
+export const postClientPerformanceSample = (sample: unknown) => apiPost<any>("/api/performance/client", sample);
 export const getRuntime = () => apiGet<any>("/api/runtime");
 export const getRuntimeHeroes = () => apiGet<any>("/api/runtime/heroes");
 export const getHeroBuild = (heroName: string) => apiGet<any>(`/api/builds/hero/${encodeURIComponent(heroName)}`);
@@ -44,6 +71,12 @@ export const clearObsRegions = (key: string) => apiPost<any>("/api/obs/regions/c
 export const getObsConfig = () => apiGet<any>("/api/obs/config");
 export const saveObsConfig = (config: unknown) => apiPost<any>("/api/obs/config", config);
 export const getNativeObsVisionStatus = () => apiGet<any>("/api/capture/obs/status");
+export const getNdiToolsStatus = () => apiGet<any>("/api/capture/ndi/status");
+export const getNdiDirectStatus = () => apiGet<any>("/api/capture/ndi/direct/status");
+export const getNdiDirectSources = () => apiGet<any>("/api/capture/ndi/direct/sources");
+export const startNdiDirectCapture = (sourceName: string, sourceUrl?: string, maxFps = 30) => apiPost<any>("/api/capture/ndi/direct/start", { sourceName, sourceUrl, maxFps });
+export const stopNdiDirectCapture = () => apiPost<any>("/api/capture/ndi/direct/stop");
+export const launchNdiTool = (tool: "studioMonitor" | "testPatterns" | "screenCapture" | "webcam" | "accessManager" | "launcher" = "studioMonitor") => apiPost<any>("/api/capture/ndi/launch", { tool });
 export const getMapZones = () => apiGet<any>("/api/map/zones");
 export const saveMapZones = (zones: unknown) => apiPost<any>("/api/map/zones", { zones });
 export const getMapProjection = () => apiGet<any>("/api/map/projection");
@@ -125,6 +158,7 @@ export async function inferUltralyticsFrame(frame: Blob, confidence = 0.55) {
 }
 export const getLatestLiveReasoning = () => apiGet<any>("/api/reasoning/live/latest");
 export const evaluateLiveReasoning = (state: unknown) => apiPost<any>("/api/reasoning/live/evaluate", state);
+export const getLiveReasoningScenarios = () => apiGet<any>("/api/reasoning/live/scenarios");
 export const getMatchState = () => apiGet<any>("/api/match/state");
 export const getPlayerProfile = () => apiGet<any>("/api/profile");
 export const savePlayerProfile = (profile: unknown) => apiPost<any>("/api/profile", profile);

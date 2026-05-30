@@ -24,3 +24,4 @@ export const API_LOCAL_DNS_HOSTNAME = LOCAL_DNS_HOSTNAMES.find((hostname) => hos
 export const LOCAL_DNS_FRONTEND_ORIGIN = `http://${PRIMARY_LOCAL_DNS_HOSTNAME}:${FRONTEND_PORT}`;
 export const LOCAL_DNS_BACKEND_ORIGIN = `http://${API_LOCAL_DNS_HOSTNAME}:${PORT}`;
 export const MLBB_IO_BASE = "https://mlbb.io";
+export const RONE_API_BASE = process.env.RONE_API_BASE ?? "https://mlbb.rone.dev";

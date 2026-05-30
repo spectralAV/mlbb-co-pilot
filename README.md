@@ -252,6 +252,31 @@ npm run cv:train:rocm
 
 Docker Desktop on Windows does not expose AMD ROCm through the normal `/dev/kfd` and `/dev/dri` Linux path. If a ROCm container is used from WSL, it must use the ROCDXG `/dev/dxg` flags and mount `libdxcore.so` plus `librocdxg.so`.
 
+### Roboflow Draft Experiment
+
+The Roboflow Universe `mobile-legends-draft-recognition` dataset is supported as a separate experiment so its hero-class detector does not overwrite the production UI-region detector. Export the project in YOLO format, then import the zip or extracted folder:
+
+```powershell
+npm run cv:draft:roboflow:import -- --source "C:\path\to\mobile-legends-draft-recognition.yolov8.zip" --clean --force
+npm run cv:draft:roboflow:status
+npm run cv:draft:roboflow:train
+```
+
+After training, test a draft screenshot:
+
+```powershell
+npm run cv:draft:roboflow:infer -- --image "C:\path\to\draft-screen.jpg" --confidence 0.45
+```
+
+The Roboflow Universe `mlbbminimap-2` project is wired as a separate minimap experiment:
+
+```powershell
+npm run cv:minimap:roboflow:import -- --source "C:\path\to\mlbbminimap-2.yolov8.zip" --clean --force
+npm run cv:minimap:roboflow:status
+npm run cv:minimap:roboflow:train
+npm run cv:minimap:roboflow:infer -- --image "C:\path\to\live-hud.jpg" --confidence 0.45
+```
+
 ## Legal
 
 Copyright 2026 SpectralAV.
@@ -275,9 +300,41 @@ GET  /api/runtime/heroes
 GET  /api/runtime/status
 ```
 
+Rone API integration is available as an optional enrichment layer. Public endpoints are exposed through a whitelist under `/api/rone/public/*`, while account endpoints use the Rone verification-code flow and require an in-session bearer token.
+
+```text
+GET  /api/rone/status
+GET  /api/rone/public/heroes?size=12&index=1
+GET  /api/rone/public/academy/spells
+POST /api/rone/user/auth/send-vc
+POST /api/rone/user/auth/login
+GET  /api/rone/user/info
+GET  /api/rone/user/matches?sid=40&limit=10
+```
+
 ## Module Updates
 
-Open Settings > Module Updates to upload a patch ZIP. Patch manifests may be named `patch.json` or `patch-manifest.json`.
+Open Settings > Module Updates to upload trial CV module ZIPs for users to try locally. Manifests may be named `patch.json` or `patch-manifest.json`; CV modules should set `type` to `cv-module` and include a `cvModule` block.
+
+```json
+{
+  "name": "mlbb-minimap-roboflow-trial",
+  "version": "0.1.0",
+  "type": "cv-module",
+  "cvModule": {
+    "id": "roboflow-minimap-2",
+    "displayName": "Roboflow Minimap Trial",
+    "surfaces": ["minimap"],
+    "experiments": ["roboflow-minimap-2"],
+    "entrypoints": {
+      "docs": "data/cv/roboflow-minimap-2/README.md"
+    },
+    "risk": "experimental"
+  },
+  "restart": false,
+  "npmInstall": false
+}
+```
 
 Patch safety rules:
 

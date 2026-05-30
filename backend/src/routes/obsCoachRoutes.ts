@@ -3,6 +3,8 @@ import { captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSou
 import { getLatestNativeObsFrame, getNativeObsBridgeStatus, ingestNativeObsFrame } from "../services/nativeObsBridge.js";
 import { attachScrcpyH264Client, getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
 import { getNativeObsUltralyticsStatus, queueNativeObsUltralyticsFrame } from "../vision/ultralyticsVision.js";
+import { getNdiToolsStatus, launchNdiTool } from "../services/ndiTools.js";
+import { getLatestNdiDirectFrame, getNdiDirectStatus, listNdiDirectSources, startNdiDirectCapture, stopNdiDirectCapture } from "../services/ndiDirectSource.js";
 import {
   addObsRegion,
   clearObsRegions,
@@ -45,6 +47,34 @@ export async function obsCoachRoutes(app: FastifyInstance) {
   app.post("/api/obs/stop", async () => ({ ok: true, realtime: setObsRealtime(false), bridge: getNativeObsBridgeStatus(), message: "OBS overlay realtime stopped." }));
   app.get("/api/obs/frame", async (_req, reply) => sendNativeObsFrame(reply));
   app.get("/api/capture/obs/status", async () => ({ ok: true, bridge: getNativeObsBridgeStatus(), ultralytics: getNativeObsUltralyticsStatus() }));
+  app.get("/api/capture/ndi/status", async () => getNdiToolsStatus());
+  app.get("/api/capture/ndi/direct/status", async () => getNdiDirectStatus());
+  app.get("/api/capture/ndi/direct/sources", async () => listNdiDirectSources());
+  app.post("/api/capture/ndi/direct/start", async (req, reply) => {
+    const body = req.body as any;
+    const result = await startNdiDirectCapture({ sourceName: body?.sourceName, sourceUrl: body?.sourceUrl, maxFps: body?.maxFps });
+    if (!result.ok) return reply.code(400).send(result);
+    return result;
+  });
+  app.post("/api/capture/ndi/direct/stop", async () => ({ ok: true, status: stopNdiDirectCapture() }));
+  app.get("/api/capture/ndi/direct/frame", async (_req, reply) => {
+    const frame = await getLatestNdiDirectFrame();
+    if (!frame) return reply.code(404).send({ ok: false, error: "No direct NDI frame has arrived yet." });
+    return reply
+      .header("cache-control", "no-store")
+      .header("x-captured-at", frame.capturedAt)
+      .header("x-frame-id", frame.frameId)
+      .header("x-source-width", String(frame.width))
+      .header("x-source-height", String(frame.height))
+      .type("image/png")
+      .send(frame.buffer);
+  });
+  app.post("/api/capture/ndi/launch", async (req, reply) => {
+    const tool = String((req.body as any)?.tool ?? "studioMonitor") as any;
+    const result = await launchNdiTool(tool);
+    if (!result.ok) return reply.code(404).send(result);
+    return result;
+  });
   app.post("/api/capture/obs/frame", { bodyLimit: 32 * 1024 * 1024 }, async (req, reply) => {
     if (!Buffer.isBuffer(req.body)) return reply.code(400).send({ ok: false, error: "Expected an image/bmp frame body." });
     const source = String(req.headers["x-mlbb-source"] ?? "obs-scrcpy-plugin");

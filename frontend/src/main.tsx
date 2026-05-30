@@ -11,6 +11,8 @@ import { Settings } from "./pages/Settings";
 import { Calibration } from "./pages/Calibration";
 import { SkinGallery } from "./pages/SkinGallery";
 import { CvLab } from "./pages/CvLab";
+import { CvVideoTool } from "./pages/CvVideoTool";
+import { PerformanceMonitor } from "./pages/PerformanceMonitor";
 import { MlbbCounterOutput, MlbbHeroPicksOutput, MlbbLiveOutput, MlbbStreamControl, MlbbStreamOutput, MlbbTacticalMapOutput, MlbbTextPanelOutput } from "./pages/MlbbStreamPack";
 import "./styles.css";
 
@@ -34,6 +36,8 @@ const router = createBrowserRouter([
       { path: "mlbb-control", element: <MlbbStreamControl /> },
       { path: "calibration", element: <Calibration /> },
       { path: "cv-lab", element: <CvLab /> },
+      { path: "cv-video", element: <CvVideoTool /> },
+      { path: "performance", element: <PerformanceMonitor /> },
       { path: "settings", element: <Settings /> }
     ]
   }

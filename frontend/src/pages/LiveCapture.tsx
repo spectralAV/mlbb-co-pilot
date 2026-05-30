@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleStop, Crop, Database, Gauge, MonitorUp, ScanLine, Smartphone, Tv } from "lucide-react";
-import { getNativeObsVisionStatus } from "../api/client";
+import { CircleStop, Crop, Database, Gauge, MonitorUp, Radio, RefreshCw, ScanLine, Smartphone, Tv } from "lucide-react";
+import { getNativeObsVisionStatus, getNdiDirectSources, getNdiDirectStatus, getNdiToolsStatus, launchNdiTool } from "../api/client";
 import {
   attachCapturePreviewCanvas,
   captureSources,
   maxBufferedFrames,
   maxNativeCrops,
+  ndiDirectSourceStorageKey,
+  ndiDirectSourceUrlStorageKey,
   regions,
   startSelectedCaptureRuntime,
   stopCaptureRuntime,
@@ -14,10 +16,22 @@ import {
   type ScrcpyVideoCodec
 } from "../runtime/captureRuntime";
 
+type NdiSource = { id: string; name: string; url?: string };
+
+function storedValue(key: string, fallback: string) {
+  if (typeof window === "undefined") return fallback;
+  return window.localStorage.getItem(key) || fallback;
+}
+
 export function LiveCapture() {
   const previewRef = useRef<HTMLVideoElement | null>(null);
   const capturePreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [nativeObsStatus, setNativeObsStatus] = useState<any>(null);
+  const [ndiToolsStatus, setNdiToolsStatus] = useState<any>(null);
+  const [directNdiSources, setDirectNdiSources] = useState<NdiSource[]>([]);
+  const [selectedNdiSource, setSelectedNdiSource] = useState(() => storedValue(ndiDirectSourceStorageKey, ""));
+  const [ndiDirectStatus, setNdiDirectStatus] = useState<any>(null);
+  const [ndiDirectMessage, setNdiDirectMessage] = useState("Refresh direct NDI sources and select the phone source. This bypasses NDI Webcam.");
   const {
     running,
     sourceMode,
@@ -42,7 +56,7 @@ export function LiveCapture() {
 
   useEffect(() => {
     if (!previewRef.current) return;
-    previewRef.current.srcObject = sourceMode === "browser" ? stream : null;
+    previewRef.current.srcObject = sourceMode === "browser" || sourceMode === "ndi" ? stream : null;
     if (stream) void previewRef.current.play().catch(() => {});
   }, [stream, sourceMode]);
 
@@ -70,6 +84,36 @@ export function LiveCapture() {
     };
   }, [selectedSource, sourceMode]);
 
+  useEffect(() => {
+    if (selectedSource !== "ndi") return;
+    let active = true;
+    async function refresh() {
+      try {
+        const [toolsStatus, directStatus] = await Promise.all([getNdiToolsStatus(), getNdiDirectStatus()]);
+        if (active) {
+          setNdiToolsStatus(toolsStatus);
+          setNdiDirectStatus(directStatus);
+        }
+      } catch {
+        if (active) {
+          setNdiToolsStatus(null);
+          setNdiDirectStatus(null);
+        }
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [selectedSource]);
+
+  useEffect(() => {
+    if (selectedSource !== "ndi") return;
+    void refreshDirectNdiSources();
+  }, [selectedSource]);
+
   const activeWindows = regions.filter((region) => metrics[region.key]?.active && region.key.includes("window"));
   const selected = captureSources.find((source) => source.id === selectedSource) ?? captureSources[0];
   const sourceAspect = sourceSize.width && sourceSize.height ? `${sourceSize.width} / ${sourceSize.height}` : "20 / 9";
@@ -78,17 +122,51 @@ export function LiveCapture() {
     { id: "h265", label: "H.265", detail: "Preset only" },
     { id: "av1", label: "AV1", detail: "Preset only" }
   ];
-  const canStartSelected = !(selectedSource === "scrcpy" && selectedCodec !== "h264");
+  const selectedDirectNdiSource = directNdiSources.find((source) => source.name === selectedNdiSource || source.id === selectedNdiSource);
+  const canStartSelected = !(selectedSource === "scrcpy" && selectedCodec !== "h264") && !(selectedSource === "ndi" && !selectedNdiSource);
 
-  return <div className="space-y-5">
-    <div className="flex flex-wrap items-end justify-between gap-3">
+  function rememberNdiSource(source: NdiSource | string) {
+    const name = typeof source === "string" ? source : source.name;
+    const url = typeof source === "string" ? "" : source.url ?? "";
+    setSelectedNdiSource(name);
+    window.localStorage.setItem(ndiDirectSourceStorageKey, name);
+    if (url) window.localStorage.setItem(ndiDirectSourceUrlStorageKey, url);
+    else window.localStorage.removeItem(ndiDirectSourceUrlStorageKey);
+  }
+
+  async function refreshDirectNdiSources() {
+    try {
+      const result = await getNdiDirectSources();
+      const sources = result.sources ?? [];
+      setDirectNdiSources(sources);
+      if (!selectedNdiSource && sources[0]) rememberNdiSource(sources[0]);
+      setNdiDirectMessage(sources.length
+        ? `Found ${sources.length} direct NDI source${sources.length === 1 ? "" : "s"}. Start receives the source frames before NDI Webcam can crop them.`
+        : "No direct NDI sources found yet. Keep NDI HX Capture open on the phone, then refresh.");
+    } catch (error) {
+      setNdiDirectMessage(error instanceof Error ? error.message : "Could not refresh direct NDI sources.");
+    }
+  }
+
+  async function launchNdiStudioMonitor() {
+    try {
+      const result = await launchNdiTool("studioMonitor");
+      setNdiToolsStatus(result.status);
+      setNdiDirectMessage(result.ok ? "Studio Monitor launched for viewing only. Direct capture still uses the selected NDI source." : result.error ?? "Could not launch Studio Monitor.");
+    } catch (error) {
+      setNdiDirectMessage(error instanceof Error ? error.message : "Could not launch Studio Monitor.");
+    }
+  }
+
+  return <div className="live-capture-page">
+    <div className="live-capture-header">
       <div>
-        <h2 className="text-3xl font-black">Live Capture</h2>
-        <p className="text-slate-400">Unified runtime capture stays alive while you move between pages.</p>
+        <h2>Live Capture</h2>
+        <p>Unified runtime capture stays alive while you move between pages.</p>
       </div>
-      <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+      <div className="live-capture-actions">
         <button className="btn inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50" onClick={startSelectedCaptureRuntime} disabled={running || !canStartSelected}><MonitorUp className="h-4 w-4" />Start</button>
-        <button className="min-h-11 rounded-lg bg-white/10 px-4 py-2 font-semibold active:bg-white/20" onClick={stopCaptureRuntime} disabled={!running}><CircleStop className="mr-2 inline h-4 w-4" />Stop</button>
+        <button className="capture-secondary-button" onClick={stopCaptureRuntime} disabled={!running}><CircleStop className="h-4 w-4" />Stop</button>
       </div>
     </div>
 
@@ -97,17 +175,17 @@ export function LiveCapture() {
       Capture runtime is active globally. You can open Draft, Calibration, Stream Output, or Settings without restarting capture.
     </div>}
 
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <section className="capture-source-grid">
       {captureSources.map((source) => {
         const active = selectedSource === source.id;
         const Icon = source.id === "adb" ? Smartphone : source.id === "window" ? MonitorUp : source.id === "obs" || source.id === "ndi" || source.id === "capture_card" ? Tv : Database;
-        return <button key={source.id} type="button" onClick={() => setSelectedSource(source.id as CaptureSource)} disabled={running} className={`min-h-32 rounded-lg border p-4 text-left transition active:scale-[0.99] ${active ? "border-violet-300 bg-violet-500/20" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
+        return <button key={source.id} type="button" onClick={() => setSelectedSource(source.id as CaptureSource)} disabled={running} className={`capture-source-card ${active ? "capture-source-card-active" : ""}`}>
           <div className="flex items-center justify-between gap-3">
             <Icon className={active ? "h-5 w-5 text-violet-200" : "h-5 w-5 text-cyan-300"} />
             <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase ${source.state === "ready" ? "bg-emerald-500/20 text-emerald-200" : source.state === "planned" ? "bg-cyan-500/20 text-cyan-100" : source.state === "optional" ? "bg-slate-500/25 text-slate-200" : "bg-amber-500/20 text-amber-100"}`}>{source.state}</span>
           </div>
-          <div className="mt-3 font-black text-white">{source.title}</div>
-          <p className="mt-2 text-sm text-slate-300">{source.detail}</p>
+          <div className="capture-source-title">{source.title}</div>
+          <p>{source.detail}</p>
         </button>;
       })}
     </section>
@@ -133,6 +211,62 @@ export function LiveCapture() {
     {selectedSource === "scrcpy" && selectedCodec !== "h264" && <div className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-3 text-sm text-amber-100">
       {selectedCodec.toUpperCase()} is selectable for device/encoder testing, but live preview and CV are disabled for it right now so the app does not fall into the slow ADB frame path.
     </div>}
+
+    {selectedSource === "ndi" && <section className="card capture-ndi-panel">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-3xl">
+          <h3 className="flex items-center gap-2 font-bold"><Radio className="h-4 w-4 text-cyan-300" />Direct NDI Source</h3>
+          <p className="mt-1 text-sm text-slate-400">Receives the phone's NDI stream directly through the NDI SDK. No NDI Webcam, no camera wrapper, no extra crop.</p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase ${ndiToolsStatus?.installed ? "bg-emerald-500/20 text-emerald-200" : "bg-amber-500/20 text-amber-100"}`}>
+          {ndiToolsStatus?.installed ? "NDI Tools found" : "Checking tools"}
+        </span>
+      </div>
+
+      <div className="mt-4">
+        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-white">Windows NDI 6 Tools</div>
+              <div className="mt-1 text-xs text-slate-400">{ndiToolsStatus?.toolsRoot ?? "C:\\Program Files\\NDI\\NDI 6 Tools"}</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button className="cv-ghost-button inline-flex min-h-10 items-center gap-2 px-3 text-xs" onClick={() => void refreshDirectNdiSources()}>
+                <RefreshCw className="h-4 w-4" />Refresh Sources
+              </button>
+              <button className="cv-ghost-button inline-flex min-h-10 items-center gap-2 px-3 text-xs" disabled={!ndiToolsStatus?.tools?.studioMonitor?.available} onClick={() => void launchNdiStudioMonitor()}>
+                <MonitorUp className="h-4 w-4" />Open Studio Monitor
+              </button>
+              <button className="cv-ghost-button inline-flex min-h-10 items-center gap-2 px-3 text-xs" disabled={!ndiToolsStatus?.tools?.testPatterns?.available} onClick={() => void launchNdiTool("testPatterns")}>
+                <RefreshCw className="h-4 w-4" />Test Pattern
+              </button>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-4">
+            <Metric label="Runtime" value={ndiToolsStatus?.runtimeAvailable ? "NDI 6" : "Missing"} />
+            <Metric label="Direct Receiver" value={ndiDirectStatus?.running ? "Running" : "Ready"} />
+            <Metric label="Source Frames" value={ndiDirectStatus?.frames ?? 0} />
+            <Metric label="Source Size" value={ndiDirectStatus?.width ? `${ndiDirectStatus.width}x${ndiDirectStatus.height}` : "-"} />
+          </div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <select className="input min-h-10 min-w-0 py-1 text-sm" value={selectedNdiSource} onChange={(event) => {
+              const source = directNdiSources.find((item) => item.name === event.target.value || item.id === event.target.value);
+              rememberNdiSource(source ?? event.target.value);
+            }}>
+              <option value="">Select direct NDI source</option>
+              {directNdiSources.map((source) => <option key={source.id || source.name} value={source.name}>{source.name}{source.url ? ` - ${source.url}` : ""}</option>)}
+            </select>
+            <div className="capture-metric min-h-10 min-w-44">
+              <div>Selected</div>
+              <strong>{selectedDirectNdiSource?.name || selectedNdiSource || "None"}</strong>
+            </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-500/10 p-3 text-sm text-cyan-50">
+            {ndiDirectMessage}
+          </div>
+        </div>
+      </div>
+    </section>}
 
     {selectedSource === "window" && <section className="card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -160,31 +294,31 @@ export function LiveCapture() {
       </div>
     </section>}
 
-    <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_360px]">
+    <div className="capture-workspace">
       <section className="card overflow-hidden">
-        <div className="relative bg-black" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "scrcpy" || sourceMode === "browser" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+        <div className="capture-preview-stage" style={{ aspectRatio: sourceAspect }}>
+          {sourceMode === "scrcpy" || sourceMode === "browser" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs" || sourceMode === "ndi") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
             return <div key={region.key} className={`pointer-events-none absolute border ${active ? "border-emerald-300 bg-emerald-400/10" : "border-sky-300/40 bg-sky-400/5"}`} style={{ left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` }}>
-              <span className={`absolute left-1 top-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-emerald-400 text-slate-950" : "bg-black/60 text-sky-100"}`}>{region.label}</span>
+              <span className={`capture-roi-label ${active ? "capture-roi-label-active" : ""}`}>{region.label}</span>
             </div>;
           })}
-          {!running && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-center text-sm text-slate-300"><div className="max-w-sm px-4">Selected: {selected.title}. Start once; the runtime will stay unified across app pages.</div></div>}
+          {!running && <div className="capture-preview-empty"><div>Selected: {selected.title}. Start once; the runtime will stay unified across app pages.</div></div>}
         </div>
       </section>
 
-      <aside className="space-y-4">
+      <aside className="capture-side-stack">
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Gauge className="h-4 w-4 text-cyan-300" />Frame Pipeline</h3>
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
             <Metric label="FPS" value={fps} />
             <Metric label="Buffer" value={`${buffered}/${maxBufferedFrames}`} />
             <Metric label="Latency" value={lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`} />
-            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
-            <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : selectedSource === "obs" ? "Native decoded" : "-"} />
-            <Metric className="col-span-2" label={sourceMode === "browser" ? "CV Surface" : "Native Source"} value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
+            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "ndi" ? "Direct NDI" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
+            <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : sourceMode === "ndi" ? "NDI SDK frame" : selectedSource === "obs" ? "Native decoded" : "-"} />
+            <Metric className="col-span-2" label={sourceMode === "browser" ? "CV Surface" : sourceMode === "ndi" ? "Direct Source" : "Native Source"} value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
             <Metric className="col-span-2" label="Native ROI Crops" value={`${nativeCrops}/${maxNativeCrops}`} />
           </div>
         </div>
@@ -291,5 +425,5 @@ export function LiveCapture() {
 }
 
 function Metric({ label, value, className = "" }: { label: string; value: string | number; className?: string }) {
-  return <div className={`rounded-lg bg-white/5 p-3 ${className}`}><div className="text-slate-400">{label}</div><div className="text-2xl font-black">{value}</div></div>;
+  return <div className={`capture-metric ${className}`}><div>{label}</div><strong>{value}</strong></div>;
 }

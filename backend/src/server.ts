@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
@@ -13,6 +14,7 @@ import { semanticRoutes } from "./routes/semanticRoutes.js";
 import { buildHeroRoutes } from "./routes/buildHeroRoutes.js";
 import { overlayRoutes } from "./routes/overlayRoutes.js";
 import { obsCoachRoutes } from "./routes/obsCoachRoutes.js";
+import { roneRoutes } from "./routes/roneRoutes.js";
 import { runtimeRoutes } from "./routes/runtimeRoutes.js";
 import { syncRoutes } from "./routes/syncRoutes.js";
 import { updateRoutes } from "./routes/updateRoutes.js";
@@ -29,7 +31,7 @@ import { compileSkinPortraitSignatures, fetchSkinPortrait, getSkinPortraitManife
 import { getLatestLiveVision, ingestLiveVisionFrame } from "./vision/liveVisionState.js";
 import { getScreenStateModel, getScreenStateTrainingStatus, trainScreenStateModel } from "./vision/screenStateTraining.js";
 import { getDraftHeroModel, getDraftHeroModelStatus, trainDraftHeroModel } from "./vision/draftHeroModelTraining.js";
-import { getLatestLiveReasoning, ingestLiveReasoning } from "./engines/liveReasoningEngine.js";
+import { getLatestLiveReasoning, ingestLiveReasoning, listCoachReasoningScenarios } from "./engines/liveReasoningEngine.js";
 import { getMatchState } from "./state/matchState.js";
 import { getPlayerProfile, savePlayerProfile } from "./services/playerProfile.js";
 import { getBattleSpellRecognitionManifest, getBattleSpellRecognitionReference } from "./vision/battleSpellRecognition.js";
@@ -42,6 +44,7 @@ import { getDinoIdentityStatus, indexDinoReferences, matchDinoIdentity } from ".
 import { getTimerOcrStatus, inferTimerCrop, installTimerOcrRuntime, timerClasses } from "./vision/timerRecognition.js";
 import { getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, normalizeScreenOcrRegions } from "./vision/screenTextRecognition.js";
 import { getVisionReflectionSummary } from "./vision/visionReflection.js";
+import { addClientPerformanceSample, getPerformanceSnapshot, recordRequestMetric } from "./services/performanceMonitor.js";
 
 const app = Fastify({ logger: true });
 const frontendDist = path.resolve(process.cwd(), "..", "frontend", "dist");
@@ -77,10 +80,20 @@ await app.register(websocket);
 await app.register(semanticRoutes);
 await app.register(buildHeroRoutes);
 await app.register(syncRoutes);
+await app.register(roneRoutes);
 await app.register(runtimeRoutes);
 await app.register(updateRoutes);
 await app.register(overlayRoutes);
 await app.register(obsCoachRoutes);
+
+app.addHook("onRequest", async (request) => {
+  (request as any).performanceStartedAt = performance.now();
+});
+
+app.addHook("onResponse", async (request, reply) => {
+  const startedAt = Number((request as any).performanceStartedAt ?? performance.now());
+  recordRequestMetric(request.method, request.url, reply.statusCode, performance.now() - startedAt);
+});
 
 async function fileExists(file: string) {
   try {
@@ -106,6 +119,11 @@ async function registerFrontendStatic() {
 }
 
 app.get("/api/health", async () => ({ ok: true, service: "MLBB Co-Pilot", time: new Date().toISOString() }));
+app.get("/api/performance/snapshot", async () => getPerformanceSnapshot());
+app.post("/api/performance/client", async (req) => {
+  addClientPerformanceSample(req.body as any, req.headers["user-agent"]);
+  return { success: true };
+});
 app.post("/api/sync/all", async () => { const result = await mlbbIo.syncAll(); eventBus.emit("data_synced", result); return { success:true, result }; });
 app.get("/api/sync/all", async () => { const result = await mlbbIo.syncAll(); eventBus.emit("data_synced", result); return { success:true, result }; });
 app.post("/api/sync/heroes", async () => ({ success:true, data: await mlbbIo.syncHeroes() }));
@@ -366,6 +384,7 @@ app.post("/api/vision/models/screen-ocr/infer", async (req, reply) => {
 });
 app.get("/api/reasoning/live/latest", async () => ({ success:true, data:getLatestLiveReasoning() }));
 app.post("/api/reasoning/live/evaluate", async (req) => ({ success:true, data:ingestLiveReasoning(req.body as any) }));
+app.get("/api/reasoning/live/scenarios", async () => ({ success:true, data:listCoachReasoningScenarios() }));
 app.get("/api/match/state", async () => ({ success:true, data:getMatchState() }));
 
 app.get("/api/map/runtime", async () => ({ success:true, manifest:getMapRuntimeManifest(), zones:getZones(), projection:getMinimapProjection() }));

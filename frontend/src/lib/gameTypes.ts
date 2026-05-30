@@ -95,6 +95,10 @@ export interface LiveCoachingOutput {
   warnings: string[];
   priority: "low" | "medium" | "high" | "urgent";
   mode: "farm" | "fight" | "objective" | "defend" | "reset" | "rotate";
+  scenarioId?: string;
+  secondaryActions?: string[];
+  avoid?: string[];
+  confidence?: "low" | "medium" | "high";
 }
 
 export interface GameSession {

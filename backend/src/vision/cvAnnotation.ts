@@ -73,11 +73,11 @@ export async function listAnnotations() {
 
 export async function saveAnnotation(
   image: Buffer,
-  input: { split?: unknown; source?: unknown; boxes?: unknown },
+  input: { split?: unknown; source?: unknown; boxes?: unknown; allowEmpty?: unknown },
 ) {
   const split: AnnotationSplit = input.split === "val" ? "val" : "train";
   const boxes = normalizeAnnotationBoxes(input.boxes);
-  if (!boxes.length) throw new Error("Draw at least one annotation box before saving.");
+  if (!boxes.length && input.allowEmpty !== true) throw new Error("Draw at least one annotation box before saving.");
   const info = await sharp(image).metadata();
   if (!info.width || !info.height) throw new Error("Could not read annotation image dimensions.");
   const id = `user-${new Date().toISOString().replace(/[:.]/g, "-")}-${nanoid(6)}`;
@@ -106,7 +106,7 @@ export async function saveAnnotation(
     mkdir(path.dirname(activeLabel), { recursive: true }),
   ]);
   await sharp(image).jpeg({ quality: 94 }).toFile(canonicalImage);
-  const labels = boxes.map(toYoloLine).join("\n") + "\n";
+  const labels = boxes.length ? boxes.map(toYoloLine).join("\n") + "\n" : "";
   await Promise.all([
     writeFile(canonicalLabel, labels, "ascii"),
     writeFile(metadataFile, JSON.stringify(metadata, null, 2) + "\n", "ascii"),

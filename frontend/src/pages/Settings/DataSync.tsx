@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Image, RefreshCw, Smartphone } from "lucide-react";
-import { apiPost, getAdbAssetStatus, getDinoIdentityStatus, getDraftHeroModelStatus, getScreenStateTrainingStatus, getTimerOcrStatus, getUltralyticsStatus, indexDinoReferences, installTimerOcrRuntime, installUltralyticsRuntime, syncAdbAssets, trainDraftHeroModel, trainScreenStateModel, trainUltralyticsModel } from "../../api/client";
+import { AlertTriangle, BrainCircuit, CheckCircle2, Database, Image, KeyRound, RefreshCw, SlidersHorizontal, Smartphone } from "lucide-react";
+import { apiPost, getAdbAssetStatus, getDinoIdentityStatus, getDraftHeroModelStatus, getRuntimeStatus, getScreenStateTrainingStatus, getSkinSignatureStatus, getTimerOcrStatus, getUltralyticsStatus, indexDinoReferences, installTimerOcrRuntime, installUltralyticsRuntime, syncAdbAssets, trainDraftHeroModel, trainScreenStateModel, trainUltralyticsModel } from "../../api/client";
 
 type ExtractedTexture = { file: string; name: string; width: number; height: number };
 type AdbAssetStatus = {
@@ -79,12 +79,43 @@ type TimerOcrStatus = {
   labelledTimerBoxes: number;
   transcribedTimerBoxes: number;
 };
+type RuntimeStatus = {
+  exists: boolean;
+  heroCount: number;
+  updatedAt: string | null;
+};
+type SkinSignatureStatus = {
+  compiledAt?: string;
+  portraitCount: number;
+  referenceCount: number;
+};
+
+function compactTime(value?: string) {
+  if (!value) return "-";
+  try {
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function OfficialMetric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
+  return <div className="rounded-lg bg-white/5 p-3">
+    <span className="text-xs uppercase text-slate-400">{label}</span>
+    <div className="mt-1 min-w-0 break-words text-sm font-semibold leading-tight text-white">{value}</div>
+    {detail ? <div className="mt-1 min-w-0 break-words text-xs leading-tight text-slate-400">{detail}</div> : null}
+  </div>;
+}
 
 export function DataSync() {
   const [authorization, setAuthorization] = useState("");
   const [rank, setRank] = useState("101");
   const [matchType, setMatchType] = useState(0);
-  const [log, setLog] = useState("");
+  const [syncResult, setSyncResult] = useState<any>(null);
+  const [syncError, setSyncError] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
+  const [skinSignatures, setSkinSignatures] = useState<SkinSignatureStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [adbStatus, setAdbStatus] = useState<AdbAssetStatus | null>(null);
   const [adbBusy, setAdbBusy] = useState<"draft" | "vision" | "ui" | null>(null);
@@ -100,6 +131,20 @@ export function DataSync() {
   const [dinoBusy, setDinoBusy] = useState(false);
   const [timerOcr, setTimerOcr] = useState<TimerOcrStatus | null>(null);
   const [timerOcrBusy, setTimerOcrBusy] = useState(false);
+
+  async function loadOfficialStatus() {
+    try {
+      const [runtimeResponse, signatureResponse] = await Promise.all([
+        getRuntimeStatus(),
+        getSkinSignatureStatus().catch(() => null),
+      ]);
+      setRuntimeStatus(runtimeResponse as RuntimeStatus);
+      if (signatureResponse?.data) setSkinSignatures(signatureResponse.data as SkinSignatureStatus);
+      setSyncError("");
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   async function loadAdbStatus() {
     try {
@@ -126,6 +171,7 @@ export function DataSync() {
   }
 
   useEffect(() => {
+    void loadOfficialStatus();
     void loadAdbStatus();
     void loadScreenTrainingStatus();
   }, []);
@@ -135,15 +181,27 @@ export function DataSync() {
     .filter((texture) => /head|hero|skill|battle|map/i.test(texture.file))
     .sort((left, right) => Number(!left.name.startsWith("HeroHead")) - Number(!right.name.startsWith("HeroHead")))
     .slice(0, 6), [adbStatus]);
+  const officialHeroCount = syncResult?.runtime?.heroes ?? runtimeStatus?.heroCount ?? "-";
+  const officialUpdatedAt = syncResult?.runtime?.updatedAt ?? syncResult?.generatedAt ?? runtimeStatus?.updatedAt ?? "";
+  const heroDetail = syncResult?.synced?.heroDirectory ? "Directory synced" : officialUpdatedAt ? `Cached ${compactTime(officialUpdatedAt)}` : "Awaiting sync";
+  const metaValue = syncResult?.synced?.heroMeta ? "Synced" : runtimeStatus?.exists ? "Cached" : "-";
+  const visionReferenceCount = syncResult?.visionSignatures?.referenceCount ?? skinSignatures?.referenceCount ?? "-";
+  const visionPortraitCount = syncResult?.visionSignatures?.portraitCount ?? skinSignatures?.portraitCount;
+  const visionDetail = visionPortraitCount ? `${visionPortraitCount} portraits` : skinSignatures?.compiledAt ? `Cached ${compactTime(skinSignatures.compiledAt)}` : "Portrait signatures";
 
   async function sync() {
     setBusy(true);
-    setLog("Syncing official MLBB data...");
+    setSyncError("");
+    setSyncMessage(authorization.trim() ? "Syncing official MLBB data..." : "Syncing with local MLBB_GMS_AUTHORIZATION...");
     try {
-      const result = await apiPost<any>("/api/sync/official", { authorization, rank, matchType, lang: "en" });
-      setLog(JSON.stringify(result, null, 2));
+      const result = await apiPost<any>("/api/sync/official", { authorization: authorization.trim(), rank, matchType, lang: "en" });
+      setSyncResult(result);
+      setRuntimeStatus({ exists: true, heroCount: Number(result.runtime?.heroes ?? 0), updatedAt: result.runtime?.updatedAt ?? result.generatedAt ?? null });
+      if (result.visionSignatures) setSkinSignatures(result.visionSignatures as SkinSignatureStatus);
+      setSyncMessage(`Official data synced at ${compactTime(result.generatedAt)}.`);
     } catch (error) {
-      setLog(error instanceof Error ? error.message : String(error));
+      setSyncError(error instanceof Error ? error.message : String(error));
+      setSyncMessage("");
     } finally {
       setBusy(false);
     }
@@ -248,17 +306,42 @@ export function DataSync() {
 
   return <div className="space-y-4">
     <section className="card space-y-4 p-5">
-      <div>
-        <h3 className="text-xl font-bold">Official Data</h3>
-        <p className="text-sm text-slate-400">Heroes, roles, lanes, relations, meta stats, and current portrait references.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-xl font-bold"><Database className="h-5 w-5 text-cyan-300" />Official Data</h3>
+          <p className="text-sm text-slate-400">Heroes, roles, lanes, meta stats, patches, and portrait references.</p>
+        </div>
+        <button className="btn inline-flex items-center gap-2" disabled={busy} onClick={sync}>
+          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+          {busy ? "Syncing" : "Sync"}
+        </button>
       </div>
-      <label className="block text-sm">GMS authorization token<input className="input mt-2 w-full" type="password" value={authorization} onChange={(e) => setAuthorization(e.target.value)} placeholder="Paste fresh authorization header value" /></label>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-sm">Rank bracket<input className="input mt-2 w-full" value={rank} onChange={(e) => setRank(e.target.value)} /></label>
-        <label className="block text-sm">Match type<input className="input mt-2 w-full" type="number" value={matchType} onChange={(e) => setMatchType(Number(e.target.value))} /></label>
+      {syncMessage && <p className="flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-3 text-sm text-cyan-100"><CheckCircle2 className="h-4 w-4 shrink-0" />{syncMessage}</p>}
+      {syncError && <p className="flex items-start gap-2 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{syncError}</p>}
+      <div className="grid gap-3 sm:grid-cols-4">
+        <OfficialMetric label="Token Source" value={authorization.trim() ? "Pasted" : "Local Env"} detail={authorization.trim() ? "This sync only" : "MLBB_GMS_AUTHORIZATION"} />
+        <OfficialMetric label="Heroes" value={officialHeroCount} detail={heroDetail} />
+        <OfficialMetric label="Meta Stats" value={metaValue} detail={`Rank ${rank} / Type ${matchType}`} />
+        <OfficialMetric label="Vision Refs" value={visionReferenceCount} detail={visionDetail} />
       </div>
-      <button className="btn" disabled={busy || authorization.length < 8} onClick={sync}>{busy ? "Syncing..." : "Sync Official Data"}</button>
-      {log && <pre className="overflow-auto rounded-lg bg-black/30 p-3 text-xs text-slate-200">{log}</pre>}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <details className="rounded-lg border border-white/10 bg-black/20 p-3">
+          <summary className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-200"><KeyRound className="h-4 w-4 text-cyan-300" />Credentials</summary>
+          <label className="mt-3 block text-sm">GMS authorization token<input className="input mt-2 w-full" type="password" value={authorization} onChange={(e) => setAuthorization(e.target.value)} placeholder="Paste token or leave blank for local env" /></label>
+          <p className="mt-2 text-xs text-slate-400">Blank uses the backend env token; expired tokens show a refresh message.</p>
+        </details>
+        <details className="rounded-lg border border-white/10 bg-black/20 p-3">
+          <summary className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-200"><SlidersHorizontal className="h-4 w-4 text-cyan-300" />Sync Options</summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm">Rank bracket<input className="input mt-2 w-full" value={rank} onChange={(e) => setRank(e.target.value)} /></label>
+            <label className="block text-sm">Match type<input className="input mt-2 w-full" type="number" value={matchType} onChange={(e) => setMatchType(Number(e.target.value))} /></label>
+          </div>
+        </details>
+      </div>
+      {syncResult && <details className="rounded-lg border border-white/10 bg-black/20 p-3">
+        <summary className="cursor-pointer text-sm font-bold text-slate-200">Raw sync response</summary>
+        <pre className="mt-3 max-h-80 overflow-auto rounded-lg bg-black/30 p-3 text-xs text-slate-200">{JSON.stringify(syncResult, null, 2)}</pre>
+      </details>}
     </section>
 
     <section className="card space-y-4 p-5">

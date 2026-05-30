@@ -64,3 +64,33 @@ npm run cv:result:train
 ```
 
 `cv:result:metadata` creates `dataset.yaml`, `classes.json`, and a manifest without downloading the full image set. `cv:result:import:sample` downloads a shuffled 500/150 train/validation subset for a quick local experiment. `cv:result:import:all` downloads the full roughly 900 MB source dataset. The imported classes cover result state, kills, duration, battle id, medals, AFK, and hero portraits up to Arlott; newer heroes need extra labels before this model can reliably read current result screens.
+
+## Roboflow Draft Recognition Dataset
+
+The public Roboflow Universe `mobile-legends-draft-recognition` project can be imported as an isolated experiment under `data/cv/roboflow-draft-recognition`. Do not merge its 129 source classes into `mlbb-detection.yaml`; the live detector intentionally locates draft slots and markers while official asset matching determines exact hero identity.
+
+Export the Roboflow project in YOLO format, then import the zip or extracted folder:
+
+```powershell
+npm run cv:draft:roboflow:import -- --source "C:\path\to\mobile-legends-draft-recognition.yolov8.zip" --clean --force
+npm run cv:draft:roboflow:status
+npm run cv:draft:roboflow:train
+```
+
+The importer accepts standard Roboflow YOLO layouts such as `train/images`, `valid/images`, and matching `labels` directories. It validates YOLO class and normalized box values, writes a local `dataset.yaml`, and leaves production CV data untouched.
+
+## Roboflow Minimap Dataset
+
+The public Roboflow Universe `mlbbminimap-2` project can also be imported under `data/cv/roboflow-minimap-2`. The observed project is small and focused on minimap hero-icon examples, so keep it experimental until it has been tested against local live HUD captures.
+
+```powershell
+npm run cv:minimap:roboflow:import -- --source "C:\path\to\mlbbminimap-2.yolov8.zip" --clean --force
+npm run cv:minimap:roboflow:status
+npm run cv:minimap:roboflow:train
+```
+
+After training:
+
+```powershell
+npm run cv:minimap:roboflow:infer -- --image "C:\path\to\live-hud.jpg" --confidence 0.45
+```

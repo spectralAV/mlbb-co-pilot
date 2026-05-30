@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { apiUrl, apiWsUrl, getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startScrcpy, stopScrcpy } from "../api/client";
+import { apiUrl, apiWsUrl, getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startNdiDirectCapture, startScrcpy, stopNdiDirectCapture, stopScrcpy } from "../api/client";
 import { detectDraftVisualContext } from "../vision/draftContextDetector";
 import { queueDraftBanIconRecognition } from "../vision/draftIconDetector";
 import { detectMinimapMarkerCandidatesFromRgba } from "../vision/minimapMarkerDetector";
@@ -11,7 +11,7 @@ export type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" 
 export type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
 export type RegionMetrics = { mean: number; contrast: number; changed: number; active: boolean };
 export type CaptureSource = "adb" | "window" | "scrcpy" | "ndi" | "capture_card" | "obs";
-export type SourceMode = "idle" | "browser" | "adb" | "scrcpy" | "obs" | "recording";
+export type SourceMode = "idle" | "browser" | "adb" | "scrcpy" | "ndi" | "obs" | "recording";
 export type ScrcpyVideoCodec = "h264" | "h265" | "av1";
 export type CaptureLogEntry = { time: number; level: "info" | "warn" | "error"; message: string };
 export type WindowContentCrop = { enabled: boolean; top: number; right: number; bottom: number; left: number };
@@ -82,6 +82,8 @@ export type VisionStabilityState = {
 const scoreboardBodyRect: [number, number, number, number] = [0.1, 0.13, 0.8, 0.78];
 const defaultWindowContentCrop: WindowContentCrop = { enabled: false, top: 0.13, right: 0, bottom: 0.06, left: 0 };
 const windowContentCropStorageKey = "mlbb.capture.windowContentCrop.v1";
+export const ndiDirectSourceStorageKey = "mlbb.capture.ndiDirectSource.v1";
+export const ndiDirectSourceUrlStorageKey = "mlbb.capture.ndiDirectSourceUrl.v1";
 
 const defaultRegions: Region[] = [
   { key: "equipment_window", label: "Equipment Window", rect: scoreboardBodyRect },
@@ -132,7 +134,7 @@ export const captureSources: Array<{
 }> = [
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
   { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Direct H.264 stream decoded with WebCodecs for realtime preview and CV." },
-  { id: "ndi", title: "NDI Stream", state: "planned", detail: "iPhone/iPad friendly network video source for backend decoding." },
+  { id: "ndi", title: "Direct NDI", state: "ready", detail: "Receive the phone source through the NDI SDK before any webcam wrapper can crop it." },
   { id: "capture_card", title: "Capture Card", state: "planned", detail: "HDMI/USB video input for phones, tablets, or external devices." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
   { id: "obs", title: "Native OBS Bridge", state: "ready", detail: "Frames from the native scrcpy OBS source feed the same live CV and reasoning pipeline." }
@@ -241,7 +243,9 @@ const runtime = {
   adbTimer: null as number | null,
   adbActive: false,
   obsBridgeActive: false,
+  ndiDirectActive: false,
   lastObsFrameAt: "",
+  lastNdiFrameAt: "",
   h264Socket: null as WebSocket | null,
   h264Decoder: null as any,
   h264Configured: false,
@@ -375,7 +379,9 @@ export function stopCaptureRuntime() {
   runtime.h264CodecString = "";
   runtime.adbActive = false;
   runtime.obsBridgeActive = false;
+  runtime.ndiDirectActive = false;
   runtime.lastObsFrameAt = "";
+  runtime.lastNdiFrameAt = "";
   runtime.stream?.getTracks().forEach((track) => track.stop());
   runtime.stream = null;
   if (runtime.video) runtime.video.srcObject = null;
@@ -386,6 +392,7 @@ export function stopCaptureRuntime() {
   runtime.nativeCropBuffer.splice(0).forEach((crop) => crop.bitmap.close());
   const mode = useCaptureRuntimeStore.getState().sourceMode;
   if (mode === "scrcpy") void stopScrcpy().catch(() => {});
+  if (mode === "ndi") void stopNdiDirectCapture().catch(() => {});
   useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", stream: null, adbPreviewUrl: "", nativeCrops: 0, fps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
 }
 
@@ -395,12 +402,13 @@ export function startSelectedCaptureRuntime() {
   if (selected === "adb") return void startAdbCapture();
   if (selected === "window") return void startBrowserCapture();
   if (selected === "scrcpy") return void startScrcpyCapture();
+  if (selected === "ndi") return void startNdiCapture();
   if (selected === "obs") return void startObsBridgeCapture();
   const messages: Record<CaptureSource, string> = {
     adb: "",
     window: "",
     scrcpy: "",
-    ndi: "NDI stream input is planned for iPhone/iPad users, but the backend decoder is not connected yet.",
+    ndi: "",
     capture_card: "Capture card input is planned for HDMI/USB devices, but the backend decoder is not connected yet.",
     obs: ""
   };
@@ -772,7 +780,38 @@ function drawDecodedFrame(frame: any) {
   analyzeCanvas(canvas, width, height);
 }
 
-async function startBrowserCapture() {
+async function startNdiCapture() {
+  useCaptureRuntimeStore.setState({ error: "" });
+  try {
+    const sourceName = typeof window === "undefined" ? "" : window.localStorage.getItem(ndiDirectSourceStorageKey) || "";
+    const sourceUrl = typeof window === "undefined" ? "" : window.localStorage.getItem(ndiDirectSourceUrlStorageKey) || "";
+    if (!sourceName) {
+      useCaptureRuntimeStore.setState({ error: "Select a direct NDI source first, then press Start." });
+      return;
+    }
+    resetBuffers();
+    runtime.ndiDirectActive = true;
+    runtime.lastNdiFrameAt = "";
+    const result = await startNdiDirectCapture(sourceName, sourceUrl || undefined, 30);
+    if (!result.ok) throw new Error(result.error ?? "Direct NDI receiver failed to start.");
+    addCaptureLog("info", `Direct NDI receiver started: ${sourceName}.`);
+    useCaptureRuntimeStore.setState({ sourceMode: "ndi", running: true, stream: null, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 } });
+    startAgeTimer();
+    void pollNdiDirectFrame();
+  } catch (caught) {
+    runtime.ndiDirectActive = false;
+    const message = caught instanceof Error ? caught.message : "Direct NDI capture failed.";
+    addCaptureLog("error", message);
+    useCaptureRuntimeStore.setState({
+      running: false,
+      sourceMode: "idle",
+      stream: null,
+      error: `${message}. Refresh direct NDI sources and select your phone source.`
+    });
+  }
+}
+
+async function startBrowserCapture(errorPrefix = "Could not start screen capture") {
   useCaptureRuntimeStore.setState({ error: "" });
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -789,7 +828,7 @@ async function startBrowserCapture() {
     scheduleFrame();
     startAgeTimer();
   } catch (caught) {
-    const message = caught instanceof Error ? caught.message : "Could not start screen capture.";
+    const message = caught instanceof Error ? caught.message : errorPrefix;
     addCaptureLog("error", message);
     useCaptureRuntimeStore.setState({ error: `${message}. Use ADB Native in this in-app browser, or open the app in Chrome/Edge for window capture.` });
   }
@@ -848,7 +887,10 @@ function processFrame() {
   const video = runtime.video;
   const canvas = runtime.canvas;
   if (!video || !canvas || !video.videoWidth || !video.videoHeight) return;
-  const crop = resolveWindowContentCrop(video.videoWidth, video.videoHeight, useCaptureRuntimeStore.getState().windowContentCrop);
+  const state = useCaptureRuntimeStore.getState();
+  const crop = state.sourceMode === "browser"
+    ? resolveWindowContentCrop(video.videoWidth, video.videoHeight, state.windowContentCrop)
+    : { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight };
   const width = crop.width;
   const height = crop.height;
   if (canvas.width !== width || canvas.height !== height) {
@@ -942,6 +984,46 @@ async function pollObsBridgeFrame() {
   } finally {
     if (!runtime.obsBridgeActive) return;
     runtime.adbTimer = window.setTimeout(() => void pollObsBridgeFrame(), 120);
+  }
+}
+
+async function pollNdiDirectFrame() {
+  if (!runtime.ndiDirectActive) return;
+  try {
+    const response = await fetch(apiUrl(`/api/capture/ndi/direct/frame?t=${Date.now()}`), { cache: "no-store" });
+    if (response.status === 404) {
+      useCaptureRuntimeStore.setState({ error: "Waiting for direct NDI frames from the selected phone source." });
+      return;
+    }
+    if (!response.ok) throw new Error(await response.text());
+    const frameId = response.headers.get("x-frame-id") || response.headers.get("x-captured-at") || "";
+    if (frameId && frameId === runtime.lastNdiFrameAt) return;
+    runtime.lastNdiFrameAt = frameId;
+    const blob = await response.blob();
+    if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
+    runtime.adbPreviewUrl = URL.createObjectURL(blob);
+    useCaptureRuntimeStore.setState({ adbPreviewUrl: runtime.adbPreviewUrl, error: "" });
+    const bitmap = await createImageBitmap(blob);
+    const canvas = runtime.canvas;
+    if (canvas) {
+      const width = bitmap.width;
+      const height = bitmap.height;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      updateSourceSize(width, height);
+      canvas.getContext("2d", { willReadFrequently: true })?.drawImage(bitmap, 0, 0);
+      analyzeCanvas(canvas, width, height);
+    }
+    bitmap.close();
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "Direct NDI frame failed.";
+    addCaptureLog("error", message.slice(0, 180));
+    useCaptureRuntimeStore.setState({ error: message });
+  } finally {
+    if (!runtime.ndiDirectActive) return;
+    runtime.adbTimer = window.setTimeout(() => void pollNdiDirectFrame(), 60);
   }
 }
 

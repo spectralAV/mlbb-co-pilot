@@ -55,5 +55,87 @@
     },
     "expectedRule": "minimap_activity",
     "expectedScene": "map"
+  },
+  {
+    "name": "base defense overrides objective setup",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.86,
+      "signals": {
+        "objectiveName": "Lord",
+        "objectiveSpawnsInSec": 24,
+        "baseUnderAttack": true
+      }
+    },
+    "expectedRule": "base_under_attack",
+    "expectedScene": "main"
+  },
+  {
+    "name": "enemy death timers become a conversion call",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.83,
+      "signals": {
+        "enemyDeadCount": 2,
+        "allyDeadCount": 0,
+        "objectiveName": "Turtle",
+        "objectiveSpawnsInSec": 35
+      }
+    },
+    "expectedRule": "numbers_advantage_force",
+    "expectedScene": "map"
+  },
+  {
+    "name": "behind without river vision trades instead of flipping",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.81,
+      "signals": {
+        "goldState": "behind",
+        "objectiveName": "Lord",
+        "objectiveSpawnsInSec": 48,
+        "missingEnemyCount": 1,
+        "riverVision": false
+      }
+    },
+    "expectedRule": "objective_trade_behind",
+    "expectedScene": "map"
+  },
+  {
+    "name": "gold lane collapse asks for cover",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.79,
+      "signals": {
+        "lanePressure": { "gold": "losing" },
+        "missingEnemies": ["enemy roam"]
+      }
+    },
+    "expectedRule": "gold_lane_collapse",
+    "expectedScene": "map"
+  },
+  {
+    "name": "unspent gold creates reset call",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.82,
+      "signals": {
+        "unspentGold": 1200
+      }
+    },
+    "expectedRule": "spend_gold_power_spike",
+    "expectedScene": "main"
+  },
+  {
+    "name": "scoreboard item spike beats generic build review",
+    "input": {
+      "screen": "scoreboard",
+      "confidence": 0.84,
+      "signals": {
+        "enemyItems": ["Holy Crystal"]
+      }
+    },
+    "expectedRule": "enemy_item_spike",
+    "expectedScene": "counter"
   }
 ]

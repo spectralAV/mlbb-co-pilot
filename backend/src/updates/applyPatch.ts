@@ -14,6 +14,12 @@ export async function applyPatch(zipFile: string) {
   const manifest = PatchManifestSchema.parse(JSON.parse(manifestEntry.getData().toString('utf8')));
   const backupPath = await backupProject(manifest.name);
   const log: string[] = [`Validated ${manifest.name}@${manifest.version}`, `Backup: ${backupPath}`];
+  if (manifest.type === 'cv-module') {
+    const module = manifest.cvModule;
+    log.push(`CV module: ${module?.displayName ?? module?.id ?? manifest.name}`);
+    log.push(`Surfaces: ${module?.surfaces.length ? module.surfaces.join(', ') : 'not declared'}`);
+    if (module?.experiments.length) log.push(`Experiments: ${module.experiments.join(', ')}`);
+  }
 
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory || entry.entryName === 'patch.json' || entry.entryName === 'patch-manifest.json') continue;

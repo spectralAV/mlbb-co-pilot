@@ -1,0 +1,15 @@
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\bin\Release\net8.0\NdiDirect.exe
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\bin\Release\net8.0\NdiDirect.deps.json
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\bin\Release\net8.0\NdiDirect.runtimeconfig.json
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\bin\Release\net8.0\NdiDirect.dll
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\bin\Release\net8.0\NdiDirect.pdb
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.AssemblyInfoInputs.cache
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.AssemblyInfo.cs
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.csproj.CoreCompileInputs.cache
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.sourcelink.json
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.dll
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\refint\NdiDirect.dll
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.pdb
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\NdiDirect.genruntimeconfig.cache
+C:\Users\rokas\Documents\MLBB CoPilot\backend\tools\ndi-direct\obj\Release\net8.0\ref\NdiDirect.dll

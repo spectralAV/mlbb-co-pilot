@@ -1,6 +1,8 @@
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Camera, CheckCircle2, SlidersHorizontal, Sparkles } from "lucide-react";
 import { apiUrl, getObsConfig, getObsRegions, saveObsConfig, saveObsRegions } from "../api/client";
 import { analyzeCapturedFrameBlob, captureCurrentRuntimeFrame, captureSources, type CaptureSource, type SourceMode, useCaptureRuntimeStore } from "../runtime/captureRuntime";
+import { useAdvancedSurfacesVisible } from "../runtime/uiPreferences";
 import { setActiveCalibrationRegions } from "../vision/calibrationRegions";
 
 const regionOptions = [
@@ -88,6 +90,7 @@ export function Calibration() {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const captureUrlRef = useRef("");
   const runtime = useCaptureRuntimeStore();
+  const [advancedSurfacesVisible] = useAdvancedSurfacesVisible();
   const [key, setKey] = useState("ally_bans_norm");
   const [regions, setRegions] = useState<RegionMap>({});
   const [presets, setPresets] = useState<CalibrationPreset[]>([]);
@@ -429,38 +432,75 @@ export function Calibration() {
   }
 
   const visibleSavedRects = savedRects();
+  const selectedSource = captureSources.find((source) => source.id === runtime.selectedSource);
+  const sourceTitle = selectedSource?.title ?? runtime.selectedSource;
+  const sourceSizeLabel = sourceWidth && sourceHeight ? `${Math.round(sourceWidth)} x ${Math.round(sourceHeight)}` : "Not measured";
+  const runtimeSizeLabel = runtime.sourceSize.width > 0 ? `${runtime.sourceSize.width} x ${runtime.sourceSize.height}` : "No live frame";
+  const profileLabel = activePreset?.name ?? presetName;
+  const canEditRegions = advancedSurfacesVisible;
 
   return <div className="space-y-5">
     <div>
-      <h2 className="text-3xl font-black">Source Region Calibration</h2>
-      <p className="text-slate-400">Use device presets for different phone, tablet, NDI, capture card, scrcpy, ADB, or window sources.</p>
+      <h2>Screen Setup</h2>
+      <p className="mt-3 max-w-3xl text-slate-400">Save the active phone, capture card, NDI, OBS, or window layout so draft and stream detection use the right screen shape.</p>
     </div>
 
-    <section className="card grid gap-3 p-4 lg:grid-cols-[1.4fr_1fr_auto] lg:items-end">
-      <label className="space-y-2">
-        <span className="text-xs font-bold uppercase tracking-widest text-cyan-200">Device Preset</span>
-        <select className="input w-full" value={activePresetId} onChange={(event) => applyPreset(event.target.value)}>
-          {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
-        </select>
-      </label>
-      <label className="space-y-2">
-        <span className="text-xs font-bold uppercase tracking-widest text-cyan-200">Preset Name</span>
-        <input className="input w-full" value={presetName} onChange={(event) => setPresetName(event.target.value)} onBlur={() => void persistPreset(regions, sourceWidth, sourceHeight, presetName)} />
-      </label>
-      <div className="grid gap-2 sm:flex">
-        <button className="btn" onClick={createPreset}>New Preset</button>
-        <button className="btn" onClick={() => void persistPreset()}>Save Preset</button>
-        <button className="btn" onClick={deletePreset} disabled={presets.length <= 1}>Delete</button>
+    <section className="card grid gap-4 p-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400"><Camera className="h-4 w-4 text-cyan-200" />Source</div>
+          <div className="mt-2 text-lg font-black text-white">{sourceTitle}</div>
+          <div className="mt-1 text-sm text-slate-400">{runtime.running ? `Live as ${runtime.sourceMode}` : "Idle"} / {runtimeSizeLabel}</div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400"><SlidersHorizontal className="h-4 w-4 text-cyan-200" />Screen Shape</div>
+          <div className="mt-2 text-lg font-black text-white">{sourceSizeLabel}</div>
+          <div className="mt-1 text-sm text-slate-400">{aspectPreset === "custom" ? "Detected or custom" : aspectPresets.find(([id]) => id === aspectPreset)?.[1]}</div>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase text-slate-400"><CheckCircle2 className="h-4 w-4 text-cyan-200" />Active Profile</div>
+          <div className="mt-2 truncate text-lg font-black text-white">{profileLabel}</div>
+          <div className="mt-1 text-sm text-slate-400">{configurationLoaded ? `${visibleSavedRects.length} saved regions` : "Loading"}</div>
+        </div>
       </div>
-      <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-3 text-sm text-cyan-100 lg:col-span-3">
-        Live Capture source: <b>{runtime.selectedSource}</b> {runtime.running ? `running as ${runtime.sourceMode}` : "not running"} {runtime.sourceSize.width > 0 ? `at ${runtime.sourceSize.width}x${runtime.sourceSize.height}` : ""}. Calibration frames are pulled from this source.
+      <div className="grid gap-2 sm:grid-cols-2 xl:min-w-72 xl:grid-cols-1">
+        <button className="btn inline-flex items-center justify-center gap-2" onClick={loadCaptureFrame}><Camera className="h-4 w-4" />Capture Sample</button>
+        <button className="btn inline-flex items-center justify-center gap-2" onClick={() => void persistPreset()} disabled={!configurationLoaded}><CheckCircle2 className="h-4 w-4" />Save Setup</button>
       </div>
-      <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-3 text-sm text-emerald-100 lg:col-span-3" data-testid="active-cv-calibration">
-        Detector geometry: <b>{configurationLoaded ? `${activePreset?.name ?? presetName} active for live CV` : "loading active preset"}</b>.
+      <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto] xl:col-span-2">
+        <label>
+          <span className="mb-2 block text-xs font-bold uppercase text-cyan-200">Setup Profile</span>
+          <select className="input w-full" value={activePresetId} onChange={(event) => applyPreset(event.target.value)}>
+            {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+          </select>
+        </label>
+        <label>
+          <span className="mb-2 block text-xs font-bold uppercase text-cyan-200">Profile Name</span>
+          <input className="input w-full" value={presetName} onChange={(event) => setPresetName(event.target.value)} onBlur={() => void persistPreset(regions, sourceWidth, sourceHeight, presetName)} />
+        </label>
+        <label>
+          <span className="mb-2 block text-xs font-bold uppercase text-cyan-200">Common Shape</span>
+          <select className="input w-full min-w-44" value={aspectPreset} onChange={(event) => chooseAspect(event.target.value)}>{aspectPresets.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+        </label>
       </div>
+      {!advancedSurfacesVisible && <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-3 text-sm text-cyan-50 xl:col-span-2">
+        <Sparkles className="mr-2 inline h-4 w-4" />User mode saves the active source shape. Manual CV region editing is available from Developer mode.
+      </div>}
     </section>
 
-    <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+    {advancedSurfacesVisible && <section className="card space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-white">Advanced Region Editor</h3>
+          <p className="text-sm text-slate-400">Manual boxes are for detector debugging and source-specific overrides.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn" onClick={createPreset}>New Preset</button>
+          <button className="btn" onClick={() => void persistPreset()}>Save Preset</button>
+          <button className="btn" onClick={deletePreset} disabled={presets.length <= 1}>Delete</button>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
       <select className="input w-full sm:w-auto" value={aspectPreset} onChange={(event) => chooseAspect(event.target.value)}>{aspectPresets.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
       <input className="input w-full sm:w-28" type="number" min="1" step="0.1" value={sourceWidth} onChange={(event) => { setAspectPreset("custom"); setSourceWidth(Number(event.target.value) || 1); }} />
       <input className="input w-full sm:w-28" type="number" min="1" step="0.1" value={sourceHeight} onChange={(event) => { setAspectPreset("custom"); setSourceHeight(Number(event.target.value) || 1); }} />
@@ -475,13 +515,30 @@ export function Calibration() {
       <button className="btn w-full sm:w-auto" onClick={save} disabled={!selected}>{selectedSaved ? "Update Region" : "Save Region"}</button>
       <button className="btn w-full sm:w-auto" onClick={() => clear(key)}>Clear Selected</button>
       <button className="btn w-full sm:w-auto" onClick={() => clear("all")}>Clear All Lists</button>
-    </div>
+      </div>
+    </section>}
 
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <div data-testid="calibration-canvas" ref={boxRef} className="relative touch-none select-none overflow-hidden rounded-lg border border-sky-300/30 bg-[#03060c]" style={{ aspectRatio: `${sourceWidth} / ${sourceHeight}` }} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); const p = pointer(event); setTransform(null); setStart(p); setCurrent(p); }} onPointerMove={(event) => { const p = pointer(event); if (transform) transformSelected(p); else if (start) setCurrent(p); }} onPointerUp={(event) => { const p = pointer(event); if (transform) finishTransform(p); else finish(p); }} onPointerCancel={() => { setStart(null); setCurrent(null); setTransform(null); }}>
+      <div
+        data-testid="calibration-canvas"
+        ref={boxRef}
+        className={`relative touch-none select-none overflow-hidden rounded-lg border border-sky-300/30 bg-[#03060c] ${canEditRegions ? "cursor-crosshair" : ""}`}
+        style={{ aspectRatio: `${sourceWidth} / ${sourceHeight}` }}
+        onPointerDown={canEditRegions ? (event) => { event.currentTarget.setPointerCapture(event.pointerId); const p = pointer(event); setTransform(null); setStart(p); setCurrent(p); } : undefined}
+        onPointerMove={canEditRegions ? (event) => { const p = pointer(event); if (transform) transformSelected(p); else if (start) setCurrent(p); } : undefined}
+        onPointerUp={canEditRegions ? (event) => { const p = pointer(event); if (transform) finishTransform(p); else finish(p); } : undefined}
+        onPointerCancel={canEditRegions ? () => { setStart(null); setCurrent(null); setTransform(null); } : undefined}
+      >
         {captureUrl && <img src={captureUrl} alt="" className="absolute inset-0 h-full w-full object-fill opacity-90" draggable={false} />}
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.05)_1px,transparent_1px)] bg-[size:40px_40px]" />
-        {visibleSavedRects.map((rect, index) => {
+        {!captureUrl && <div className="absolute inset-0 grid place-items-center text-center">
+          <div className="max-w-sm rounded-lg border border-white/10 bg-black/35 p-5">
+            <Camera className="mx-auto mb-3 h-8 w-8 text-cyan-200" />
+            <div className="text-lg font-black text-white">No sample captured</div>
+            <div className="mt-2 text-sm text-slate-400">Capture a sample from the active live source or save a common screen shape.</div>
+          </div>
+        </div>}
+        {canEditRegions && visibleSavedRects.map((rect, index) => {
           const colors = colorFor(rect.key);
           const active = selectedSaved?.key === rect.key && selectedSaved.index === rect.index;
           const displayRegion = active && selected ? selected : rect.region;
@@ -498,27 +555,42 @@ export function Calibration() {
             />)}
           </div>;
         })}
-        {drag && <div className="absolute border-2 border-emerald-300 bg-emerald-400/20" style={drag} />}
+        {canEditRegions && drag && <div className="absolute border-2 border-emerald-300 bg-emerald-400/20" style={drag} />}
       </div>
       <aside className="card p-4">
-        <h3 className="font-bold">Capture Frame</h3>
-        <div className="mt-3 rounded-lg bg-black/30 p-3 text-xs text-slate-300">{captureStatus}</div>
-        <h3 className="mt-5 font-bold">Active Preset</h3>
-        <div className="mt-3 rounded-lg bg-black/30 p-3 text-xs text-slate-300">
-          {activePreset ? `${activePreset.name} / ${activePreset.source} / ${activePreset.width}x${activePreset.height}` : "No preset"}
+        <h3 className="font-bold">{advancedSurfacesVisible ? "Capture Frame" : "Setup Summary"}</h3>
+        <div className="mt-3 rounded-lg bg-black/30 p-3 text-sm text-slate-300">{captureStatus}</div>
+        <div className="mt-4 grid gap-3">
+          <div className="rounded-lg bg-white/5 p-3">
+            <div className="text-xs font-bold uppercase text-slate-500">Active Profile</div>
+            <div className="mt-1 truncate text-sm font-semibold text-white">{activePreset ? `${activePreset.name}` : "No preset"}</div>
+            <div className="mt-1 text-xs text-slate-400">{activePreset ? `${activePreset.source} / ${activePreset.width} x ${activePreset.height}` : ""}</div>
+          </div>
+          <div className="rounded-lg bg-white/5 p-3">
+            <div className="text-xs font-bold uppercase text-slate-500">Live Source</div>
+            <div className="mt-1 truncate text-sm font-semibold text-white">{sourceTitle}</div>
+            <div className="mt-1 text-xs text-slate-400">{runtime.running ? "Running" : "Idle"} / {runtimeSizeLabel}</div>
+          </div>
+          <div className="rounded-lg bg-white/5 p-3">
+            <div className="text-xs font-bold uppercase text-slate-500">Detector Geometry</div>
+            <div className="mt-1 truncate text-sm font-semibold text-white">{configurationLoaded ? "Ready" : "Loading"}</div>
+            <div className="mt-1 text-xs text-slate-400">{visibleSavedRects.length} saved advanced regions</div>
+          </div>
         </div>
-        <h3 className="mt-5 font-bold">Selected Region</h3>
-        <pre data-testid="selected-region-json" className="mt-3 max-h-44 overflow-auto rounded-lg bg-black/30 p-3 text-xs">{selected ? JSON.stringify({ key, editing: selectedSaved, region: selected }, null, 2) : "No selection"}</pre>
-        <h3 className="mt-5 font-bold">Saved Regions</h3>
-        <div className="mt-3 flex max-h-44 flex-wrap gap-2 overflow-auto">
-          {visibleSavedRects.map((rect, index) => {
-            const active = selectedSaved?.key === rect.key && selectedSaved.index === rect.index;
-            return <button key={`${rect.key}-${rect.index ?? "single"}-pick-${index}`} type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${active ? "border-cyan-300 bg-cyan-500/20 text-cyan-50" : "border-white/10 bg-white/5 text-slate-300"}`} onClick={() => selectSaved(rect)}>
-              {rect.key.replace(/_norm$/, "")}{rect.index == null ? "" : ` ${rect.index + 1}`}
-            </button>;
-          })}
-        </div>
-        <pre data-testid="saved-regions-json" className="mt-3 max-h-96 overflow-auto rounded-lg bg-black/30 p-3 text-xs">{JSON.stringify(regions, null, 2)}</pre>
+        {advancedSurfacesVisible && <>
+          <h3 className="mt-5 font-bold">Selected Region</h3>
+          <pre data-testid="selected-region-json" className="mt-3 max-h-44 overflow-auto rounded-lg bg-black/30 p-3 text-xs">{selected ? JSON.stringify({ key, editing: selectedSaved, region: selected }, null, 2) : "No selection"}</pre>
+          <h3 className="mt-5 font-bold">Saved Regions</h3>
+          <div className="mt-3 flex max-h-44 flex-wrap gap-2 overflow-auto">
+            {visibleSavedRects.map((rect, index) => {
+              const active = selectedSaved?.key === rect.key && selectedSaved.index === rect.index;
+              return <button key={`${rect.key}-${rect.index ?? "single"}-pick-${index}`} type="button" className={`rounded-lg border px-2 py-1 text-xs font-semibold ${active ? "border-cyan-300 bg-cyan-500/20 text-cyan-50" : "border-white/10 bg-white/5 text-slate-300"}`} onClick={() => selectSaved(rect)}>
+                {rect.key.replace(/_norm$/, "")}{rect.index == null ? "" : ` ${rect.index + 1}`}
+              </button>;
+            })}
+          </div>
+          <pre data-testid="saved-regions-json" className="mt-3 max-h-96 overflow-auto rounded-lg bg-black/30 p-3 text-xs">{JSON.stringify(regions, null, 2)}</pre>
+        </>}
       </aside>
     </div>
   </div>;

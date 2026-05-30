@@ -100,7 +100,7 @@ export async function getHeroRecognitionReference(heroId: number) {
 function toHeroReference(hero: any, portraitUrl?: string, officialIconUrl?: string): HeroReference | null {
   const id = Number(hero?.id ?? hero?.hero_id ?? hero?.raw?.id ?? hero?.raw?.hero_id);
   const name = String(hero?.name ?? hero?.hero_name ?? hero?.raw?.hero_name ?? "").trim();
-  const iconUrl = String(officialIconUrl || (hero?.icon ?? hero?.icon_url ?? hero?.img_src ?? hero?.raw?.img_src ?? "")).trim();
+  const iconUrl = String(officialIconUrl || ((hero?.icon ?? hero?.icon_url ?? hero?.img_src ?? hero?.raw?.img_src) ?? "")).trim();
   if (!Number.isFinite(id) || !name || !iconUrl) return null;
   return {
     id,

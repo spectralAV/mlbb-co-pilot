@@ -524,9 +524,9 @@ function buildMapZoneStates(): MapZoneState[] {
 }
 
 function MapStat({ label, value, tone = "text-white" }: { label: string; value: string; tone?: string }) {
-  return <div className="border border-white/10 bg-white/[0.06] px-3 py-2">
-    <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{label}</div>
-    <div className={`mt-1 text-lg font-black uppercase leading-tight ${tone}`}>{value}</div>
+  return <div className="min-w-0 border border-white/10 bg-white/[0.06] px-3 py-2">
+    <div className="truncate text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{label}</div>
+    <div className={`mt-1 break-words text-base font-black uppercase leading-tight sm:text-lg ${tone}`}>{value}</div>
   </div>;
 }
 
@@ -1269,7 +1269,7 @@ export function MlbbStreamControl() {
 
     <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div className="card p-5">
-        <h2 className="text-sm font-black uppercase tracking-[0.2em] text-cyan-200">Detected state</h2>
+        <h2 className="text-3xl font-black uppercase leading-none text-white md:text-4xl">Detected state</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <MapStat label="Screen" value={display.matchPhase} />
           <MapStat label="Draft fact confidence" value={display.picksSubtitle} tone="text-cyan-200" />

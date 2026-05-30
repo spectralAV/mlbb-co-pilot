@@ -38,6 +38,14 @@
     "cv:result:import:all": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/importResultScreenDataset.py --project-root . --download } else { python backend/tools/importResultScreenDataset.py --project-root . --download }\"",
     "cv:result:status": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/resultScreenVision.py status --project-root . } else { python backend/tools/resultScreenVision.py status --project-root . }\"",
     "cv:result:train": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/resultScreenVision.py train --project-root . --device cpu --batch 4 --workers 0 --amp false",
+    "cv:draft:roboflow:import": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/importRoboflowDraftDataset.py --project-root .",
+    "cv:draft:roboflow:status": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/roboflowDraftVision.py status --project-root .",
+    "cv:draft:roboflow:train": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/roboflowDraftVision.py train --project-root . --device cpu --batch 4 --workers 0 --amp false",
+    "cv:draft:roboflow:infer": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/roboflowDraftVision.py infer --project-root .",
+    "cv:minimap:roboflow:import": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/importRoboflowDraftDataset.py --project-root . --target-name roboflow-minimap-2 --universe-url https://universe.roboflow.com/aung-khant-kyaw/mlbbminimap-2 --scope \"Mobile Legends minimap hero-icon recognition\"",
+    "cv:minimap:roboflow:status": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/roboflowDraftVision.py status --project-root . --target-name roboflow-minimap-2 --weight-name mlbb-roboflow-minimap.pt --engine-name ultralytics-roboflow-minimap",
+    "cv:minimap:roboflow:train": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/roboflowDraftVision.py train --project-root . --target-name roboflow-minimap-2 --weight-name mlbb-roboflow-minimap.pt --run-name mlbb-roboflow-minimap --engine-name ultralytics-roboflow-minimap --device cpu --batch 4 --workers 0 --amp false",
+    "cv:minimap:roboflow:infer": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/roboflowDraftVision.py infer --project-root . --target-name roboflow-minimap-2 --weight-name mlbb-roboflow-minimap.pt --engine-name ultralytics-roboflow-minimap --source-label roboflow-minimap-yolo",
     "start": "npm run dev"
   },
   "devDependencies": {

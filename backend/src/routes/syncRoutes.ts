@@ -5,7 +5,7 @@ import { getMlbbAdbAssetStatus, readMlbbAdbTexture, syncMlbbAdbAssets } from "..
 import { compileSkinPortraitSignatures, getSkinPortraitManifest } from "../vision/skinPortraitRecognition.js";
 
 const SyncSchema = z.object({
-  authorization: z.string().min(8),
+  authorization: z.string().optional().default(""),
   rank: z.string().default("101"),
   matchType: z.number().default(0),
   lang: z.string().default("en")
@@ -23,7 +23,8 @@ export async function syncRoutes(app: FastifyInstance) {
   app.post("/api/sync/official", async (req, reply) => {
     try {
       const input = SyncSchema.parse(req.body) as { authorization: string; rank?: string; matchType?: number; lang?: string };
-      const result = await syncOfficialData(input);
+      const authorization = input.authorization.trim() || process.env.MLBB_GMS_AUTHORIZATION?.trim() || "";
+      const result = await syncOfficialData({ ...input, authorization });
       const skinManifest = await getSkinPortraitManifest();
       const visionSignatures = skinManifest.portraitCount > 0
         ? await compileSkinPortraitSignatures()
