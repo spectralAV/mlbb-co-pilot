@@ -46,6 +46,7 @@ import { getTimerOcrStatus, inferTimerCrop, installTimerOcrRuntime, timerClasses
 import { getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, normalizeScreenOcrRegions } from "./vision/screenTextRecognition.js";
 import { getVisionReflectionSummary } from "./vision/visionReflection.js";
 import { addClientPerformanceSample, getPerformanceSnapshot, recordRequestMetric } from "./services/performanceMonitor.js";
+import { ensureObsScrcpyPluginInstalled } from "./services/obsPluginInstaller.js";
 
 const app = Fastify({ logger: true });
 const frontendDist = path.resolve(process.cwd(), "..", "frontend", "dist");
@@ -411,4 +412,12 @@ app.get("/ws/events", { websocket:true }, (socket) => { const unsub = eventBus.s
 
 await registerFrontendStatic();
 
-try { await app.listen({ port: PORT, host: HOST }); console.log(`MLBB Co-Pilot backend running on ${HOST}:${PORT}`); } catch(err) { app.log.error(err); process.exit(1); }
+try {
+  await app.listen({ port: PORT, host: HOST });
+  console.log(`MLBB Co-Pilot backend running on ${HOST}:${PORT}`);
+  void ensureObsScrcpyPluginInstalled()
+    .then((status) => {
+      if (status.obsInstalled && status.bundled) app.log.info({ pluginRoot: status.pluginRoot, upToDate: status.upToDate }, "OBS scrcpy source plugin checked.");
+    })
+    .catch((error) => app.log.warn({ error }, "OBS scrcpy source plugin auto-install failed."));
+} catch(err) { app.log.error(err); process.exit(1); }

@@ -3,6 +3,7 @@ import { CircleStop, Crop, Database, Gauge, MonitorUp, Radio, RefreshCw, ScanLin
 import { getNativeObsVisionStatus, getNdiDirectSources, getNdiDirectStatus, getNdiToolsStatus, launchNdiTool } from "../api/client";
 import {
   attachCapturePreviewCanvas,
+  captureCardDeviceStorageKey,
   captureSources,
   maxBufferedFrames,
   maxNativeCrops,
@@ -32,6 +33,9 @@ export function LiveCapture() {
   const [selectedNdiSource, setSelectedNdiSource] = useState(() => storedValue(ndiDirectSourceStorageKey, ""));
   const [ndiDirectStatus, setNdiDirectStatus] = useState<any>(null);
   const [ndiDirectMessage, setNdiDirectMessage] = useState("Refresh direct NDI sources and select the phone source. This bypasses NDI Webcam.");
+  const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCaptureDevice, setSelectedCaptureDevice] = useState(() => storedValue(captureCardDeviceStorageKey, ""));
+  const [captureCardMessage, setCaptureCardMessage] = useState("Select an HDMI/USB capture card or use the default video input.");
   const {
     running,
     sourceMode,
@@ -40,6 +44,7 @@ export function LiveCapture() {
     setSelectedSource,
     setSelectedCodec,
     fps,
+    analysisFps,
     buffered,
     nativeCrops,
     sourceSize,
@@ -114,6 +119,11 @@ export function LiveCapture() {
     void refreshDirectNdiSources();
   }, [selectedSource]);
 
+  useEffect(() => {
+    if (selectedSource !== "capture_card") return;
+    void refreshCaptureCardInputs(false);
+  }, [selectedSource]);
+
   const activeWindows = regions.filter((region) => metrics[region.key]?.active && region.key.includes("window"));
   const selected = captureSources.find((source) => source.id === selectedSource) ?? captureSources[0];
   const sourceAspect = sourceSize.width && sourceSize.height ? `${sourceSize.width} / ${sourceSize.height}` : "20 / 9";
@@ -123,7 +133,33 @@ export function LiveCapture() {
     { id: "av1", label: "AV1", detail: "Preset only" }
   ];
   const selectedDirectNdiSource = directNdiSources.find((source) => source.name === selectedNdiSource || source.id === selectedNdiSource);
+  const selectedVideoInput = videoInputs.find((device) => device.deviceId === selectedCaptureDevice);
   const canStartSelected = !(selectedSource === "scrcpy" && selectedCodec !== "h264") && !(selectedSource === "ndi" && !selectedNdiSource);
+
+  function rememberCaptureCardDevice(deviceId: string) {
+    setSelectedCaptureDevice(deviceId);
+    if (deviceId) window.localStorage.setItem(captureCardDeviceStorageKey, deviceId);
+    else window.localStorage.removeItem(captureCardDeviceStorageKey);
+  }
+
+  async function refreshCaptureCardInputs(requestPermission = false) {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) throw new Error("Video input enumeration is unavailable in this browser.");
+      if (requestPermission && navigator.mediaDevices.getUserMedia) {
+        const permissionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        permissionStream.getTracks().forEach((track) => track.stop());
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((device) => device.kind === "videoinput");
+      setVideoInputs(inputs);
+      if (!selectedCaptureDevice && inputs[0]) rememberCaptureCardDevice(inputs[0].deviceId);
+      setCaptureCardMessage(inputs.length
+        ? `Found ${inputs.length} video input${inputs.length === 1 ? "" : "s"}. Capture cards usually appear as USB Video, HDMI, Cam Link, or UVC.`
+        : "No video inputs found. Plug in the capture card, then refresh.");
+    } catch (error) {
+      setCaptureCardMessage(error instanceof Error ? error.message : "Could not refresh video inputs.");
+    }
+  }
 
   function rememberNdiSource(source: NdiSource | string) {
     const name = typeof source === "string" ? source : source.name;
@@ -212,6 +248,36 @@ export function LiveCapture() {
       {selectedCodec.toUpperCase()} is selectable for device/encoder testing, but live preview and CV are disabled for it right now so the app does not fall into the slow ADB frame path.
     </div>}
 
+    {selectedSource === "capture_card" && <section className="card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-3xl">
+          <h3 className="flex items-center gap-2 font-bold"><Tv className="h-4 w-4 text-cyan-300" />Capture Card Input</h3>
+          <p className="mt-1 text-sm text-slate-400">Uses a native browser camera stream from HDMI/USB capture cards. The frame is not cropped unless calibration regions do it later.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="cv-ghost-button inline-flex min-h-10 items-center gap-2 px-3 text-xs" onClick={() => void refreshCaptureCardInputs(false)}>
+            <RefreshCw className="h-4 w-4" />Refresh Inputs
+          </button>
+          <button className="cv-ghost-button inline-flex min-h-10 items-center gap-2 px-3 text-xs" onClick={() => void refreshCaptureCardInputs(true)}>
+            <MonitorUp className="h-4 w-4" />Grant Permission
+          </button>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <select className="input min-h-10 min-w-0 py-1 text-sm" value={selectedCaptureDevice} onChange={(event) => rememberCaptureCardDevice(event.target.value)}>
+          <option value="">Default video input</option>
+          {videoInputs.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Video input ${index + 1}`}</option>)}
+        </select>
+        <div className="capture-metric min-h-10 min-w-44">
+          <div>Selected</div>
+          <strong>{selectedVideoInput?.label || (selectedCaptureDevice ? "Saved input" : "Default")}</strong>
+        </div>
+      </div>
+      <div className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-500/10 p-3 text-sm text-cyan-50">
+        {captureCardMessage}
+      </div>
+    </section>}
+
     {selectedSource === "ndi" && <section className="card capture-ndi-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="max-w-3xl">
@@ -298,7 +364,7 @@ export function LiveCapture() {
     <div className="capture-workspace">
       <section className="card overflow-hidden">
         <div className="capture-preview-stage" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "scrcpy" || sourceMode === "browser" || sourceMode === "ndi" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+          {sourceMode === "scrcpy" || sourceMode === "browser" || sourceMode === "ndi" || sourceMode === "capture_card" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
@@ -314,13 +380,14 @@ export function LiveCapture() {
         <div className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Gauge className="h-4 w-4 text-cyan-300" />Frame Pipeline</h3>
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <Metric label="FPS" value={fps} />
+            <Metric label={sourceMode === "ndi" ? "Preview FPS" : "FPS"} value={fps} />
+            <Metric label="CV Analysis" value={analysisFps} />
             <Metric label="Buffer" value={`${buffered}/${maxBufferedFrames}`} />
             <Metric label="Latency" value={lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`} />
-            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "ndi" ? "Direct NDI" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
-            <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : sourceMode === "ndi" ? "NDI SDK frame" : selectedSource === "obs" ? "Native decoded" : "-"} />
-            <Metric className="col-span-2" label={sourceMode === "browser" ? "CV Surface" : sourceMode === "ndi" ? "Direct Source" : "Native Source"} value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
-            <Metric className="col-span-2" label="Native ROI Crops" value={`${nativeCrops}/${maxNativeCrops}`} />
+            <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "ndi" ? "Direct NDI" : sourceMode === "capture_card" ? "Capture card" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
+            <Metric label={sourceMode === "ndi" ? "Receiver FPS" : "ROI Crops"} value={sourceMode === "ndi" ? (ndiDirectStatus?.receiverFps ?? 0) : `${nativeCrops}/${maxNativeCrops}`} />
+            <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : sourceMode === "ndi" ? "NDI SDK frame" : sourceMode === "capture_card" ? "UVC camera frame" : selectedSource === "obs" ? "Native decoded" : "-"} />
+            <Metric className="col-span-2" label={sourceMode === "browser" ? "CV Surface" : sourceMode === "ndi" ? "Direct Source" : sourceMode === "capture_card" ? "Video Input" : "Native Source"} value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
           </div>
         </div>
 

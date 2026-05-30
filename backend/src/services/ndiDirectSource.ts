@@ -13,16 +13,21 @@ const captureDir = path.join(ROOT, "data", "capture");
 const framePath = path.join(captureDir, "ndi-direct-frame.bmp");
 const statusPath = path.join(captureDir, "ndi-direct-status.json");
 const streamMagic = Buffer.from("NDIR");
+const MAX_NDI_CLIENT_BUFFERED_BYTES = 8 * 1024 * 1024;
 
 let ndiProcess: ChildProcessWithoutNullStreams | null = null;
 let ndiSource = "";
 let lastError = "";
 let intentionalStop = false;
 let cachedPng: { frameId: string; buffer: Buffer; width: number; height: number; capturedAt: string } | null = null;
-let latestRawFrame: { frameId: string; buffer: Buffer; width: number; height: number; capturedAt: string; fourCc: string; frameRateN: number; frameRateD: number } | null = null;
+type RawNdiFrame = { frameId: string; buffer: Buffer; width: number; height: number; capturedAt: string; fourCc: string; frameRateN: number; frameRateD: number };
+
+let latestRawFrame: RawNdiFrame | null = null;
 let streamRemainder = Buffer.alloc(0);
 let receivedFrames = 0;
 let receivedFrameTimes: number[] = [];
+let frameWaiters: Array<{ after: string; resolve: (frame: RawNdiFrame | null) => void; timer: NodeJS.Timeout }> = [];
+const rawFrameClients = new Set<any>();
 
 async function ensureHelper() {
   if (fs.existsSync(helperDll)) return helperDll;
@@ -73,6 +78,51 @@ function rememberRawFrame(width: number, height: number, payload: Buffer, frameR
     frameRateD,
   };
   cachedPng = null;
+  if (lastError.includes("Source was not discovered")) lastError = "";
+  resolveFrameWaiters();
+  broadcastRawFrame(latestRawFrame);
+}
+
+function resolveFrameWaiters() {
+  if (!latestRawFrame || !frameWaiters.length) return;
+  const pending = frameWaiters;
+  frameWaiters = [];
+  for (const waiter of pending) {
+    if (waiter.after && waiter.after === latestRawFrame.frameId) {
+      frameWaiters.push(waiter);
+      continue;
+    }
+    clearTimeout(waiter.timer);
+    waiter.resolve(latestRawFrame);
+  }
+}
+
+function clearFrameWaiters() {
+  const pending = frameWaiters;
+  frameWaiters = [];
+  for (const waiter of pending) {
+    clearTimeout(waiter.timer);
+    waiter.resolve(null);
+  }
+}
+
+function broadcastRawFrame(frame: RawNdiFrame) {
+  const meta = JSON.stringify({
+    type: "ndi_frame",
+    frameId: frame.frameId,
+    width: frame.width,
+    height: frame.height,
+    capturedAt: frame.capturedAt,
+    fourCc: frame.fourCc,
+    frameRateN: frame.frameRateN,
+    frameRateD: frame.frameRateD,
+  });
+  for (const client of rawFrameClients) {
+    if (client.readyState !== 1) continue;
+    if (typeof client.bufferedAmount === "number" && client.bufferedAmount > MAX_NDI_CLIENT_BUFFERED_BYTES) continue;
+    client.send(meta);
+    client.send(frame.buffer);
+  }
 }
 
 function parseNdiStreamChunk(chunk: Buffer) {
@@ -138,6 +188,7 @@ export function stopNdiDirectCapture() {
   lastError = "";
   streamRemainder = Buffer.alloc(0);
   receivedFrameTimes = [];
+  clearFrameWaiters();
   return getNdiDirectStatus();
 }
 
@@ -164,7 +215,7 @@ export async function startNdiDirectCapture(options: { sourceName?: string; sour
     "stream",
     "--runtimeDll", status.runtimeDll,
     "--sourceName", sourceName,
-    "--timeoutMs", "3000",
+    "--timeoutMs", "6500",
     "--maxFps", String(Math.max(1, Math.min(120, Number(options.maxFps ?? 30)))),
   ];
   if (options.sourceUrl) args.push("--sourceUrl", options.sourceUrl);
@@ -179,6 +230,8 @@ export async function startNdiDirectCapture(options: { sourceName?: string; sour
 }
 
 export function getNdiDirectStatus() {
+  const now = Date.now();
+  while (receivedFrameTimes.length && now - receivedFrameTimes[0] > 1000) receivedFrameTimes.shift();
   const status = readJson(statusPath);
   const frameStat = fs.existsSync(framePath) ? fs.statSync(framePath) : null;
   const frameDimensions = !latestRawFrame && frameStat ? bmpDimensions(fs.readFileSync(framePath)) : { width: 0, height: 0 };
@@ -273,4 +326,26 @@ export async function getLatestNdiDirectFrame() {
 
 export function getLatestNdiDirectRawFrame() {
   return latestRawFrame;
+}
+
+export function waitForNextNdiDirectRawFrame(after = "", timeoutMs = 120) {
+  if (latestRawFrame && (!after || latestRawFrame.frameId !== after)) return Promise.resolve(latestRawFrame);
+  return new Promise<RawNdiFrame | null>((resolve) => {
+    const waiter = {
+      after,
+      resolve,
+      timer: setTimeout(() => {
+        frameWaiters = frameWaiters.filter((item) => item !== waiter);
+        resolve(null);
+      }, Math.max(16, timeoutMs)),
+    };
+    frameWaiters.push(waiter);
+  });
+}
+
+export function attachNdiDirectRawClient(socket: any) {
+  rawFrameClients.add(socket);
+  socket.send(JSON.stringify({ type: "ndi_status", status: getNdiDirectStatus() }));
+  if (latestRawFrame) broadcastRawFrame(latestRawFrame);
+  socket.on("close", () => rawFrameClients.delete(socket));
 }

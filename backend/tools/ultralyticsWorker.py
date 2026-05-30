@@ -244,6 +244,39 @@ def build_backend(weights, requested_device):
     return TorchBackend(weights, requested_device)
 
 
+def decode_raw_frame(frame_bytes, width, height, pixel_format):
+    pixel_format = str(pixel_format or "").upper()
+    channels = 4 if pixel_format in ("BGRA", "BGRX", "RGBA", "RGBX") else 3
+    expected = int(width) * int(height) * channels
+    if len(frame_bytes) != expected:
+        raise RuntimeError(f"Raw {pixel_format} frame has {len(frame_bytes)} bytes, expected {expected}.")
+    raw = np.frombuffer(frame_bytes, dtype=np.uint8).reshape((int(height), int(width), channels))
+    if pixel_format in ("BGRA", "BGRX"):
+        return cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+    if pixel_format == "RGBA" or pixel_format == "RGBX":
+        return cv2.cvtColor(raw, cv2.COLOR_RGBA2BGR)
+    if pixel_format == "RGB":
+        return cv2.cvtColor(raw, cv2.COLOR_RGB2BGR)
+    if pixel_format == "BGR":
+        return np.ascontiguousarray(raw)
+    raise RuntimeError(f"Unsupported raw frame pixel format: {pixel_format}")
+
+
+def decode_frame(frame_bytes, header):
+    encoding = str(header.get("encoding") or "encoded").lower()
+    if encoding == "raw":
+        return decode_raw_frame(
+            frame_bytes,
+            int(header.get("width", 0)),
+            int(header.get("height", 0)),
+            header.get("pixelFormat") or header.get("pixel_format"),
+        )
+    frame = cv2.imdecode(np.frombuffer(frame_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise RuntimeError("Could not decode the received image frame.")
+    return frame
+
+
 def main():
     if len(sys.argv) not in (2, 3):
         raise RuntimeError("Worker requires the trained model weights path and optional device.")
@@ -266,10 +299,8 @@ def main():
             confidence = float(header.get("confidence", 0.55))
             frame_bytes = reader.read(size)
             if len(frame_bytes) != size:
-                raise RuntimeError("Incomplete image frame received.")
-            frame = cv2.imdecode(np.frombuffer(frame_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if frame is None:
-                raise RuntimeError("Could not decode the received image frame.")
+                raise RuntimeError("Incomplete frame received.")
+            frame = decode_frame(frame_bytes, header)
             payload = {"id": request_id, "ok": True, "detections": backend.predict(frame, confidence)}
         except Exception as error:
             payload = {"id": request_id, "ok": False, "error": str(error)}

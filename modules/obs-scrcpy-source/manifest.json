@@ -1,0 +1,17 @@
+{
+  "id": "obs-scrcpy-source",
+  "name": "OBS scrcpy Device Source",
+  "version": "0.1.5",
+  "platform": "win32-x64",
+  "description": "Native OBS Studio source that receives a read-only scrcpy stream, supports H.264/H.265/AV1 decode output, and publishes latest-frame raw BGRA CV samples without blocking OBS output.",
+  "obs": {
+    "sourceName": "scrcpy Device Source",
+    "pluginDll": "obs-plugins/64bit/obs-scrcpy-source.dll",
+    "dataDir": "data/obs-plugins/obs-scrcpy-source",
+    "requiresRestart": true
+  },
+  "files": {
+    "bin": "bin/64bit",
+    "data": "data"
+  }
+}

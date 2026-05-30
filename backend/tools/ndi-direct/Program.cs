@@ -248,9 +248,18 @@ sealed class Args
 sealed class NdiReceiver : IDisposable
 {
     readonly IntPtr receiver;
+    readonly IntPtr sourceNamePtr;
+    readonly IntPtr sourceUrlPtr;
+    readonly IntPtr receiverNamePtr;
     bool disposed;
 
-    NdiReceiver(IntPtr receiver) => this.receiver = receiver;
+    NdiReceiver(IntPtr receiver, IntPtr sourceNamePtr, IntPtr sourceUrlPtr, IntPtr receiverNamePtr)
+    {
+        this.receiver = receiver;
+        this.sourceNamePtr = sourceNamePtr;
+        this.sourceUrlPtr = sourceUrlPtr;
+        this.receiverNamePtr = receiverNamePtr;
+    }
 
     public static NdiReceiver Connect(NdiSource source)
     {
@@ -260,27 +269,33 @@ sealed class NdiReceiver : IDisposable
         var receiverNamePtr = Marshal.StringToHGlobalAnsi("MLBB Co-Pilot Direct NDI");
         var create = new Ndi.RecvCreate
         {
-            source_to_connect_to = new Ndi.Source(),
+            source_to_connect_to = sourceStruct,
             color_format = Ndi.RecvColorFormat.RGBX_RGBA,
             bandwidth = Ndi.RecvBandwidth.Highest,
             allow_video_fields = false,
             p_ndi_recv_name = receiverNamePtr,
         };
         var createPtr = Marshal.AllocHGlobal(Marshal.SizeOf<Ndi.RecvCreate>());
+        var receiver = IntPtr.Zero;
         try
         {
             Marshal.StructureToPtr(create, createPtr, false);
-            var receiver = Ndi.RecvCreateV3(createPtr);
+            receiver = Ndi.RecvCreateV3(createPtr);
             if (receiver == IntPtr.Zero) throw new InvalidOperationException("Could not create NDI receiver.");
             Ndi.RecvConnect(receiver, ref sourceStruct);
-            return new NdiReceiver(receiver);
+            return new NdiReceiver(receiver, namePtr, urlPtr, receiverNamePtr);
+        }
+        catch
+        {
+            if (receiver != IntPtr.Zero) Ndi.RecvDestroy(receiver);
+            Marshal.FreeHGlobal(namePtr);
+            if (urlPtr != IntPtr.Zero) Marshal.FreeHGlobal(urlPtr);
+            Marshal.FreeHGlobal(receiverNamePtr);
+            throw;
         }
         finally
         {
             Marshal.FreeHGlobal(createPtr);
-            Marshal.FreeHGlobal(namePtr);
-            if (urlPtr != IntPtr.Zero) Marshal.FreeHGlobal(urlPtr);
-            Marshal.FreeHGlobal(receiverNamePtr);
         }
     }
 
@@ -305,6 +320,9 @@ sealed class NdiReceiver : IDisposable
         if (disposed) return;
         disposed = true;
         if (receiver != IntPtr.Zero) Ndi.RecvDestroy(receiver);
+        if (sourceNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(sourceNamePtr);
+        if (sourceUrlPtr != IntPtr.Zero) Marshal.FreeHGlobal(sourceUrlPtr);
+        if (receiverNamePtr != IntPtr.Zero) Marshal.FreeHGlobal(receiverNamePtr);
     }
 }
 
@@ -516,17 +534,13 @@ static class Ndi
         if (finder == IntPtr.Zero) throw new InvalidOperationException("Could not create NDI finder.");
         try
         {
-            FindWaitForSources(finder, (uint)Math.Max(100, timeoutMs));
-            uint count = 0;
-            var sourcesPtr = FindGetCurrentSources(finder, ref count);
-            var sources = new List<NdiSource>();
-            var size = Marshal.SizeOf<Source>();
-            for (var i = 0; i < count; i++)
+            var deadline = DateTimeOffset.UtcNow.AddMilliseconds(Math.Max(100, timeoutMs));
+            var sources = CurrentSources(finder);
+            while (sources.Count == 0 && DateTimeOffset.UtcNow < deadline)
             {
-                var item = Marshal.PtrToStructure<Source>(IntPtr.Add(sourcesPtr, i * size));
-                var name = Marshal.PtrToStringAnsi(item.p_ndi_name) ?? "";
-                var url = item.p_url_address == IntPtr.Zero ? null : Marshal.PtrToStringAnsi(item.p_url_address);
-                if (name.Length > 0) sources.Add(new NdiSource(name, name, url));
+                var remaining = Math.Max(100, (int)(deadline - DateTimeOffset.UtcNow).TotalMilliseconds);
+                FindWaitForSources(finder, (uint)Math.Min(500, remaining));
+                sources = CurrentSources(finder);
             }
             return sources;
         }
@@ -534,6 +548,22 @@ static class Ndi
         {
             FindDestroy(finder);
         }
+    }
+
+    static List<NdiSource> CurrentSources(IntPtr finder)
+    {
+        uint count = 0;
+        var sourcesPtr = FindGetCurrentSources(finder, ref count);
+        var sources = new List<NdiSource>();
+        var size = Marshal.SizeOf<Source>();
+        for (var i = 0; i < count; i++)
+        {
+            var item = Marshal.PtrToStructure<Source>(IntPtr.Add(sourcesPtr, i * size));
+            var name = Marshal.PtrToStringAnsi(item.p_ndi_name) ?? "";
+            var url = item.p_url_address == IntPtr.Zero ? null : Marshal.PtrToStringAnsi(item.p_url_address);
+            if (name.Length > 0) sources.Add(new NdiSource(name, name, url));
+        }
+        return sources;
     }
 
     [StructLayout(LayoutKind.Sequential)]

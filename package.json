@@ -99,6 +99,10 @@
       {
         "from": "map-runtime",
         "to": "map-runtime"
+      },
+      {
+        "from": "modules/obs-scrcpy-source",
+        "to": "modules/obs-scrcpy-source"
       }
     ],
     "win": {

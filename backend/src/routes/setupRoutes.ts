@@ -6,6 +6,7 @@ import { getAdbCaptureStatus } from "../services/adbFrameSource.js";
 import { getNdiDirectStatus } from "../services/ndiDirectSource.js";
 import { getNdiToolsStatus } from "../services/ndiTools.js";
 import { getNativeObsBridgeStatus } from "../services/nativeObsBridge.js";
+import { ensureObsScrcpyPluginInstalled } from "../services/obsPluginInstaller.js";
 import { getScrcpyStatus } from "../services/scrcpySource.js";
 import { readRuntime } from "../runtime/RuntimeStore.js";
 import { getScreenOcrStatus } from "../vision/screenTextRecognition.js";
@@ -82,12 +83,13 @@ function summarize(checks: SetupCheck[]) {
 
 export async function setupRoutes(app: FastifyInstance) {
   app.get("/api/setup/status", async () => {
-    const [pkg, runtime, adb, scrcpy, obs, ndiTools, ndiDirect, yolo, timerOcr, screenOcr] = await Promise.all([
+    const [pkg, runtime, adb, scrcpy, obs, obsPlugin, ndiTools, ndiDirect, yolo, timerOcr, screenOcr] = await Promise.all([
       rootPackage(),
       settled(readRuntime()),
       settled(getAdbCaptureStatus()),
       settled(Promise.resolve(getScrcpyStatus())),
       settled(Promise.resolve(getNativeObsBridgeStatus())),
+      settled(ensureObsScrcpyPluginInstalled()),
       settled(getNdiToolsStatus()),
       settled(Promise.resolve(getNdiDirectStatus())),
       settled(getUltralyticsStatus()),
@@ -173,6 +175,24 @@ export async function setupRoutes(app: FastifyInstance) {
         data: obs.value,
       });
     } else checks.push(errored("obs", "OBS Bridge", "capture", resultError(obs), true));
+
+    if (obsPlugin.ok) {
+      checks.push({
+        id: "obs-plugin",
+        label: "OBS Plugin",
+        group: "capture",
+        state: obsPlugin.value.upToDate ? "ready" : obsPlugin.value.obsInstalled ? "action" : "optional",
+        summary: obsPlugin.value.upToDate ? "Installed" : obsPlugin.value.obsInstalled ? "Install needed" : "OBS not found",
+        detail: obsPlugin.value.upToDate
+          ? `Installed at ${obsPlugin.value.pluginRoot}. Restart OBS after updates.`
+          : obsPlugin.value.obsInstalled
+            ? obsPlugin.value.action
+            : "OBS Studio was not detected, so the native scrcpy source plugin was not installed.",
+        action: obsPlugin.value.upToDate ? undefined : obsPlugin.value.action,
+        optional: true,
+        data: obsPlugin.value,
+      });
+    } else checks.push(errored("obs-plugin", "OBS Plugin", "capture", resultError(obsPlugin), true));
 
     if (ndiTools.ok) {
       checks.push({

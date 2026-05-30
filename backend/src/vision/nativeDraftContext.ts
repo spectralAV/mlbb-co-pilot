@@ -1,4 +1,5 @@
 import { firstNormalizedRegion, type NormalizedRect } from "../services/obsCoachState.js";
+import { isRawVideoFrame, rawFrameBytesPerPixel, type RawVideoFrame, type VisionFrameInput } from "./rawFrame.js";
 
 type Rect = NormalizedRect;
 type ContextFact<T> = {
@@ -18,8 +19,8 @@ const defaultFirstPickMarkers: Record<"ally" | "enemy", Rect> = {
   enemy: [0.702, 0.032, 0.052, 0.072],
 };
 
-export function detectNativeDraftVisualContext(buffer: Buffer, calibratedRegions: Record<string, unknown> = {}): NativeDraftVisualContext {
-  const image = parseBmp(buffer);
+export function detectNativeDraftVisualContext(input: VisionFrameInput, calibratedRegions: Record<string, unknown> = {}): NativeDraftVisualContext {
+  const image = imageFromFrameInput(input);
   if (!image) return {};
   const selfRail = firstNormalizedRegion(calibratedRegions.draft_self_highlight_rail_norm) ?? defaultSelfRail;
   const firstPickMarkers = {
@@ -59,6 +60,33 @@ function parseBmp(buffer: Buffer): BmpImage | null {
       const sourceY = rawHeight > 0 ? height - y - 1 : y;
       const index = pixelOffset + sourceY * rowStride + x * bytesPerPixel;
       return [buffer[index + 2], buffer[index + 1], buffer[index]];
+    },
+  };
+}
+
+function imageFromFrameInput(input: VisionFrameInput): BmpImage | null {
+  if (isRawVideoFrame(input)) return rawImage(input);
+  return parseBmp(input);
+}
+
+function rawImage(frame: RawVideoFrame): BmpImage | null {
+  const bytesPerPixel = rawFrameBytesPerPixel(frame.pixelFormat);
+  if (frame.buffer.byteLength !== frame.width * frame.height * bytesPerPixel) return null;
+  return {
+    width: frame.width,
+    height: frame.height,
+    colorAt: (x, y) => {
+      const index = (y * frame.width + x) * bytesPerPixel;
+      switch (frame.pixelFormat) {
+      case "BGRA":
+      case "BGRX":
+      case "BGR":
+        return [frame.buffer[index + 2], frame.buffer[index + 1], frame.buffer[index]];
+      case "RGBA":
+      case "RGBX":
+      case "RGB":
+        return [frame.buffer[index], frame.buffer[index + 1], frame.buffer[index + 2]];
+      }
     },
   };
 }

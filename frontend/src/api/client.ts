@@ -72,6 +72,8 @@ export const clearObsRegions = (key: string) => apiPost<any>("/api/obs/regions/c
 export const getObsConfig = () => apiGet<any>("/api/obs/config");
 export const saveObsConfig = (config: unknown) => apiPost<any>("/api/obs/config", config);
 export const getNativeObsVisionStatus = () => apiGet<any>("/api/capture/obs/status");
+export const getObsPluginStatus = () => apiGet<any>("/api/capture/obs/plugin/status");
+export const installObsPlugin = () => apiPost<any>("/api/capture/obs/plugin/install", {});
 export const getNdiToolsStatus = () => apiGet<any>("/api/capture/ndi/status");
 export const getNdiDirectStatus = () => apiGet<any>("/api/capture/ndi/direct/status");
 export const getNdiDirectSources = () => apiGet<any>("/api/capture/ndi/direct/sources");

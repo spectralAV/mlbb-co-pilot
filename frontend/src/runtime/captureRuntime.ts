@@ -11,15 +11,18 @@ export type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" 
 export type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
 export type RegionMetrics = { mean: number; contrast: number; changed: number; active: boolean };
 export type CaptureSource = "adb" | "window" | "scrcpy" | "ndi" | "capture_card" | "obs";
-export type SourceMode = "idle" | "browser" | "adb" | "scrcpy" | "ndi" | "obs" | "recording";
+export type SourceMode = "idle" | "browser" | "adb" | "scrcpy" | "ndi" | "capture_card" | "obs" | "recording";
 export type ScrcpyVideoCodec = "h264" | "h265" | "av1";
 export type CaptureLogEntry = { time: number; level: "info" | "warn" | "error"; message: string };
 export type WindowContentCrop = { enabled: boolean; top: number; right: number; bottom: number; left: number };
 type NativeCrop = { time: number; key: RegionKey; width: number; height: number; bitmap: ImageBitmap };
 type FrameSummary = { time: number; sourceWidth: number; sourceHeight: number; regions: Record<RegionKey, RegionMetrics> };
 type ScrcpyFrameMeta = { type: "scrcpy_frame"; config?: boolean; key?: boolean; ptsUs?: number; size?: number };
+type NdiRawFrameMeta = { type: "ndi_frame"; frameId: string; width: number; height: number; capturedAt: string; fourCc?: string; frameRateN?: number; frameRateD?: number };
+type RawFrameMeta = { frameId?: string; width: number; height: number; capturedAt: string; pixelFormat?: string };
 type PixelRegion = { x: number; y: number; w: number; h: number };
 type VisionProbe = { key: string; rect: [number, number, number, number] };
+type DraftVisualContextCache = ReturnType<typeof detectDraftVisualContext>;
 type UltralyticsDetection = {
   classId: number;
   className: string;
@@ -82,6 +85,7 @@ export type VisionStabilityState = {
 const scoreboardBodyRect: [number, number, number, number] = [0.1, 0.13, 0.8, 0.78];
 const defaultWindowContentCrop: WindowContentCrop = { enabled: false, top: 0.13, right: 0, bottom: 0.06, left: 0 };
 const windowContentCropStorageKey = "mlbb.capture.windowContentCrop.v1";
+export const captureCardDeviceStorageKey = "mlbb.capture.captureCardDeviceId.v1";
 export const ndiDirectSourceStorageKey = "mlbb.capture.ndiDirectSource.v1";
 export const ndiDirectSourceUrlStorageKey = "mlbb.capture.ndiDirectSourceUrl.v1";
 
@@ -125,6 +129,8 @@ export const maxBufferedFrames = 60;
 export const maxNativeCrops = 96;
 const scrcpyMaxFps = 15;
 const h264MaxDecodeQueue = 6;
+const ndiAnalysisIntervalMs = 125;
+const draftContextCacheMs = 250;
 
 export const captureSources: Array<{
   id: CaptureSource;
@@ -135,7 +141,7 @@ export const captureSources: Array<{
   { id: "adb", title: "ADB Phone", state: "ready", detail: "Native pixels, works in this browser, slower frame rate." },
   { id: "scrcpy", title: "Backend scrcpy", state: "ready", detail: "Direct H.264 stream decoded with WebCodecs for realtime preview and CV." },
   { id: "ndi", title: "Direct NDI", state: "ready", detail: "Receive the phone source through the NDI SDK before any webcam wrapper can crop it." },
-  { id: "capture_card", title: "Capture Card", state: "planned", detail: "HDMI/USB video input for phones, tablets, or external devices." },
+  { id: "capture_card", title: "Capture Card", state: "ready", detail: "HDMI/USB UVC input with direct browser frames and preserved aspect ratio." },
   { id: "window", title: "Window Share", state: "permission", detail: "Fast when browser screen-share permission is available." },
   { id: "obs", title: "Native OBS Bridge", state: "ready", detail: "Frames from the native scrcpy OBS source feed the same live CV and reasoning pipeline." }
 ];
@@ -183,6 +189,7 @@ type CaptureRuntimeState = {
   selectedSource: CaptureSource;
   selectedCodec: ScrcpyVideoCodec;
   fps: number;
+  analysisFps: number;
   buffered: number;
   nativeCrops: number;
   sourceSize: { width: number; height: number };
@@ -206,6 +213,7 @@ export const useCaptureRuntimeStore = create<CaptureRuntimeState>((set) => ({
   selectedSource: "adb",
   selectedCodec: "h264",
   fps: 0,
+  analysisFps: 0,
   buffered: 0,
   nativeCrops: 0,
   sourceSize: { width: 0, height: 0 },
@@ -247,6 +255,8 @@ const runtime = {
   lastObsFrameAt: "",
   lastNdiFrameAt: "",
   h264Socket: null as WebSocket | null,
+  ndiSocket: null as WebSocket | null,
+  ndiPendingMeta: null as NdiRawFrameMeta | null,
   h264Decoder: null as any,
   h264Configured: false,
   h264ReadyForKey: true,
@@ -264,7 +274,12 @@ const runtime = {
   nativeCropBuffer: [] as NativeCrop[],
   previous: emptyMetrics(),
   frameTimes: [] as number[],
+  renderFrameTimes: [] as number[],
   lastFrameAt: 0,
+  lastNdiAnalysisAt: 0,
+  lastDraftContextAt: 0,
+  lastDraftContextKey: "",
+  lastDraftContext: null as DraftVisualContextCache | null,
   lastVisionPostedAt: 0,
   visionPostInFlight: false,
   visionStability: createVisionStabilityState(),
@@ -360,12 +375,18 @@ export function stopCaptureRuntime() {
   if (runtime.raf != null) cancelAnimationFrame(runtime.raf);
   if (runtime.adbTimer != null) window.clearTimeout(runtime.adbTimer);
   if (runtime.ageTimer != null) window.clearInterval(runtime.ageTimer);
+  runtime.adbActive = false;
+  runtime.obsBridgeActive = false;
+  runtime.ndiDirectActive = false;
   runtime.h264Socket?.close();
+  runtime.ndiSocket?.close();
   runtime.h264Decoder?.close?.();
   runtime.raf = null;
   runtime.adbTimer = null;
   runtime.ageTimer = null;
   runtime.h264Socket = null;
+  runtime.ndiSocket = null;
+  runtime.ndiPendingMeta = null;
   runtime.h264Decoder = null;
   runtime.h264Configured = false;
   runtime.h264ReadyForKey = true;
@@ -377,9 +398,6 @@ export function stopCaptureRuntime() {
   runtime.h264AuKey = false;
   runtime.h264ParameterSets = [];
   runtime.h264CodecString = "";
-  runtime.adbActive = false;
-  runtime.obsBridgeActive = false;
-  runtime.ndiDirectActive = false;
   runtime.lastObsFrameAt = "";
   runtime.lastNdiFrameAt = "";
   runtime.stream?.getTracks().forEach((track) => track.stop());
@@ -388,12 +406,16 @@ export function stopCaptureRuntime() {
   if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
   runtime.adbPreviewUrl = "";
   runtime.lastFrameAt = 0;
+  runtime.lastNdiAnalysisAt = 0;
+  runtime.lastDraftContextAt = 0;
+  runtime.lastDraftContextKey = "";
+  runtime.lastDraftContext = null;
   runtime.visionStability = createVisionStabilityState();
   runtime.nativeCropBuffer.splice(0).forEach((crop) => crop.bitmap.close());
   const mode = useCaptureRuntimeStore.getState().sourceMode;
   if (mode === "scrcpy") void stopScrcpy().catch(() => {});
   if (mode === "ndi") void stopNdiDirectCapture().catch(() => {});
-  useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", stream: null, adbPreviewUrl: "", nativeCrops: 0, fps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
+  useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", stream: null, adbPreviewUrl: "", nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
 }
 
 export function startSelectedCaptureRuntime() {
@@ -403,13 +425,14 @@ export function startSelectedCaptureRuntime() {
   if (selected === "window") return void startBrowserCapture();
   if (selected === "scrcpy") return void startScrcpyCapture();
   if (selected === "ndi") return void startNdiCapture();
+  if (selected === "capture_card") return void startCaptureCardCapture();
   if (selected === "obs") return void startObsBridgeCapture();
   const messages: Record<CaptureSource, string> = {
     adb: "",
     window: "",
     scrcpy: "",
     ndi: "",
-    capture_card: "Capture card input is planned for HDMI/USB devices, but the backend decoder is not connected yet.",
+    capture_card: "",
     obs: ""
   };
   useCaptureRuntimeStore.setState({ error: messages[selected] });
@@ -777,6 +800,7 @@ function drawDecodedFrame(frame: any) {
   if (useCaptureRuntimeStore.getState().error.startsWith("H.264")) {
     useCaptureRuntimeStore.setState({ error: "" });
   }
+  recordRenderedFrame();
   analyzeCanvas(canvas, width, height);
 }
 
@@ -797,7 +821,7 @@ async function startNdiCapture() {
     addCaptureLog("info", `Direct NDI receiver started: ${sourceName}.`);
     useCaptureRuntimeStore.setState({ sourceMode: "ndi", running: true, stream: null, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 } });
     startAgeTimer();
-    void pollNdiDirectFrame();
+    startNdiDirectRawSocket();
   } catch (caught) {
     runtime.ndiDirectActive = false;
     const message = caught instanceof Error ? caught.message : "Direct NDI capture failed.";
@@ -808,6 +832,37 @@ async function startNdiCapture() {
       stream: null,
       error: `${message}. Refresh direct NDI sources and select your phone source.`
     });
+  }
+}
+
+async function startCaptureCardCapture() {
+  useCaptureRuntimeStore.setState({ error: "" });
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Camera capture is unavailable in this browser.");
+    }
+    const deviceId = typeof window === "undefined" ? "" : window.localStorage.getItem(captureCardDeviceStorageKey) || "";
+    const video: MediaTrackConstraints = {
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 60, max: 60 },
+    };
+    if (deviceId) video.deviceId = { exact: deviceId };
+    const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    resetBuffers();
+    runtime.stream = stream;
+    if (runtime.video) {
+      runtime.video.srcObject = stream;
+      await runtime.video.play();
+    }
+    addCaptureLog("info", `Capture card stream opened${deviceId ? " from selected video input" : " from default video input"}.`);
+    useCaptureRuntimeStore.setState({ sourceMode: "capture_card", running: true, stream, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 } });
+    scheduleFrame();
+    startAgeTimer();
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "Could not start capture card.";
+    addCaptureLog("error", message);
+    useCaptureRuntimeStore.setState({ error: `${message}. Select a video input, grant camera permission, then start again.`, running: false, sourceMode: "idle" });
   }
 }
 
@@ -860,11 +915,30 @@ function resetBuffers() {
   runtime.nativeCropBuffer.splice(0).forEach((crop) => crop.bitmap.close());
   runtime.previous = emptyMetrics();
   runtime.frameTimes = [];
+  runtime.renderFrameTimes = [];
   runtime.lastFrameAt = 0;
+  runtime.lastNdiAnalysisAt = 0;
+  runtime.lastDraftContextAt = 0;
+  runtime.lastDraftContextKey = "";
+  runtime.lastDraftContext = null;
   runtime.lastVisionPostedAt = 0;
   runtime.visionPostInFlight = false;
   runtime.visionStability = createVisionStabilityState();
-  useCaptureRuntimeStore.setState({ buffered: 0, nativeCrops: 0, fps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
+  useCaptureRuntimeStore.setState({ buffered: 0, nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
+}
+
+function trimFrameTimes(times: number[], now: number) {
+  while (times.length && now - times[0] > 1000) times.shift();
+}
+
+function recordRenderedFrame(now = performance.now()) {
+  runtime.lastFrameAt = now;
+  runtime.renderFrameTimes.push(now);
+  trimFrameTimes(runtime.renderFrameTimes, now);
+}
+
+function currentRenderFps() {
+  return runtime.renderFrameTimes.length || runtime.frameTimes.length;
 }
 
 function scheduleFrame() {
@@ -908,6 +982,7 @@ function processFrame() {
     }
     runtime.previewCanvas.getContext("2d")?.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
   }
+  recordRenderedFrame();
   analyzeCanvas(canvas, width, height);
 }
 
@@ -934,6 +1009,7 @@ async function pollAdbFrame() {
       }
       updateSourceSize(width, height);
       canvas.getContext("2d", { willReadFrequently: true })?.drawImage(bitmap, 0, 0);
+      recordRenderedFrame();
       analyzeCanvas(canvas, width, height);
     }
     bitmap.close();
@@ -950,7 +1026,7 @@ async function pollAdbFrame() {
 async function pollObsBridgeFrame() {
   if (!runtime.obsBridgeActive) return;
   try {
-    const response = await fetch(apiUrl(`/api/capture/obs/frame?t=${Date.now()}`), { cache: "no-store" });
+    const response = await fetch(apiUrl(`/api/capture/obs/frame.raw?t=${Date.now()}`), { cache: "no-store" });
     if (response.status === 404) {
       useCaptureRuntimeStore.setState({ error: "Waiting for OBS frames. Add the scrcpy Device Source in OBS and enable its MLBB CoPilot CV bridge setting." });
       return;
@@ -959,24 +1035,12 @@ async function pollObsBridgeFrame() {
     const capturedAt = response.headers.get("x-captured-at") ?? "";
     if (capturedAt && capturedAt === runtime.lastObsFrameAt) return;
     runtime.lastObsFrameAt = capturedAt;
-    const blob = await response.blob();
-    if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
-    runtime.adbPreviewUrl = URL.createObjectURL(blob);
-    useCaptureRuntimeStore.setState({ adbPreviewUrl: runtime.adbPreviewUrl, error: "" });
-    const bitmap = await createImageBitmap(blob);
-    const canvas = runtime.canvas;
-    if (canvas) {
-      const width = bitmap.width;
-      const height = bitmap.height;
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-      updateSourceSize(width, height);
-      canvas.getContext("2d", { willReadFrequently: true })?.drawImage(bitmap, 0, 0);
-      analyzeCanvas(canvas, width, height);
-    }
-    bitmap.close();
+    const width = Number(response.headers.get("x-source-width") ?? 0);
+    const height = Number(response.headers.get("x-source-height") ?? 0);
+    const pixelFormat = response.headers.get("x-pixel-format") ?? "BGRA";
+    if (!width || !height) throw new Error("Native OBS raw frame is missing dimensions.");
+    const bytes = new Uint8ClampedArray(await response.arrayBuffer());
+    drawObsRawFrame(bytes, { frameId: capturedAt, width, height, capturedAt, pixelFormat });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Native OBS bridge frame failed.";
     addCaptureLog("error", message.slice(0, 180));
@@ -987,10 +1051,139 @@ async function pollObsBridgeFrame() {
   }
 }
 
+function startNdiDirectRawSocket() {
+  runtime.ndiSocket?.close();
+  runtime.ndiPendingMeta = null;
+  const socket = new WebSocket(apiWsUrl("/ws/capture/ndi-direct-raw"));
+  runtime.ndiSocket = socket;
+  socket.binaryType = "arraybuffer";
+  socket.onopen = () => {
+    if (runtime.ndiDirectActive) useCaptureRuntimeStore.setState({ error: "" });
+  };
+  socket.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      try {
+        const message = JSON.parse(event.data);
+        if (message?.type === "ndi_frame") runtime.ndiPendingMeta = message as NdiRawFrameMeta;
+      } catch {
+        // Ignore non-frame websocket messages.
+      }
+      return;
+    }
+    const meta = runtime.ndiPendingMeta;
+    runtime.ndiPendingMeta = null;
+    if (!meta || !(event.data instanceof ArrayBuffer)) return;
+    drawNdiRawFrame(new Uint8ClampedArray(event.data), meta);
+  };
+  socket.onerror = () => {
+    if (!runtime.ndiDirectActive) return;
+    addCaptureLog("warn", "Direct NDI websocket had an error; falling back to long-poll frames.");
+  };
+  socket.onclose = () => {
+    if (runtime.ndiSocket === socket) runtime.ndiSocket = null;
+    if (!runtime.ndiDirectActive) return;
+    runtime.adbTimer = window.setTimeout(() => void pollNdiDirectFrame(), 250);
+  };
+}
+
+function canvasRgbaBytes(bytes: Uint8ClampedArray<ArrayBuffer>, meta: RawFrameMeta) {
+  const pixelFormat = String(meta.pixelFormat ?? "RGBA").toUpperCase();
+  const width = Number(meta.width);
+  const height = Number(meta.height);
+  if (pixelFormat === "RGBA") return bytes;
+  const channels = pixelFormat.length === 4 ? 4 : 3;
+  const expected = width * height * channels;
+  if (bytes.byteLength !== expected) throw new Error(`Raw ${pixelFormat} frame has ${bytes.byteLength} bytes, expected ${expected}.`);
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let source = 0, target = 0; source < bytes.length; source += channels, target += 4) {
+    switch (pixelFormat) {
+      case "BGRA":
+      case "BGRX":
+        rgba[target] = bytes[source + 2];
+        rgba[target + 1] = bytes[source + 1];
+        rgba[target + 2] = bytes[source];
+        rgba[target + 3] = pixelFormat === "BGRA" ? bytes[source + 3] : 255;
+        break;
+      case "BGR":
+        rgba[target] = bytes[source + 2];
+        rgba[target + 1] = bytes[source + 1];
+        rgba[target + 2] = bytes[source];
+        rgba[target + 3] = 255;
+        break;
+      case "RGB":
+        rgba[target] = bytes[source];
+        rgba[target + 1] = bytes[source + 1];
+        rgba[target + 2] = bytes[source + 2];
+        rgba[target + 3] = 255;
+        break;
+      case "RGBX":
+        rgba[target] = bytes[source];
+        rgba[target + 1] = bytes[source + 1];
+        rgba[target + 2] = bytes[source + 2];
+        rgba[target + 3] = 255;
+        break;
+      default:
+        throw new Error(`Unsupported raw frame pixel format: ${pixelFormat}`);
+    }
+  }
+  return rgba;
+}
+
+function drawRuntimeRawFrame(bytes: Uint8ClampedArray<ArrayBuffer>, meta: RawFrameMeta, analyzeEveryMs = 0) {
+  const width = Number(meta.width);
+  const height = Number(meta.height);
+  const pixelFormat = String(meta.pixelFormat ?? "RGBA").toUpperCase();
+  const channels = pixelFormat.length === 4 ? 4 : 3;
+  if (!width || !height || bytes.byteLength !== width * height * channels) return;
+  if (runtime.adbPreviewUrl) {
+    URL.revokeObjectURL(runtime.adbPreviewUrl);
+    runtime.adbPreviewUrl = "";
+  }
+  useCaptureRuntimeStore.setState({ adbPreviewUrl: "", error: "" });
+  const canvas = runtime.canvas;
+  if (!canvas) return;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  updateSourceSize(width, height);
+  const imageData = new ImageData(canvasRgbaBytes(bytes, meta), width, height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx?.putImageData(imageData, 0, 0);
+  if (runtime.previewCanvas) {
+    if (runtime.previewCanvas.width !== width || runtime.previewCanvas.height !== height) {
+      runtime.previewCanvas.width = width;
+      runtime.previewCanvas.height = height;
+    }
+    runtime.previewCanvas.getContext("2d")?.drawImage(canvas, 0, 0);
+  }
+  const now = performance.now();
+  recordRenderedFrame(now);
+  if (!analyzeEveryMs || now - runtime.lastNdiAnalysisAt >= analyzeEveryMs) {
+    runtime.lastNdiAnalysisAt = now;
+    analyzeCanvas(canvas, width, height);
+  }
+}
+
+function drawObsRawFrame(bytes: Uint8ClampedArray<ArrayBuffer>, meta: RawFrameMeta) {
+  drawRuntimeRawFrame(bytes, meta, 120);
+}
+
+function drawNdiRawFrame(bytes: Uint8ClampedArray<ArrayBuffer>, meta: NdiRawFrameMeta) {
+  const width = Number(meta.width);
+  const height = Number(meta.height);
+  if (!width || !height || bytes.byteLength !== width * height * 4) return;
+  if (meta.frameId && meta.frameId === runtime.lastNdiFrameAt) return;
+  runtime.lastNdiFrameAt = meta.frameId || meta.capturedAt || String(performance.now());
+  drawRuntimeRawFrame(bytes, { ...meta, pixelFormat: "RGBA" }, ndiAnalysisIntervalMs);
+}
+
 async function pollNdiDirectFrame() {
   if (!runtime.ndiDirectActive) return;
   try {
-    const response = await fetch(apiUrl(`/api/capture/ndi/direct/frame.raw?t=${Date.now()}`), { cache: "no-store" });
+    const after = runtime.lastNdiFrameAt ? `&after=${encodeURIComponent(runtime.lastNdiFrameAt)}` : "";
+    const response = await fetch(apiUrl(`/api/capture/ndi/direct/frame.raw?t=${Date.now()}${after}`), { cache: "no-store" });
+    if (response.status === 204) return;
     if (response.status === 404) {
       useCaptureRuntimeStore.setState({ error: "Waiting for direct NDI frames from the selected phone source." });
       return;
@@ -1004,56 +1197,44 @@ async function pollNdiDirectFrame() {
     if (!width || !height) throw new Error("Direct NDI raw frame is missing dimensions.");
     const bytes = new Uint8ClampedArray(await response.arrayBuffer());
     if (bytes.byteLength !== width * height * 4) throw new Error(`Direct NDI raw frame has ${bytes.byteLength} bytes, expected ${width * height * 4}.`);
-    if (runtime.adbPreviewUrl) {
-      URL.revokeObjectURL(runtime.adbPreviewUrl);
-      runtime.adbPreviewUrl = "";
-    }
-    useCaptureRuntimeStore.setState({ adbPreviewUrl: "", error: "" });
-    const imageData = new ImageData(bytes, width, height);
-    const canvas = runtime.canvas;
-    if (canvas) {
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-      updateSourceSize(width, height);
-      canvas.getContext("2d", { willReadFrequently: true })?.putImageData(imageData, 0, 0);
-      if (runtime.previewCanvas) {
-        if (runtime.previewCanvas.width !== width || runtime.previewCanvas.height !== height) {
-          runtime.previewCanvas.width = width;
-          runtime.previewCanvas.height = height;
-        }
-        runtime.previewCanvas.getContext("2d")?.putImageData(imageData, 0, 0);
-      }
-      analyzeCanvas(canvas, width, height);
-    }
+    drawNdiRawFrame(bytes, { type: "ndi_frame", frameId, width, height, capturedAt: frameId });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Direct NDI frame failed.";
     addCaptureLog("error", message.slice(0, 180));
     useCaptureRuntimeStore.setState({ error: message });
   } finally {
     if (!runtime.ndiDirectActive) return;
-    runtime.adbTimer = window.setTimeout(() => void pollNdiDirectFrame(), 16);
+    runtime.adbTimer = window.setTimeout(() => void pollNdiDirectFrame(), 66);
   }
+}
+
+function detectCachedDraftContext(canvas: HTMLCanvasElement, now: number) {
+  const cacheKey = `${canvas.width}x${canvas.height}`;
+  if (!runtime.lastDraftContext || runtime.lastDraftContextKey !== cacheKey || now - runtime.lastDraftContextAt >= draftContextCacheMs) {
+    runtime.lastDraftContext = detectDraftVisualContext(canvas);
+    runtime.lastDraftContextAt = now;
+    runtime.lastDraftContextKey = cacheKey;
+  }
+  return runtime.lastDraftContext;
 }
 
 function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number, sourceOverride?: SourceMode) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
   void ensureActiveCalibrationRegions();
+  const now = performance.now();
   const frameRegions = calibratedRuntimeRegions();
   const metrics = emptyMetrics();
   for (const region of frameRegions) metrics[region.key] = sampleRegion(ctx, width, height, region, runtime.previous[region.key]);
   const probeMetrics = Object.fromEntries(calibratedVisionProbes().map((probe) => [probe.key, sampleRegion(ctx, width, height, probe)]));
   runtime.previous = metrics;
 
-  const now = performance.now();
-  runtime.lastFrameAt = now;
+  runtime.lastFrameAt ||= now;
   runtime.frameBuffer.push({ time: now, sourceWidth: width, sourceHeight: height, regions: metrics });
   while (runtime.frameBuffer.length > maxBufferedFrames) runtime.frameBuffer.shift();
   queueNativeWindowCrops(canvas, width, height, now, metrics, frameRegions);
   const minimapDetections = detectMinimapMarkers(ctx, width, height, now, frameRegions);
-  const draftContext = detectDraftVisualContext(canvas);
+  const draftContext = detectCachedDraftContext(canvas, now);
   const rawVision = classifyVisionFrame(metrics, probeMetrics, minimapDetections, Boolean(draftContext.selfSlot || draftContext.firstPickSide), runtime.trainedScreenModel);
   const liveVision = sourceOverride === "recording"
     ? rawVision
@@ -1061,13 +1242,15 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
   const trustedMinimapDetections = liveVision.screen === "draft" ? [] : minimapDetections;
 
   runtime.frameTimes.push(now);
-  while (runtime.frameTimes.length && now - runtime.frameTimes[0] > 1000) runtime.frameTimes.shift();
+  trimFrameTimes(runtime.frameTimes, now);
+  trimFrameTimes(runtime.renderFrameTimes, now);
 
   useCaptureRuntimeStore.setState({
     metrics,
     buffered: runtime.frameBuffer.length,
     nativeCrops: runtime.nativeCropBuffer.length,
-    fps: runtime.frameTimes.length,
+    fps: currentRenderFps(),
+    analysisFps: runtime.frameTimes.length,
     lastFrameAge: 0,
     minimapDetections: trustedMinimapDetections,
     liveVision
@@ -1430,7 +1613,8 @@ function startAgeTimer() {
   if (runtime.ageTimer != null) window.clearInterval(runtime.ageTimer);
   runtime.ageTimer = window.setInterval(() => {
     const now = performance.now();
-    while (runtime.frameTimes.length && now - runtime.frameTimes[0] > 1000) runtime.frameTimes.shift();
+    trimFrameTimes(runtime.frameTimes, now);
+    trimFrameTimes(runtime.renderFrameTimes, now);
     const age = runtime.lastFrameAt ? now - runtime.lastFrameAt : null;
     if (age != null && age > 1000) {
       runtime.frameBuffer = [];
@@ -1439,7 +1623,8 @@ function startAgeTimer() {
     }
     useCaptureRuntimeStore.setState({
       buffered: runtime.frameBuffer.length,
-      fps: runtime.frameTimes.length,
+      fps: currentRenderFps(),
+      analysisFps: runtime.frameTimes.length,
       lastFrameAge: age
     });
   }, 250);

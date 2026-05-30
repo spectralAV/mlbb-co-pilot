@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import sharp from "sharp";
 import { DETECTED_FACT_CONFIDENCE } from "../state/matchState.js";
 import { listAnnotations } from "./cvAnnotation.js";
+import { frameDimensions, sharpFromVisionFrame, type VisionFrameInput } from "./rawFrame.js";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(process.cwd(), "..");
@@ -92,7 +93,7 @@ export async function inferTimerCrop(image: Buffer, timerType: TimerClass = "ene
   }
 }
 
-export async function recognizeTimerDetections(image: Buffer, detections: Detection[], timestamp = Date.now()) {
+export async function recognizeTimerDetections(image: VisionFrameInput, detections: Detection[], timestamp = Date.now()) {
   if (timestamp - lastInferenceAt < ocrIntervalMs) return [] as TimerFact[];
   const timers = detections
     .filter((detection) => timerClasses.includes(detection.className as TimerClass) && detection.confidence >= DETECTED_FACT_CONFIDENCE)
@@ -100,13 +101,11 @@ export async function recognizeTimerDetections(image: Buffer, detections: Detect
   if (!timers.length) return [] as TimerFact[];
   lastInferenceAt = timestamp;
   const facts: TimerFact[] = [];
-  const metadata = await sharp(image).metadata();
-  const width = metadata.width ?? 0;
-  const height = metadata.height ?? 0;
+  const { width, height } = await frameDimensions(image);
   if (!width || !height) return facts;
   for (const detection of timers) {
     const timerType = detection.className as TimerClass;
-    const crop = await sharp(image).extract(toCrop(detection.bbox, width, height)).png().toBuffer();
+    const crop = await sharpFromVisionFrame(image).extract(toCrop(detection.bbox, width, height)).png().toBuffer();
     const result = await inferTimerCrop(crop, timerType).catch(() => null);
     if (!result?.accepted || !result.text) continue;
     const fact = stabilizeTimerCandidate({

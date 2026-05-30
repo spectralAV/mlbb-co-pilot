@@ -7,6 +7,7 @@ import { getLatestLiveVision, ingestLiveVisionFrame, type VisionScreenState } fr
 import { ingestDraftRecognition } from "./draftRecognition.js";
 import { detectNativeDraftVisualContext } from "./nativeDraftContext.js";
 import { firstNormalizedRegion, getActiveObsRegions, type NormalizedRect } from "../services/obsCoachState.js";
+import { isRawVideoFrame, type VisionFrameInput } from "./rawFrame.js";
 import { recognizeTimerDetections, type TimerFact } from "./timerRecognition.js";
 import { recordVisionReflection } from "./visionReflection.js";
 
@@ -138,7 +139,7 @@ let workerStdout = "";
 let workerSequence = 0;
 let cachedWslHome: string | null = null;
 const workerRequests = new Map<number, WorkerRequest>();
-let pendingObsFrame: { image: Buffer; source: string; receivedAt: number } | null = null;
+let pendingObsFrame: { frame: VisionFrameInput; source: string; receivedAt: number } | null = null;
 let obsProcessing = false;
 let lastStatusCheckAt = 0;
 let cachedModelAvailable = false;
@@ -439,11 +440,11 @@ export function getNativeObsUltralyticsStatus() {
   return { ...nativeObsStatus, workerRunning: Boolean(worker && !worker.killed) };
 }
 
-export function queueNativeObsUltralyticsFrame(image: Buffer, source = "obs-scrcpy-plugin") {
+export function queueNativeObsUltralyticsFrame(frame: VisionFrameInput, source = "obs-scrcpy-plugin") {
   nativeObsStatus.queuedFrames += 1;
   nativeObsStatus.lastFrameAt = new Date().toISOString();
   if (pendingObsFrame) nativeObsStatus.droppedFrames += 1;
-  pendingObsFrame = { image: Buffer.from(image), source, receivedAt: Date.now() };
+  pendingObsFrame = { frame, source, receivedAt: Date.now() };
   if (!obsProcessing) void processNativeObsQueue();
   return getNativeObsUltralyticsStatus();
 }
@@ -511,7 +512,7 @@ async function processNativeObsQueue() {
       nativeObsStatus.active = true;
       const startedAt = Date.now();
       try {
-        const detections = stabilizeUltralyticsDetections(await requestWorkerInference(frame.image, 0.55), { streamId: `native:${frame.source}` });
+        const detections = stabilizeUltralyticsDetections(await requestWorkerInference(frame.frame, 0.55), { streamId: `native:${frame.source}` });
         nativeObsStatus.active = true;
         nativeObsStatus.processedFrames += 1;
         nativeObsStatus.lastInferenceAt = new Date().toISOString();
@@ -520,9 +521,9 @@ async function processNativeObsQueue() {
         nativeObsStatus.error = "";
         const calibratedRegions = await getActiveObsRegions();
         if (detectedYoloSurface(detections.filter((detection) => detection.confidence >= 0.55))?.screen === "draft") {
-          await publishNativeDraftContext(frame.image, frame.source, calibratedRegions);
+          await publishNativeDraftContext(frame.frame, frame.source, calibratedRegions);
         }
-        const timerFacts = await recognizeTimerDetections(frame.image, detections, Date.now());
+        const timerFacts = await recognizeTimerDetections(frame.frame, detections, Date.now());
         publishNativeObsDetections(detections, frame.source, calibratedRegions, timerFacts);
       } catch (error) {
         nativeObsStatus.error = error instanceof Error ? error.message : "Native OBS inference failed.";
@@ -540,8 +541,8 @@ async function processNativeObsQueue() {
   }
 }
 
-async function publishNativeDraftContext(image: Buffer, source: string, calibratedRegions: Record<string, unknown>) {
-  const context = detectNativeDraftVisualContext(image, calibratedRegions);
+async function publishNativeDraftContext(frame: VisionFrameInput, source: string, calibratedRegions: Record<string, unknown>) {
+  const context = detectNativeDraftVisualContext(frame, calibratedRegions);
   if (!context.selfSlot && !context.firstPickSide) return;
   await ingestDraftRecognition({
     phase: "pick",
@@ -603,7 +604,7 @@ function toMinimapPoint(center: [number, number], minimap: NormalizedRect): [num
   ];
 }
 
-async function requestWorkerInference(image: Buffer, confidence: number) {
+async function requestWorkerInference(frame: VisionFrameInput, confidence: number) {
   await reloadWorkerIfWeightsChanged();
   return new Promise<UltralyticsDetection[]>((resolve, reject) => {
     const activeWorker = ensureWorker();
@@ -618,8 +619,19 @@ async function requestWorkerInference(image: Buffer, confidence: number) {
       rejectWorkerRequest(id, new Error(`Ultralytics worker stdin write failed: ${error.message}`));
       if (worker === activeWorker) shutdownWorker("Ultralytics worker stdin failed; restarting worker.");
     };
-    activeWorker.stdin.write(`${JSON.stringify({ id, size: image.byteLength, confidence })}\n`, rejectWrite);
-    activeWorker.stdin.write(image, rejectWrite);
+    const header = isRawVideoFrame(frame)
+      ? {
+          id,
+          size: frame.buffer.byteLength,
+          confidence,
+          encoding: "raw",
+          width: frame.width,
+          height: frame.height,
+          pixelFormat: frame.pixelFormat,
+        }
+      : { id, size: frame.byteLength, confidence, encoding: "encoded" };
+    activeWorker.stdin.write(`${JSON.stringify(header)}\n`, rejectWrite);
+    activeWorker.stdin.write(isRawVideoFrame(frame) ? frame.buffer : frame, rejectWrite);
   });
 }
 
