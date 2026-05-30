@@ -57,7 +57,7 @@
     "appId": "com.spectralav.mlbb-copilot",
     "productName": "MLBB Co-Pilot",
     "asar": true,
-    "icon": "build/icon.ico",
+    "icon": "build/mlbb-copilot-icon.ico",
     "directories": {
       "output": "dist-electron"
     },
