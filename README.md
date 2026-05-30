@@ -1,60 +1,75 @@
-# MLBB Co-Pilot v0.4.0
+<p align="center">
+  <img src="assets/mlbb-copilot-icon.png" width="128" alt="MLBB Co-Pilot app icon">
+</p>
 
-Semantic tactical intelligence system for Mobile Legends: Bang Bang.
+<h1 align="center">MLBB Co-Pilot</h1>
 
-It combines a local web app, Electron desktop shell, backend tactical engines, and computer-vision tooling to help with draft decisions, build choices, live match awareness, OBS overlays, and post-game/gameplay analysis.
+<p align="center">
+  <strong>Local tactical intelligence for Mobile Legends: Bang Bang draft, builds, live coaching, capture diagnostics, and CV-assisted match awareness.</strong>
+</p>
 
-At a high level, it includes:
+<p align="center">
+  <a href="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/publish-container.yml"><img alt="Container package" src="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/publish-container.yml/badge.svg"></a>
+  <a href="https://github.com/spectralAV/mlbb-co-pilot/releases"><img alt="Release" src="https://img.shields.io/github/v/release/spectralAV/mlbb-co-pilot?include_prereleases&label=release"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/spectralAV/mlbb-co-pilot"></a>
+  <img alt="Node.js" src="https://img.shields.io/badge/node-22%20LTS-339933?logo=node.js&logoColor=white">
+  <img alt="Electron" src="https://img.shields.io/badge/electron-desktop-47848F?logo=electron&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/typescript-app-3178C6?logo=typescript&logoColor=white">
+</p>
 
-*Draft intelligence: recommends picks, bans, counters, synergies, and role-aware hero choices.
+<p align="center">
+  <a href="#quickstart">Quickstart</a> |
+  <a href="#capabilities">Capabilities</a> |
+  <a href="#computer-vision">Computer Vision</a> |
+  <a href="#documentation">Docs</a> |
+  <a href="#roadmap">Roadmap</a> |
+  <a href="#community-and-support">Support</a>
+</p>
 
-*Build and item guidance: suggests builds and counter-items based on enemy heroes and match context.
+MLBB Co-Pilot is a Windows-first public alpha that combines a React tactical workspace, Fastify backend, Electron desktop shell, computer-vision tooling, map/runtime data, and OBS-ready overlays. It is designed to help players and creators reason about draft picks, counter picks, item builds, objective timing, lane pressure, gank risk, and live match context from local data.
 
-*Live capture/CV pipeline: supports ADB, scrcpy, OBS bridge, screen classification, minimap markers, scoreboard/equipment detection, OCR hooks, and YOLO/Ultralytics model support.
+The project is moving toward `1.0.0`. Current release: `v0.4.0`.
 
-*Tactical map/runtime tools: map zones, minimap projection, objective context, lane pressure, gank risk, and live reasoning.
+## Status
 
-*Stream/OBS tools: overlay pages and stream output panels for live coaching.
+| Area | Current state |
+| --- | --- |
+| Primary platform | Windows development and desktop packaging path |
+| Desktop app | Electron shell with Windows NSIS target; macOS and Linux targets are configured but not yet platform-QA'd |
+| Web app | Local React/Vite frontend and Fastify API |
+| Container | GHCR package for the web runtime |
+| Capture | ADB, scrcpy, OBS bridge, and first-run diagnostics in active development |
+| CV | Ultralytics YOLO pipeline, ONNX Runtime DirectML path, WSL ROCm training path, OCR hooks, and dataset tooling |
+| Release phase | Public alpha on the path to `1.0.0` |
 
-*Desktop packaging: Electron-based Windows package and GHCR container package.
+## Quickstart
 
-*Data/runtime sync: local compiled runtime data, MLBB hero/item/emblem/talent metadata, and safe module update handling.
-
-## Install
-
-For a step-by-step setup guide, see [Installing MLBB Co-Pilot](docs/installing-mlbb-copilot.md).
+Clone and install all workspaces:
 
 ```powershell
-cd "C:\Users\rokas\Documents\MLBB CoPilot"
+git clone https://github.com/spectralAV/mlbb-co-pilot.git
+cd mlbb-co-pilot
 npm run install:all
 ```
 
-## Start
+Start the local web app:
 
 ```powershell
 npm run dev
 ```
 
+Open:
+
+```text
 Frontend: http://localhost:5173
+Backend:  http://localhost:8787/api/health
+```
 
-Backend health: http://localhost:8787/api/health
-
-## Desktop App
-
-Electron desktop mode is wired for a Windows-first local app shell and has packaging targets declared for Windows, macOS, and Linux.
-
-The path to `1.0.0` is tracked in [Roadmap To 1.0.0](docs/roadmap-1.0.md).
-
-Run the desktop app against the dev servers:
+Run the desktop app in development mode:
 
 ```powershell
 npm run desktop:dev
-```
-
-Run the built desktop shell:
-
-```powershell
-npm run desktop
 ```
 
 Create an unpacked desktop build for local QA:
@@ -63,17 +78,18 @@ Create an unpacked desktop build for local QA:
 npm run desktop:pack
 ```
 
-Create a platform installer/package:
+For the full installer guide, see [Installing MLBB Co-Pilot](docs/installing-mlbb-copilot.md).
 
-```powershell
-npm run desktop:dist
-```
+## Install Options
 
-The Electron shell starts the compiled Fastify backend as a managed local process, waits for `/api/health`, and loads the built frontend from the backend origin. Browser dev mode remains available through `npm run dev`.
+| Path | Command | Notes |
+| --- | --- | --- |
+| Source development | `npm run install:all` then `npm run dev` | Best for contributors and local testing |
+| Electron desktop | `npm run desktop:dev`, `npm run desktop:pack`, or `npm run desktop:dist` | Windows is the primary supported package path today |
+| Container runtime | `docker run --rm -p 8787:8787 ghcr.io/spectralav/mlbb-co-pilot:latest` | Serves the built web runtime through the backend |
+| Friendly local URLs | `npm run local-dns:install` then `npm run dev:local` | Requires elevated PowerShell for hosts-file setup |
 
-## Container Package
-
-The web runtime can also be published as a GitHub Container Registry package:
+Container tags:
 
 ```text
 ghcr.io/spectralav/mlbb-co-pilot:latest
@@ -81,301 +97,118 @@ ghcr.io/spectralav/mlbb-co-pilot:0.4.0
 ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.4.0
 ```
 
-Run it locally:
+## Capabilities
 
-```powershell
-docker run --rm -p 8787:8787 ghcr.io/spectralav/mlbb-co-pilot:latest
-```
+| Capability | What it does |
+| --- | --- |
+| Draft intelligence | Recommends picks, bans, counters, synergies, and role-aware hero choices |
+| Build guidance | Suggests builds and counter-items from enemy heroes and match context |
+| Live coaching | Tracks manual or captured match state for objective timing, lane pressure, and gank risk |
+| Tactical map | Uses map zones, minimap projection, objective context, and live reasoning rules |
+| Stream overlays | Provides OBS-friendly pages and stream output surfaces |
+| First-run setup | Checks backend health, runtime data, capture tools, CV readiness, and optional integrations |
+| Runtime sync | Compiles local MLBB hero, item, emblem, talent, and spell metadata |
+| Module updates | Accepts local CV module ZIPs with manifest validation and backup safety |
 
-Then open:
+## Computer Vision
 
-```text
-http://localhost:8787
-```
+MLBB Co-Pilot includes an experimental CV toolchain for local recognition workflows:
 
-Optional portless local DNS mode after setup:
+- Ultralytics YOLO detection pipeline for MLBB screen regions.
+- ONNX Runtime DirectML inference path for Windows AMD/DirectX 12 GPUs.
+- CUDA path when a CUDA-enabled PyTorch runtime is installed.
+- CPU fallback for conservative local training and validation.
+- Optional WSL ROCm path for AMD training experiments.
+- OCR sidecar hooks for selected screen text regions.
+- Roboflow draft and minimap experiments kept separate from production detectors.
 
-```powershell
-npm run dev:local
-```
-
-Frontend: http://mlbb.local
-
-Backend health: http://api.mlbb.local/api/health
-
-OBS output: http://obs.mlbb.local/mlbb-live-output
-
-## Local DNS
-
-MLBB Co-Pilot can run behind friendly local hostnames for browser and OBS sources:
-
-```text
-http://mlbb.local
-http://api.mlbb.local/api/health
-http://obs.mlbb.local/mlbb-live-output
-```
-
-Install the Windows hosts-file entries from an elevated PowerShell:
-
-```powershell
-npm run local-dns:install
-```
-
-Check or remove them:
-
-```powershell
-npm run local-dns:status
-npm run local-dns:remove
-```
-
-Run the portless proxy together with the dev servers from an elevated PowerShell:
-
-```powershell
-npm run dev:local
-```
-
-The proxy listens on `127.0.0.1:80` and forwards frontend traffic to `127.0.0.1:5173`, API and app WebSocket traffic to `127.0.0.1:8787`, and Vite HMR WebSocket traffic to the frontend dev server. If port `80` is already taken, set `LOCAL_PROXY_PORT`, but URLs without a port require the proxy to own port `80`.
-
-Override the defaults with a comma-separated host list when needed:
-
-```powershell
-$env:LOCAL_DNS_HOSTNAMES="mlbb.local,api.mlbb.local,obs.mlbb.local"
-npm run dev:local
-```
-
-Backend and frontend dev servers bind to `127.0.0.1` by default. For a deliberate LAN test session, set `HOST` and `FRONTEND_HOST` before starting the app.
-
-## Build
-
-```powershell
-npm run build
-```
-
-Backend-only checks:
-
-```powershell
-cd backend
-npm run typecheck
-npm run build
-```
-
-Frontend-only build:
-
-```powershell
-cd frontend
-npm run build
-```
-
-## CV Runtime
-
-Ultralytics YOLO runs through the managed Python environment in `data/cv/.venv`.
+Check local CV readiness:
 
 ```powershell
 npm run cv:status
 ```
 
-Bootstrap or refresh the local YOLO dataset:
+Prepare or refresh the local YOLO dataset:
 
 ```powershell
 npm run cv:bootstrap
 ```
 
-This rebuilds `data/cv/images` and `data/cv/labels` from reviewed screen frames, local CV Lab annotations, and the already-synced `data/adb-assets` HUD sprites. It does not bypass protection or decompile game code; third-party game assets remain governed by their own terms.
-
-Extract all frames from recorded gameplay footage for CV review and training intake:
+Train with the conservative Windows CPU path:
 
 ```powershell
-npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01"
+npm run cv:train
 ```
 
-By default this writes frames under `data/cv/footage/<name>/frames` with a manifest and CSV index, without adding them to the active YOLO dataset. Use `-DatasetSplit train` only when you deliberately want the extracted frames added as empty-label background negatives. Running `cv:prepare` rebuilds the active dataset, so footage exports should stay in `data/cv/footage` until frames are reviewed or intentionally copied into training.
-
-The backend selects `ULTRALYTICS_DEVICE=auto` by default. Auto uses ONNX Runtime DirectML for Windows AMD/DirectX 12 GPUs when available, CUDA when the managed PyTorch runtime exposes an NVIDIA CUDA GPU, then falls back to CPU. This is the preferred live inference path on AMD Windows because the DirectML worker has lower warm-frame latency than the WSL ROCm/PyTorch path. You can override it before starting:
-
-```powershell
-$env:ULTRALYTICS_DEVICE="directml"
-npm run dev
-```
-
-For AMD Windows inference, the worker exports `data/cv/models/mlbb-detect.pt` to `data/cv/models/mlbb-detect.onnx` and runs it with `onnxruntime-directml`. Training uses the Ultralytics PyTorch path. For NVIDIA GPU training/inference, install a CUDA-enabled PyTorch build into `data/cv/.venv` using the selector at https://pytorch.org/get-started/locally/.
-
-The backend keeps a bounded vision reflection log at `data/cache/vision-reflections.json`. It records noteworthy live vision frames, low-confidence/unknown frames, YOLO publish rejections, and native inference failures without changing match-state decisions. Inspect it with:
-
-```text
-GET /api/vision/reflections
-GET /api/vision/reflections?limit=25
-```
-
-Optional PaddleOCR support is available as a sidecar text reader for screen regions such as the top HUD, kill feed, scoreboard modal, draft header, and result banner. It is separate from YOLO: detection still comes from Ultralytics, while PaddleOCR only reads text from selected regions.
-
-```text
-GET  /api/vision/models/screen-ocr/status
-POST /api/vision/models/screen-ocr/install
-POST /api/vision/models/screen-ocr/infer
-```
-
-Screen OCR runs manually from CV Lab by default. To allow future live-capture OCR polling, start the backend with:
-
-```powershell
-$env:MLBB_ENABLE_SCREEN_OCR="1"
-npm run dev
-```
-
-### WSL ROCm Runtime
-
-For AMD ROCm training or Torch inference, use Ubuntu 24.04 in WSL. The WSL path uses AMD's ROCDXG bridge through `/dev/dxg`, not the Windows DirectML worker.
+Run the explicit WSL ROCm bootstrap and status checks:
 
 ```powershell
 npm run cv:wsl:bootstrap
 npm run cv:wsl:status
 ```
 
-The bootstrap script creates `$HOME/.mlbb-copilot/cv-rocm` in Ubuntu, installs ROCm/PyTorch dependencies, builds a user-local `librocdxg` when needed, and validates that PyTorch can see the AMD GPU through its CUDA-compatible API. WSL ROCm training is available, but it is experimental on Radeon 780M under WSL and can stress the Windows display driver.
+## Architecture
 
-Keep the backend on the default Windows runtime for live DirectML inference. Start the backend against WSL only when you specifically want PyTorch ROCm inference instead of DirectML:
+| Path | Purpose |
+| --- | --- |
+| `backend/src/server.ts` | Fastify API startup and route registration |
+| `backend/src/routes` | Setup, sync, runtime, semantic, overlay, update, and integration routes |
+| `backend/src/engines` | Draft, build, counter, synergy, ban, scoring, and live reasoning engines |
+| `backend/src/vision` | Recognition, CV reflection, screen state, minimap, OCR, and model orchestration |
+| `backend/tools` | Dataset prep, Ultralytics workers, Roboflow importers, OCR helpers, and video extraction |
+| `frontend/src/pages` | Tactical app screens, setup flow, settings, CV Lab, map trainer, overlays, and dashboards |
+| `frontend/src/components/game` | Live match cockpit, map controls, coaching feed, timers, and risk panels |
+| `data` | Local runtime data, map data, OBS config, recognition samples, and CV datasets |
+| `electron` | Desktop shell, preload bridge, backend readiness wait, and app launch logic |
+| `map-runtime` | Compiled tactical map runtime files |
 
-```powershell
-$env:ULTRALYTICS_RUNTIME="wsl"
-$env:ULTRALYTICS_WSL_DISTRO="Ubuntu-24.04"
-npm run dev
-```
+## Developer Commands
 
-The default training command uses the conservative Windows CPU path:
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start backend and frontend dev servers |
+| `npm run desktop:dev` | Start backend, frontend, and Electron together |
+| `npm run build` | Build backend and frontend |
+| `npm test` | Run the TypeScript test suite |
+| `npm run desktop:pack` | Build an unpacked desktop app for QA |
+| `npm run desktop:dist` | Build platform package targets |
+| `npm run cv:status` | Inspect local CV runtime status |
+| `npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01"` | Extract frames from gameplay footage for review |
 
-```powershell
-npm run cv:train
-```
+## Documentation
 
-The ROCm training command must be launched explicitly. It uses reduced WSL pressure by default (`imgsz=640`, `batch=2`, `workers=0`, `amp=false`):
+| Document | Purpose |
+| --- | --- |
+| [Install Guide](docs/installing-mlbb-copilot.md) | Clean setup flow for source, desktop, CV, and local URLs |
+| [Roadmap To 1.0.0](docs/roadmap-1.0.md) | Release path from `0.5.x` through stable `1.0.0` |
+| [Known Limitations](docs/known-limitations.md) | Current alpha limitations and supported-platform notes |
+| [Support Guide](docs/support.md) | What to include when opening issues |
+| [Release Checklist](docs/release-checklist.md) | Pre-release and release validation steps |
+| [Coach Reasoning Model](docs/coach-reasoning-model.md) | Notes on tactical reasoning and coaching flow |
+| [CV Dataset Notes](data/cv/README.md) | Local dataset and CV runtime guidance |
 
-```powershell
-npm run cv:train:rocm
-```
+## Roadmap
 
-Docker Desktop on Windows does not expose AMD ROCm through the normal `/dev/kfd` and `/dev/dri` Linux path. If a ROCm container is used from WSL, it must use the ROCDXG `/dev/dxg` flags and mount `libdxcore.so` plus `librocdxg.so`.
+| Milestone | Goal |
+| --- | --- |
+| `0.5.x` | Stable installer, app icon and signing polish, first-run setup flow |
+| `0.6.x` | Reliable phone capture path with ADB, scrcpy, and OBS diagnostics |
+| `0.7.x` | Stronger CV dataset/model confidence and calibration UX |
+| `0.8.x` | Polished draft, build, and live coaching workflows |
+| `0.9.x` | Public beta, docs, bug fixes, and clean-machine install testing |
+| `1.0.0` | Stable public release with clear supported platforms and known limitations |
 
-### Roboflow Draft Experiment
+## Community And Support
 
-The Roboflow Universe `mobile-legends-draft-recognition` dataset is supported as a separate experiment so its hero-class detector does not overwrite the production UI-region detector. Export the project in YOLO format, then import the zip or extracted folder:
-
-```powershell
-npm run cv:draft:roboflow:import -- --source "C:\path\to\mobile-legends-draft-recognition.yolov8.zip" --clean --force
-npm run cv:draft:roboflow:status
-npm run cv:draft:roboflow:train
-```
-
-After training, test a draft screenshot:
-
-```powershell
-npm run cv:draft:roboflow:infer -- --image "C:\path\to\draft-screen.jpg" --confidence 0.45
-```
-
-The Roboflow Universe `mlbbminimap-2` project is wired as a separate minimap experiment:
-
-```powershell
-npm run cv:minimap:roboflow:import -- --source "C:\path\to\mlbbminimap-2.yolov8.zip" --clean --force
-npm run cv:minimap:roboflow:status
-npm run cv:minimap:roboflow:train
-npm run cv:minimap:roboflow:infer -- --image "C:\path\to\live-hud.jpg" --confidence 0.45
-```
+- Use [GitHub Issues](https://github.com/spectralAV/mlbb-co-pilot/issues/new/choose) for bugs, feature requests, documentation fixes, and capture/CV diagnostics.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
+- Keep logs, screenshots, gameplay footage, auth headers, and third-party assets private unless you are sure they can be shared.
 
 ## Legal
 
 Copyright 2026 SpectralAV.
 
-This is an independent project and is not affiliated with, endorsed by, sponsored by, or approved by Moonton, ByteDance, or the Mobile Legends: Bang Bang rights holders.
+MLBB Co-Pilot is an independent project and is not affiliated with, endorsed by, sponsored by, or approved by Moonton, ByteDance, or the Mobile Legends: Bang Bang rights holders.
 
-Original project code is licensed under the Apache License, Version 2.0. Third-party packages, models, trademarks, game assets, screenshots, artwork, and extracted/cached data remain governed by their own license terms. See `LICENSE` and `NOTICE`.
-
-## Data Sync
-
-Open Settings > Data Sync, paste a fresh GMS authorization header value, and run the sync. The token is sent only for that request.
-
-Do not hardcode GMS authorization tokens, commit them, print them in logs, or paste them into issue reports.
-
-Useful runtime endpoints:
-
-```text
-POST /api/sync/official
-GET  /api/runtime
-GET  /api/runtime/heroes
-GET  /api/runtime/status
-```
-
-Rone API integration is available as an optional enrichment layer. Public endpoints are exposed through a whitelist under `/api/rone/public/*`, while account endpoints use the Rone verification-code flow and require an in-session bearer token.
-
-```text
-GET  /api/rone/status
-GET  /api/rone/public/heroes?size=12&index=1
-GET  /api/rone/public/academy/spells
-POST /api/rone/user/auth/send-vc
-POST /api/rone/user/auth/login
-GET  /api/rone/user/info
-GET  /api/rone/user/matches?sid=40&limit=10
-```
-
-## Module Updates
-
-Open Settings > Module Updates to upload trial CV module ZIPs for users to try locally. Manifests may be named `patch.json` or `patch-manifest.json`; CV modules should set `type` to `cv-module` and include a `cvModule` block.
-
-```json
-{
-  "name": "mlbb-minimap-roboflow-trial",
-  "version": "0.1.0",
-  "type": "cv-module",
-  "cvModule": {
-    "id": "roboflow-minimap-2",
-    "displayName": "Roboflow Minimap Trial",
-    "surfaces": ["minimap"],
-    "experiments": ["roboflow-minimap-2"],
-    "entrypoints": {
-      "docs": "data/cv/roboflow-minimap-2/README.md"
-    },
-    "risk": "experimental"
-  },
-  "restart": false,
-  "npmInstall": false
-}
-```
-
-Patch safety rules:
-
-- rejects path traversal
-- writes only to allowed project folders
-- creates a backup before applying files
-- does not run npm install automatically
-- does not restart the app automatically
-
-## Architecture Map
-
-- `backend/src/server.ts`: Fastify app and route registration
-- `backend/src/routes`: semantic, BuildLab, sync, runtime, updates, overlay routes
-- `backend/src/routes/obsCoachRoutes.ts`: OBS coach state, region calibration, and prepared OBS endpoints
-- `backend/src/providers/mlbb`: official GMS source clients
-- `backend/src/runtime`: official runtime compiler and store
-- `backend/src/engines`: draft, build, counter, synergy, ban, and semantic engines
-- `frontend/src/pages`: tactical app screens and Settings tabs
-- `frontend/src/pages/OverlayPreview.tsx`: 20:9 OBS browser-source overlay
-- `frontend/src/pages/Calibration.tsx`: normalized region calibration UI
-- `frontend/src/pages/GamePage.tsx`: active match cockpit for manual live coaching
-- `frontend/src/pages/GameAnalysis.tsx`: local gameplay session review timeline
-- `frontend/src/pages/GameOverlay.tsx`: compact OBS-safe game overlay
-- `frontend/src/api/client.ts`: shared frontend API client
-- `frontend/src/utils/assetResolver.ts`: hero, item, emblem, talent, and spell icon resolution
-- `data/cache`: local cache and compiled runtime data
-- `data/obs`: OBS source config and normalized screen regions
-
-## OBS Coach Prep
-
-Useful pages:
-
-```text
-http://localhost:5173/overlay
-http://localhost:5173/game
-http://localhost:5173/analysis
-http://localhost:5173/game-overlay
-http://localhost:5173/overlay-preview
-http://localhost:5173/calibration
-```
-
-OBS capture is prepared but not connected to a live image reader in this TypeScript build. Region calibration data is stored in `data/obs/screen_regions.json`.
+Original project code is licensed under the Apache License, Version 2.0. Third-party packages, models, trademarks, game assets, screenshots, artwork, extracted data, cached data, and downloaded data remain governed by their own license terms. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

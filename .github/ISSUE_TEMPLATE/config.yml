@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support guide
+    url: https://github.com/spectralAV/mlbb-co-pilot/blob/main/docs/support.md
+    about: Read what to include in a useful support issue.
+  - name: Security policy
+    url: https://github.com/spectralAV/mlbb-co-pilot/blob/main/SECURITY.md
+    about: Report vulnerabilities privately. Do not post exploit details publicly.

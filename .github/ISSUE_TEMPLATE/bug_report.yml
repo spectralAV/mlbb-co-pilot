@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a reproducible app, backend, frontend, desktop, or packaging bug.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please do not include auth headers, private screenshots, private gameplay footage, or generated model weights.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Example: v0.4.0 or a commit SHA.
+    validations:
+      required: true
+  - type: dropdown
+    id: run-mode
+    attributes:
+      label: Run mode
+      options:
+        - Source dev mode
+        - Electron desktop
+        - Container
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 24H2, Ubuntu 24.04, macOS 15, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste only non-sensitive logs.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submit checks
+      options:
+        - label: I removed secrets, auth headers, private captures, and private screenshots.
+          required: true
+        - label: I searched existing issues.
+          required: true

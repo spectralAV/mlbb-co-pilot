@@ -1,0 +1,64 @@
+name: Capture or CV diagnostic
+description: Report ADB, scrcpy, OBS, OCR, YOLO, calibration, or model-confidence problems.
+title: "[Capture/CV]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Capture and CV reports are most useful when they include environment details and non-sensitive logs. Do not upload private footage unless a maintainer explicitly asks and you have permission to share it.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: capture-source
+    attributes:
+      label: Capture source
+      options:
+        - ADB
+        - scrcpy
+        - OBS
+        - Manual screenshot
+        - Video file
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: cv-runtime
+    attributes:
+      label: CV runtime
+      options:
+        - CPU
+        - DirectML
+        - CUDA
+        - WSL ROCm
+        - OCR only
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic output
+      description: Include output from relevant commands with sensitive data removed.
+      value: |
+        npm run cv:status
+        adb devices -l
+        scrcpy --version
+      render: shell
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What is wrong?
+      description: Describe the false positive, missing detection, startup failure, calibration issue, or stale frame problem.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Device model, resolution, aspect ratio, graphics settings, UI language, emulator/device, and OBS setup if relevant.
