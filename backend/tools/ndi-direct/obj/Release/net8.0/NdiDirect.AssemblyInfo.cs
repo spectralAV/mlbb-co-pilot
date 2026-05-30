@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("NdiDirect")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+07ed535d21739cd5e482690b934f3bd43ddd3561")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2526a8b7b7947f0ebf04b085e7d032fdebad0aca")]
 [assembly: System.Reflection.AssemblyProductAttribute("NdiDirect")]
 [assembly: System.Reflection.AssemblyTitleAttribute("NdiDirect")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

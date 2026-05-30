@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -31,6 +32,7 @@ static class Program
                 {
                     "list" => ListSources(options),
                     "capture" => CaptureLoop(options),
+                    "stream" => StreamLoop(options),
                     _ => Fail($"Unknown command: {command}", 2),
                 };
             }
@@ -87,35 +89,110 @@ static class Program
         using var receiver = NdiReceiver.Connect(source);
         var frames = 0L;
         var lastWrite = DateTimeOffset.UtcNow;
+        var lastStatusWrite = DateTimeOffset.MinValue;
         var hasReceivedFrame = false;
         WriteStatus(status, new { ok = true, connected = true, source = source.name, width = 0, height = 0, frames, lastFrameAt = (string?)null });
 
         while (true)
         {
-            if (receiver.CaptureBmp(timeoutMs: 1000) is { } frame)
+            var started = Stopwatch.GetTimestamp();
+            if (receiver.CaptureRgba(timeoutMs: 1000) is { } frame)
             {
                 frames++;
                 hasReceivedFrame = true;
-                AtomicWrite(output, frame.Bmp);
+                AtomicWrite(output, frame.Rgba);
                 lastWrite = DateTimeOffset.UtcNow;
-                WriteStatus(status, new
+                if ((lastWrite - lastStatusWrite).TotalMilliseconds >= 250)
                 {
-                    ok = true,
-                    connected = true,
-                    source = source.name,
-                    frame.Width,
-                    frame.Height,
-                    frame.Aspect,
-                    frames,
-                    lastFrameAt = lastWrite.ToString("O"),
-                });
+                    lastStatusWrite = lastWrite;
+                    WriteStatus(status, new
+                    {
+                        ok = true,
+                        connected = true,
+                        source = source.name,
+                        frame.Width,
+                        frame.Height,
+                        frame.Aspect,
+                        frame.FourCc,
+                        frame.FourCcText,
+                        frame.FrameRateN,
+                        frame.FrameRateD,
+                        format = "rgba",
+                        stride = frame.Width * 4,
+                        byteLength = frame.Rgba.Length,
+                        frames,
+                        lastFrameAt = lastWrite.ToString("O"),
+                    });
+                }
             }
             else if (!hasReceivedFrame && (DateTimeOffset.UtcNow - lastWrite).TotalSeconds > 3)
             {
                 WriteStatus(status, new { ok = true, connected = false, source = source.name, width = 0, height = 0, frames, lastFrameAt = lastWrite.ToString("O"), error = "Waiting for NDI video frames." });
             }
-            Thread.Sleep(frameDelayMs);
+            SleepRemainingFrameBudget(started, frameDelayMs);
         }
+    }
+
+    static int StreamLoop(Args options)
+    {
+        var sourceName = options.Get("sourceName");
+        if (string.IsNullOrWhiteSpace(sourceName)) return Fail("Missing --sourceName.", 2);
+
+        var timeoutMs = options.GetInt("timeoutMs", 3000);
+        var maxFps = Math.Clamp(options.GetInt("maxFps", 30), 1, 120);
+        var frameDelayMs = Math.Max(1, 1000 / maxFps);
+        var sources = Ndi.FindSources(timeoutMs);
+        var sourceUrl = options.Get("sourceUrl");
+        var source = sources.FirstOrDefault(item =>
+            string.Equals(item.name, sourceName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item.id, sourceName, StringComparison.OrdinalIgnoreCase));
+        if (source is null)
+        {
+            source = new NdiSource(sourceName, sourceName, string.IsNullOrWhiteSpace(sourceUrl) ? null : sourceUrl);
+            Console.Error.WriteLine(JsonSerializer.Serialize(new { ok = true, connected = false, source = source.name, warning = "Source was not discovered; trying direct NDI receiver connect by name." }));
+        }
+
+        using var receiver = NdiReceiver.Connect(source);
+        using var output = Console.OpenStandardOutput();
+        var frames = 0L;
+        Console.Error.WriteLine(JsonSerializer.Serialize(new { ok = true, connected = true, source = source.name, stream = "rgba" }));
+
+        while (true)
+        {
+            var started = Stopwatch.GetTimestamp();
+            if (receiver.CaptureRgba(timeoutMs: 1000) is { } frame)
+            {
+                frames++;
+                WriteStreamFrame(output, frame, frames);
+            }
+            SleepRemainingFrameBudget(started, frameDelayMs);
+        }
+    }
+
+    static void SleepRemainingFrameBudget(long startedTimestamp, int frameDelayMs)
+    {
+        var elapsedMs = (Stopwatch.GetTimestamp() - startedTimestamp) * 1000.0 / Stopwatch.Frequency;
+        var remainingMs = frameDelayMs - elapsedMs;
+        if (remainingMs > 1) Thread.Sleep((int)remainingMs);
+    }
+
+    static void WriteStreamFrame(Stream output, NdiFrame frame, long frames)
+    {
+        Span<byte> header = stackalloc byte[32];
+        header[0] = (byte)'N';
+        header[1] = (byte)'D';
+        header[2] = (byte)'I';
+        header[3] = (byte)'R';
+        BinaryPrimitives.WriteInt32LittleEndian(header[4..], frame.Width);
+        BinaryPrimitives.WriteInt32LittleEndian(header[8..], frame.Height);
+        BinaryPrimitives.WriteInt32LittleEndian(header[12..], frame.Rgba.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(header[16..], frame.FrameRateN);
+        BinaryPrimitives.WriteInt32LittleEndian(header[20..], frame.FrameRateD);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[24..], frame.FourCc);
+        BinaryPrimitives.WriteInt32LittleEndian(header[28..], unchecked((int)(frames & 0x7fffffff)));
+        output.Write(header);
+        output.Write(frame.Rgba);
+        output.Flush();
     }
 
     static void AtomicWrite(string path, byte[] bytes)
@@ -180,29 +257,42 @@ sealed class NdiReceiver : IDisposable
         var namePtr = Marshal.StringToHGlobalAnsi(source.name);
         var urlPtr = source.url is null ? IntPtr.Zero : Marshal.StringToHGlobalAnsi(source.url);
         var sourceStruct = new Ndi.Source { p_ndi_name = namePtr, p_url_address = urlPtr };
+        var receiverNamePtr = Marshal.StringToHGlobalAnsi("MLBB Co-Pilot Direct NDI");
+        var create = new Ndi.RecvCreate
+        {
+            source_to_connect_to = new Ndi.Source(),
+            color_format = Ndi.RecvColorFormat.RGBX_RGBA,
+            bandwidth = Ndi.RecvBandwidth.Highest,
+            allow_video_fields = false,
+            p_ndi_recv_name = receiverNamePtr,
+        };
+        var createPtr = Marshal.AllocHGlobal(Marshal.SizeOf<Ndi.RecvCreate>());
         try
         {
-            var receiver = Ndi.RecvCreateV3(IntPtr.Zero);
+            Marshal.StructureToPtr(create, createPtr, false);
+            var receiver = Ndi.RecvCreateV3(createPtr);
             if (receiver == IntPtr.Zero) throw new InvalidOperationException("Could not create NDI receiver.");
             Ndi.RecvConnect(receiver, ref sourceStruct);
             return new NdiReceiver(receiver);
         }
         finally
         {
+            Marshal.FreeHGlobal(createPtr);
             Marshal.FreeHGlobal(namePtr);
             if (urlPtr != IntPtr.Zero) Marshal.FreeHGlobal(urlPtr);
+            Marshal.FreeHGlobal(receiverNamePtr);
         }
     }
 
-    public NdiFrame? CaptureBmp(uint timeoutMs)
+    public NdiFrame? CaptureRgba(uint timeoutMs)
     {
         var video = new Ndi.VideoFrame();
         var type = Ndi.RecvCaptureV3(receiver, ref video, IntPtr.Zero, IntPtr.Zero, timeoutMs);
         if (type != Ndi.FrameType.Video || video.p_data == IntPtr.Zero || video.xres <= 0 || video.yres <= 0) return null;
         try
         {
-            var bmp = Bmp.FromNdiFrame(video.p_data, video.xres, video.yres, video.line_stride_in_bytes, video.FourCC);
-            return new NdiFrame(bmp, video.xres, video.yres, video.picture_aspect_ratio);
+            var rgba = Rgba.FromNdiFrame(video.p_data, video.xres, video.yres, video.line_stride_in_bytes, video.FourCC);
+            return new NdiFrame(rgba, video.xres, video.yres, video.picture_aspect_ratio, video.FourCC, FourCc.ToText(video.FourCC), video.frame_rate_N, video.frame_rate_D);
         }
         finally
         {
@@ -218,7 +308,117 @@ sealed class NdiReceiver : IDisposable
     }
 }
 
-sealed record NdiFrame(byte[] Bmp, int Width, int Height, float Aspect);
+sealed record NdiFrame(byte[] Rgba, int Width, int Height, float Aspect, uint FourCc, string FourCcText, int FrameRateN, int FrameRateD);
+
+static class FourCc
+{
+    public static string ToText(uint fourCc)
+    {
+        var bytes = BitConverter.GetBytes(fourCc);
+        return Encoding.ASCII.GetString(bytes).TrimEnd('\0', ' ');
+    }
+}
+
+static class Rgba
+{
+    public static byte[] FromNdiFrame(IntPtr data, int width, int height, int stride, uint fourCc)
+    {
+        var rowBytes = checked(width * 4);
+        var bytes = new byte[checked(rowBytes * height)];
+        var fourCcText = FourCc.ToText(fourCc);
+
+        if (string.Equals(fourCcText, "RGBA", StringComparison.Ordinal))
+        {
+            CopyRows(data, width, height, stride, bytes, setAlpha: false);
+        }
+        else if (string.Equals(fourCcText, "RGBX", StringComparison.Ordinal))
+        {
+            CopyRows(data, width, height, stride, bytes, setAlpha: true);
+        }
+        else if (string.Equals(fourCcText, "BGRA", StringComparison.Ordinal) || string.Equals(fourCcText, "BGRX", StringComparison.Ordinal))
+        {
+            WriteBgraRows(data, width, height, stride, bytes);
+        }
+        else if (string.Equals(fourCcText, "UYVY", StringComparison.Ordinal) || Math.Abs(stride) < rowBytes)
+        {
+            WriteUyvyRows(data, width, height, stride, bytes);
+        }
+        else
+        {
+            CopyRows(data, width, height, stride, bytes, setAlpha: true);
+        }
+
+        return bytes;
+    }
+
+    static void CopyRows(IntPtr data, int width, int height, int stride, byte[] output, bool setAlpha)
+    {
+        var rowBytes = width * 4;
+        for (var y = 0; y < height; y++)
+        {
+            Marshal.Copy(IntPtr.Add(data, y * stride), output, y * rowBytes, rowBytes);
+            if (!setAlpha) continue;
+            var rowStart = y * rowBytes;
+            for (var x = 0; x < width; x++) output[rowStart + x * 4 + 3] = 255;
+        }
+    }
+
+    static void WriteBgraRows(IntPtr data, int width, int height, int stride, byte[] output)
+    {
+        var inputRowBytes = Math.Abs(stride);
+        var rowBytes = width * 4;
+        var row = new byte[inputRowBytes];
+        for (var y = 0; y < height; y++)
+        {
+            Marshal.Copy(IntPtr.Add(data, y * stride), row, 0, inputRowBytes);
+            var outIndex = y * rowBytes;
+            for (var x = 0; x < width; x++)
+            {
+                var sourceIndex = x * 4;
+                var targetIndex = outIndex + sourceIndex;
+                output[targetIndex] = row[sourceIndex + 2];
+                output[targetIndex + 1] = row[sourceIndex + 1];
+                output[targetIndex + 2] = row[sourceIndex];
+                output[targetIndex + 3] = 255;
+            }
+        }
+    }
+
+    static void WriteUyvyRows(IntPtr data, int width, int height, int stride, byte[] output)
+    {
+        var inputRowBytes = Math.Abs(stride);
+        var row = new byte[inputRowBytes];
+        for (var y = 0; y < height; y++)
+        {
+            Marshal.Copy(IntPtr.Add(data, y * stride), row, 0, inputRowBytes);
+            var outIndex = y * width * 4;
+            for (var x = 0; x < width; x += 2)
+            {
+                var sourceIndex = x * 2;
+                if (sourceIndex + 3 >= row.Length) break;
+                var u = row[sourceIndex + 0];
+                var y0 = row[sourceIndex + 1];
+                var v = row[sourceIndex + 2];
+                var y1 = row[sourceIndex + 3];
+                WriteRgb(output, outIndex + x * 4, y0, u, v);
+                if (x + 1 < width) WriteRgb(output, outIndex + (x + 1) * 4, y1, u, v);
+            }
+        }
+    }
+
+    static void WriteRgb(byte[] output, int index, byte y, byte u, byte v)
+    {
+        var c = Math.Max(0, y - 16);
+        var d = u - 128;
+        var e = v - 128;
+        output[index + 0] = Clamp((298 * c + 409 * e + 128) >> 8);
+        output[index + 1] = Clamp((298 * c - 100 * d - 208 * e + 128) >> 8);
+        output[index + 2] = Clamp((298 * c + 516 * d + 128) >> 8);
+        output[index + 3] = 255;
+    }
+
+    static byte Clamp(int value) => (byte)Math.Min(255, Math.Max(0, value));
+}
 
 static class Bmp
 {
@@ -355,7 +555,7 @@ static class Ndi
     [StructLayout(LayoutKind.Sequential)]
     public struct RecvCreate
     {
-        public IntPtr source_to_connect_to;
+        public Source source_to_connect_to;
         public RecvColorFormat color_format;
         public RecvBandwidth bandwidth;
         [MarshalAs(UnmanagedType.I1)]

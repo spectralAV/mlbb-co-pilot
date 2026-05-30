@@ -4,7 +4,7 @@ import { getLatestNativeObsFrame, getNativeObsBridgeStatus, ingestNativeObsFrame
 import { attachScrcpyH264Client, getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
 import { getNativeObsUltralyticsStatus, queueNativeObsUltralyticsFrame } from "../vision/ultralyticsVision.js";
 import { getNdiToolsStatus, launchNdiTool } from "../services/ndiTools.js";
-import { getLatestNdiDirectFrame, getNdiDirectStatus, listNdiDirectSources, startNdiDirectCapture, stopNdiDirectCapture } from "../services/ndiDirectSource.js";
+import { getLatestNdiDirectFrame, getLatestNdiDirectRawFrame, getNdiDirectStatus, listNdiDirectSources, startNdiDirectCapture, stopNdiDirectCapture } from "../services/ndiDirectSource.js";
 import {
   addObsRegion,
   clearObsRegions,
@@ -57,6 +57,19 @@ export async function obsCoachRoutes(app: FastifyInstance) {
     return result;
   });
   app.post("/api/capture/ndi/direct/stop", async () => ({ ok: true, status: stopNdiDirectCapture() }));
+  app.get("/api/capture/ndi/direct/frame.raw", async (_req, reply) => {
+    const frame = getLatestNdiDirectRawFrame();
+    if (!frame) return reply.code(404).send({ ok: false, error: "No direct NDI frame has arrived yet." });
+    return reply
+      .header("cache-control", "no-store")
+      .header("x-captured-at", frame.capturedAt)
+      .header("x-frame-id", frame.frameId)
+      .header("x-source-width", String(frame.width))
+      .header("x-source-height", String(frame.height))
+      .header("x-fourcc", frame.fourCc)
+      .type("application/octet-stream")
+      .send(frame.buffer);
+  });
   app.get("/api/capture/ndi/direct/frame", async (_req, reply) => {
     const frame = await getLatestNdiDirectFrame();
     if (!frame) return reply.code(404).send({ ok: false, error: "No direct NDI frame has arrived yet." });

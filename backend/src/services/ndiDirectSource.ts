@@ -12,12 +12,17 @@ const helperDll = path.join(ROOT, "backend", "tools", "ndi-direct", "bin", "Rele
 const captureDir = path.join(ROOT, "data", "capture");
 const framePath = path.join(captureDir, "ndi-direct-frame.bmp");
 const statusPath = path.join(captureDir, "ndi-direct-status.json");
+const streamMagic = Buffer.from("NDIR");
 
 let ndiProcess: ChildProcessWithoutNullStreams | null = null;
 let ndiSource = "";
 let lastError = "";
 let intentionalStop = false;
 let cachedPng: { frameId: string; buffer: Buffer; width: number; height: number; capturedAt: string } | null = null;
+let latestRawFrame: { frameId: string; buffer: Buffer; width: number; height: number; capturedAt: string; fourCc: string; frameRateN: number; frameRateD: number } | null = null;
+let streamRemainder = Buffer.alloc(0);
+let receivedFrames = 0;
+let receivedFrameTimes: number[] = [];
 
 async function ensureHelper() {
   if (fs.existsSync(helperDll)) return helperDll;
@@ -46,6 +51,73 @@ function bmpDimensions(buffer: Buffer) {
   };
 }
 
+function fourCcText(value: number) {
+  const buffer = Buffer.allocUnsafe(4);
+  buffer.writeUInt32LE(value >>> 0, 0);
+  return buffer.toString("ascii").replace(/\0/g, "").trim();
+}
+
+function rememberRawFrame(width: number, height: number, payload: Buffer, frameRateN: number, frameRateD: number, fourCc: number) {
+  receivedFrames += 1;
+  const now = Date.now();
+  receivedFrameTimes.push(now);
+  while (receivedFrameTimes.length && now - receivedFrameTimes[0] > 1000) receivedFrameTimes.shift();
+  latestRawFrame = {
+    frameId: String(receivedFrames),
+    buffer: payload,
+    width,
+    height,
+    capturedAt: new Date(now).toISOString(),
+    fourCc: fourCcText(fourCc),
+    frameRateN,
+    frameRateD,
+  };
+  cachedPng = null;
+}
+
+function parseNdiStreamChunk(chunk: Buffer) {
+  const nextChunk = Buffer.from(chunk);
+  streamRemainder = streamRemainder.length ? Buffer.concat([streamRemainder, nextChunk]) : nextChunk;
+  while (streamRemainder.length >= 32) {
+    if (!streamRemainder.subarray(0, 4).equals(streamMagic)) {
+      const nextMagic = streamRemainder.indexOf(streamMagic, 1);
+      streamRemainder = nextMagic >= 0 ? streamRemainder.subarray(nextMagic) : Buffer.alloc(0);
+      continue;
+    }
+    const width = streamRemainder.readInt32LE(4);
+    const height = streamRemainder.readInt32LE(8);
+    const payloadLength = streamRemainder.readInt32LE(12);
+    const frameRateN = streamRemainder.readInt32LE(16);
+    const frameRateD = streamRemainder.readInt32LE(20);
+    const fourCc = streamRemainder.readUInt32LE(24);
+    if (width <= 0 || height <= 0 || payloadLength !== width * height * 4 || payloadLength > 64 * 1024 * 1024) {
+      lastError = `Invalid direct NDI frame header: ${width}x${height}, ${payloadLength} bytes.`;
+      const nextMagic = streamRemainder.indexOf(streamMagic, 4);
+      streamRemainder = nextMagic >= 0 ? streamRemainder.subarray(nextMagic) : Buffer.alloc(0);
+      continue;
+    }
+    if (streamRemainder.length < 32 + payloadLength) break;
+    const payload = Buffer.from(streamRemainder.subarray(32, 32 + payloadLength));
+    rememberRawFrame(width, height, payload, frameRateN, frameRateD, fourCc);
+    streamRemainder = streamRemainder.subarray(32 + payloadLength);
+  }
+}
+
+function parseNdiStderr(chunk: Buffer) {
+  const text = String(chunk);
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const message = JSON.parse(trimmed);
+      if (message?.error) lastError = String(message.error).slice(0, 1000);
+      if (message?.warning && !latestRawFrame) lastError = String(message.warning).slice(0, 1000);
+    } catch {
+      lastError = trimmed.slice(0, 1000);
+    }
+  }
+}
+
 export async function listNdiDirectSources() {
   const status = await getNdiToolsStatus();
   if (!status.runtimeDll) return { ok: false, sources: [], status, error: "NDI runtime DLL was not found." };
@@ -64,6 +136,8 @@ export function stopNdiDirectCapture() {
   if (ndiProcess && !ndiProcess.killed) ndiProcess.kill();
   ndiProcess = null;
   lastError = "";
+  streamRemainder = Buffer.alloc(0);
+  receivedFrameTimes = [];
   return getNdiDirectStatus();
 }
 
@@ -78,22 +152,25 @@ export async function startNdiDirectCapture(options: { sourceName?: string; sour
   fs.rmSync(framePath, { force: true });
   fs.rmSync(statusPath, { force: true });
   cachedPng = null;
+  latestRawFrame = null;
+  streamRemainder = Buffer.alloc(0);
+  receivedFrames = 0;
+  receivedFrameTimes = [];
   lastError = "";
   intentionalStop = false;
   ndiSource = sourceName;
   const args = [
     helper,
-    "capture",
+    "stream",
     "--runtimeDll", status.runtimeDll,
     "--sourceName", sourceName,
-    "--output", framePath,
-    "--status", statusPath,
     "--timeoutMs", "3000",
-    "--maxFps", String(Math.max(1, Math.min(60, Number(options.maxFps ?? 30)))),
+    "--maxFps", String(Math.max(1, Math.min(120, Number(options.maxFps ?? 30)))),
   ];
   if (options.sourceUrl) args.push("--sourceUrl", options.sourceUrl);
   ndiProcess = spawn("dotnet", args, { cwd: ROOT, windowsHide: true });
-  ndiProcess.stderr.on("data", (chunk) => { lastError = String(chunk).slice(0, 1000); });
+  ndiProcess.stdout.on("data", parseNdiStreamChunk);
+  ndiProcess.stderr.on("data", parseNdiStderr);
   ndiProcess.on("exit", (code, signal) => {
     if (!intentionalStop && (code || signal)) lastError ||= `NDI direct receiver exited (${code ?? signal}).`;
     ndiProcess = null;
@@ -104,20 +181,25 @@ export async function startNdiDirectCapture(options: { sourceName?: string; sour
 export function getNdiDirectStatus() {
   const status = readJson(statusPath);
   const frameStat = fs.existsSync(framePath) ? fs.statSync(framePath) : null;
-  const frameDimensions = frameStat ? bmpDimensions(fs.readFileSync(framePath)) : { width: 0, height: 0 };
-  const lastFrameAt = status?.lastFrameAt ?? frameStat?.mtime.toISOString() ?? null;
-  const frameFresh = Boolean(frameStat && Date.now() - frameStat.mtimeMs < 2500);
-  const hasFrames = Number(status?.frames ?? 0) > 0 || Boolean(frameStat);
+  const frameDimensions = !latestRawFrame && frameStat ? bmpDimensions(fs.readFileSync(framePath)) : { width: 0, height: 0 };
+  const lastFrameAt = latestRawFrame?.capturedAt ?? status?.lastFrameAt ?? frameStat?.mtime.toISOString() ?? null;
+  const latestFrameMs = latestRawFrame ? Date.parse(latestRawFrame.capturedAt) : 0;
+  const frameFresh = Boolean(latestRawFrame ? Date.now() - latestFrameMs < 2500 : frameStat && Date.now() - frameStat.mtimeMs < 2500);
+  const hasFrames = receivedFrames > 0 || Number(status?.frames ?? 0) > 0 || Boolean(frameStat);
   const running = Boolean(ndiProcess && !ndiProcess.killed);
   return {
     ok: true,
     running,
     connected: Boolean(running && ((status?.connected && hasFrames) || frameFresh)),
     source: status?.source ?? ndiSource,
-    width: status?.width || status?.Width || frameDimensions.width,
-    height: status?.height || status?.Height || frameDimensions.height,
-    aspect: status?.aspect ?? status?.Aspect ?? 0,
-    frames: status?.frames ?? 0,
+    width: latestRawFrame?.width ?? status?.width ?? status?.Width ?? frameDimensions.width,
+    height: latestRawFrame?.height ?? status?.height ?? status?.Height ?? frameDimensions.height,
+    aspect: latestRawFrame ? latestRawFrame.width / latestRawFrame.height : status?.aspect ?? status?.Aspect ?? 0,
+    frames: receivedFrames || status?.frames || 0,
+    receiverFps: receivedFrameTimes.length,
+    frameRate: latestRawFrame?.frameRateD ? latestRawFrame.frameRateN / latestRawFrame.frameRateD : null,
+    fourCc: latestRawFrame?.fourCc ?? status?.fourCcText ?? status?.FourCcText ?? "",
+    transport: running ? "stdout-rgba" : "idle",
     lastFrameAt,
     error: lastError || status?.error || "",
     framePath,
@@ -152,6 +234,18 @@ function decodeBgrxBmp(buffer: Buffer) {
 }
 
 export async function getLatestNdiDirectFrame() {
+  if (latestRawFrame) {
+    if (cachedPng?.frameId === latestRawFrame.frameId) return cachedPng;
+    const buffer = await sharp(latestRawFrame.buffer, { raw: { width: latestRawFrame.width, height: latestRawFrame.height, channels: 4 } }).png({ compressionLevel: 1 }).toBuffer();
+    cachedPng = {
+      frameId: latestRawFrame.frameId,
+      buffer,
+      width: latestRawFrame.width,
+      height: latestRawFrame.height,
+      capturedAt: latestRawFrame.capturedAt,
+    };
+    return cachedPng;
+  }
   if (!fs.existsSync(framePath)) return null;
   const status = readJson(statusPath);
   const stat = fs.statSync(framePath);
@@ -175,4 +269,8 @@ export async function getLatestNdiDirectFrame() {
     width: frame.width,
     height: frame.height,
   };
+}
+
+export function getLatestNdiDirectRawFrame() {
+  return latestRawFrame;
 }

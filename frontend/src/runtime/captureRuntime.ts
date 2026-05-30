@@ -792,7 +792,7 @@ async function startNdiCapture() {
     resetBuffers();
     runtime.ndiDirectActive = true;
     runtime.lastNdiFrameAt = "";
-    const result = await startNdiDirectCapture(sourceName, sourceUrl || undefined, 30);
+    const result = await startNdiDirectCapture(sourceName, sourceUrl || undefined, 60);
     if (!result.ok) throw new Error(result.error ?? "Direct NDI receiver failed to start.");
     addCaptureLog("info", `Direct NDI receiver started: ${sourceName}.`);
     useCaptureRuntimeStore.setState({ sourceMode: "ndi", running: true, stream: null, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 } });
@@ -990,7 +990,7 @@ async function pollObsBridgeFrame() {
 async function pollNdiDirectFrame() {
   if (!runtime.ndiDirectActive) return;
   try {
-    const response = await fetch(apiUrl(`/api/capture/ndi/direct/frame?t=${Date.now()}`), { cache: "no-store" });
+    const response = await fetch(apiUrl(`/api/capture/ndi/direct/frame.raw?t=${Date.now()}`), { cache: "no-store" });
     if (response.status === 404) {
       useCaptureRuntimeStore.setState({ error: "Waiting for direct NDI frames from the selected phone source." });
       return;
@@ -999,31 +999,41 @@ async function pollNdiDirectFrame() {
     const frameId = response.headers.get("x-frame-id") || response.headers.get("x-captured-at") || "";
     if (frameId && frameId === runtime.lastNdiFrameAt) return;
     runtime.lastNdiFrameAt = frameId;
-    const blob = await response.blob();
-    if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
-    runtime.adbPreviewUrl = URL.createObjectURL(blob);
-    useCaptureRuntimeStore.setState({ adbPreviewUrl: runtime.adbPreviewUrl, error: "" });
-    const bitmap = await createImageBitmap(blob);
+    const width = Number(response.headers.get("x-source-width") ?? 0);
+    const height = Number(response.headers.get("x-source-height") ?? 0);
+    if (!width || !height) throw new Error("Direct NDI raw frame is missing dimensions.");
+    const bytes = new Uint8ClampedArray(await response.arrayBuffer());
+    if (bytes.byteLength !== width * height * 4) throw new Error(`Direct NDI raw frame has ${bytes.byteLength} bytes, expected ${width * height * 4}.`);
+    if (runtime.adbPreviewUrl) {
+      URL.revokeObjectURL(runtime.adbPreviewUrl);
+      runtime.adbPreviewUrl = "";
+    }
+    useCaptureRuntimeStore.setState({ adbPreviewUrl: "", error: "" });
+    const imageData = new ImageData(bytes, width, height);
     const canvas = runtime.canvas;
     if (canvas) {
-      const width = bitmap.width;
-      const height = bitmap.height;
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
       }
       updateSourceSize(width, height);
-      canvas.getContext("2d", { willReadFrequently: true })?.drawImage(bitmap, 0, 0);
+      canvas.getContext("2d", { willReadFrequently: true })?.putImageData(imageData, 0, 0);
+      if (runtime.previewCanvas) {
+        if (runtime.previewCanvas.width !== width || runtime.previewCanvas.height !== height) {
+          runtime.previewCanvas.width = width;
+          runtime.previewCanvas.height = height;
+        }
+        runtime.previewCanvas.getContext("2d")?.putImageData(imageData, 0, 0);
+      }
       analyzeCanvas(canvas, width, height);
     }
-    bitmap.close();
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Direct NDI frame failed.";
     addCaptureLog("error", message.slice(0, 180));
     useCaptureRuntimeStore.setState({ error: message });
   } finally {
     if (!runtime.ndiDirectActive) return;
-    runtime.adbTimer = window.setTimeout(() => void pollNdiDirectFrame(), 60);
+    runtime.adbTimer = window.setTimeout(() => void pollNdiDirectFrame(), 16);
   }
 }
 

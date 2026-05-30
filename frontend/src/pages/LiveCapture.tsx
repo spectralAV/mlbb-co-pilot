@@ -56,7 +56,7 @@ export function LiveCapture() {
 
   useEffect(() => {
     if (!previewRef.current) return;
-    previewRef.current.srcObject = sourceMode === "browser" || sourceMode === "ndi" ? stream : null;
+    previewRef.current.srcObject = sourceMode === "browser" ? stream : null;
     if (stream) void previewRef.current.play().catch(() => {});
   }, [stream, sourceMode]);
 
@@ -242,9 +242,10 @@ export function LiveCapture() {
               </button>
             </div>
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-4">
+          <div className="mt-4 grid gap-2 sm:grid-cols-5">
             <Metric label="Runtime" value={ndiToolsStatus?.runtimeAvailable ? "NDI 6" : "Missing"} />
             <Metric label="Direct Receiver" value={ndiDirectStatus?.running ? "Running" : "Ready"} />
+            <Metric label="Receiver FPS" value={ndiDirectStatus?.receiverFps ?? 0} />
             <Metric label="Source Frames" value={ndiDirectStatus?.frames ?? 0} />
             <Metric label="Source Size" value={ndiDirectStatus?.width ? `${ndiDirectStatus.width}x${ndiDirectStatus.height}` : "-"} />
           </div>
@@ -297,7 +298,7 @@ export function LiveCapture() {
     <div className="capture-workspace">
       <section className="card overflow-hidden">
         <div className="capture-preview-stage" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "scrcpy" || sourceMode === "browser" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs" || sourceMode === "ndi") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+          {sourceMode === "scrcpy" || sourceMode === "browser" || sourceMode === "ndi" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;
