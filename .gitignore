@@ -27,6 +27,8 @@ __pycache__/
 
 data/cache/*.json
 !data/cache/.gitkeep
+data/capture/*
+!data/capture/.gitkeep
 data/cache/skin-portraits/
 data/cache/skin-icons/
 data/adb-assets/
