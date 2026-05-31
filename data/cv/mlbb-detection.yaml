@@ -25,3 +25,14 @@ names:
   19: ally_respawn_timer
   20: minimap_objective_timer
   21: score_counter
+  22: match_timer
+  23: ally_kill_counter
+  24: enemy_kill_counter
+  25: personal_kda
+  26: personal_gold_counter
+  27: live_hud_stats_region
+  28: red_buff
+  29: blue_buff
+  30: jungle_creep
+  31: little_wonder
+  32: post_match_item_slot

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { BarChart3, Eye, PauseCircle } from "lucide-react";
+import { BarChart3, Clock3, Eye, PauseCircle } from "lucide-react";
 import { GamePanel, RiskBadge } from "../components/game/GameShell";
 import { listGameSessions, saveSessionNote } from "../lib/gameSessionStore";
+import { eventRisk, normalizeCoaching, normalizeGankRisk, riskRank, safeSessionEvents, safeSessionNotes } from "../lib/gameUi";
 import { formatMatchTime, type GameSession } from "../lib/gameTypes";
 
 function sessionDuration(session: GameSession) {
@@ -14,8 +15,28 @@ export function GameAnalysis() {
   const [selectedId, setSelectedId] = useState(() => sessions[0]?.id ?? "");
   const [note, setNote] = useState("");
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null, [sessions, selectedId]);
-  const latestRisk = selected?.gankRiskSnapshots[0];
-  const latestCoaching = selected?.coachingSnapshots[0];
+  const events = safeSessionEvents(selected);
+  const latestRisk = selected?.gankRiskSnapshots?.[0] ? normalizeGankRisk(selected.gankRiskSnapshots[0]) : null;
+  const latestCoaching = selected?.coachingSnapshots?.[0] ? normalizeCoaching(selected.coachingSnapshots[0]) : null;
+  const riskSpikeEvents = events.filter((event) => riskRank[eventRisk(event)] >= riskRank.high).slice(0, 3);
+  const objectiveEvents = events.filter((event) => event.type === "objective_taken").slice(0, 3);
+  const badFightEvents = events.filter((event) => event.type === "death" || event.type === "fight_lost").slice(0, 3);
+  const riskSpikeText = riskSpikeEvents.length
+    ? riskSpikeEvents.map((event) => `${event.matchTime ?? "--:--"} ${event.label}`).join(" / ")
+    : latestRisk?.warnings.slice(0, 2).join(" / ") || "No risk spikes captured yet.";
+  const objectiveMistakeText = objectiveEvents.length
+    ? objectiveEvents.map((event) => `${event.matchTime ?? "--:--"} ${event.label}`).join(" / ")
+    : latestRisk?.mapZones[0]?.reason || "No objective mistakes captured yet.";
+  const badFightText = badFightEvents.length
+    ? badFightEvents.map((event) => `${event.matchTime ?? "--:--"} ${event.label}`).join(" / ")
+    : "No death or lost-fight marker yet.";
+  const trainingFocus = badFightEvents.length
+    ? "Slow the next entry after missing enemy info."
+    : objectiveEvents.length
+      ? "Pre-position before objective timers expire."
+      : riskSpikeEvents.length
+        ? "Call missing enemies earlier before river moves."
+        : "Record fights and objective windows for sharper review.";
 
   function addNote() {
     if (!selected || !note.trim()) return;
@@ -24,22 +45,22 @@ export function GameAnalysis() {
     setSessions(listGameSessions());
   }
 
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-slate-900 p-4">
+  return <div className="game-analysis-page">
+    <div className="game-analysis-hero">
       <div>
-        <div className="text-xs font-bold uppercase tracking-[0.25em] text-purple-300">Busy Gameplay Analysis</div>
-        <h2 className="mt-1 text-3xl font-black text-white">{selected ? `${selected.hero ?? "Hero"} ${selected.role.toUpperCase()} / Session Review` : "No Session Yet"}</h2>
+        <div className="game-kicker">Busy Gameplay Analysis</div>
+        <h2>{selected ? `${selected.hero ?? "Hero"} ${selected.role.toUpperCase()} / Session Review` : "No Session Yet"}</h2>
       </div>
       <div className="flex gap-2">
         <RiskBadge risk={selected?.endedAt ? "medium" : "high"}>{selected?.endedAt ? "Review" : "Recording"}</RiskBadge>
-        <RiskBadge risk="medium">{selected?.events.length ?? 0} Events</RiskBadge>
+        <RiskBadge risk="medium">{events.length} Events</RiskBadge>
       </div>
     </div>
 
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+    <div className="game-analysis-grid">
       <GamePanel title="Sessions" icon={PauseCircle} className="xl:col-span-3">
         <div className="space-y-2">
-          {sessions.map((session) => <button key={session.id} className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${selected?.id === session.id ? "border-cyan-400/50 bg-cyan-500/10" : "border-white/10 bg-slate-950/60"}`} onClick={() => setSelectedId(session.id)}>
+          {sessions.map((session) => <button key={session.id} className={`analysis-session-button ${selected?.id === session.id ? "analysis-session-button-active" : ""}`} onClick={() => setSelectedId(session.id)}>
             <b>{session.hero ?? "Hero"} / {session.role}</b>
             <div className="text-xs text-slate-400">{new Date(session.startedAt).toLocaleString()} / {sessionDuration(session)}</div>
           </button>)}
@@ -47,29 +68,35 @@ export function GameAnalysis() {
         </div>
       </GamePanel>
 
-      <GamePanel title="Match Timeline" icon={PauseCircle} className="xl:col-span-4">
-        <div className="max-h-[520px] space-y-3 overflow-auto">
-          {(selected?.events ?? []).map((event) => <div key={event.id} className="flex gap-3 rounded-lg border border-white/10 bg-slate-950/70 p-3">
-            <RiskBadge risk={event.type === "death" || event.type === "fight_lost" ? "high" : "medium"}>{event.matchTime ?? "--:--"}</RiskBadge>
-            <div className="text-sm text-slate-200">{event.label}</div>
+      <GamePanel title="Match Timeline" icon={Clock3} className="xl:col-span-5" bodyClassName="analysis-timeline-body">
+        <div className="analysis-timeline">
+          {events.map((event) => <div key={event.id} className="analysis-timeline-item">
+            <RiskBadge risk={eventRisk(event)}>{event.matchTime ?? "--:--"}</RiskBadge>
+            <div>
+              <b>{event.label}</b>
+              <span>{event.zone ? event.zone.replace(/_/g, " ") : event.type.replace(/_/g, " ")}</span>
+              <small>{[event.source ?? "manual", event.confidence].filter(Boolean).join(" / ")}</small>
+            </div>
           </div>)}
           {selected && !selected.events.length && <p className="text-sm text-slate-400">No markers yet.</p>}
         </div>
       </GamePanel>
 
-      <GamePanel title="Analysis Summary" icon={BarChart3} className="xl:col-span-3">
-        <div className="space-y-3 text-sm text-slate-200">
-          <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3"><b>Biggest risk:</b> {latestRisk?.warnings[0] ?? "No risk snapshot yet."}</div>
-          <div className="rounded-lg border border-yellow-400/30 bg-yellow-500/10 p-3"><b>Missed window:</b> {latestCoaching?.reason ?? "Capture more snapshots during play."}</div>
-          <div className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 p-3"><b>Best next habit:</b> Track enemy roam before river entry.</div>
-          <div className="rounded-lg border border-white/10 bg-slate-950/70 p-3"><b>Recommendation:</b> {latestCoaching?.mainAction ?? "Start recording and add quick events."}</div>
+      <GamePanel title="Analysis Summary" icon={BarChart3} className="xl:col-span-2">
+        <div className="analysis-summary-stack">
+          <div><span>Biggest risk</span><b>{latestRisk?.warnings[0] ?? "No risk snapshot yet."}</b></div>
+          <div><span>Risk spikes</span><b>{riskSpikeText}</b></div>
+          <div><span>Missed objectives</span><b>{objectiveMistakeText}</b></div>
+          <div><span>Deaths / bad fights</span><b>{badFightText}</b></div>
+          <div><span>Training focus</span><b>{trainingFocus}</b></div>
+          <div><span>Recommendation</span><b>{latestCoaching?.mainAction ?? "Start recording and add quick events."}</b></div>
         </div>
       </GamePanel>
 
       <GamePanel title="Post-Match Notes" icon={Eye} className="xl:col-span-2">
         <textarea className="input h-40 w-full text-sm" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add note..." />
         <button className="btn mt-2 w-full" disabled={!selected || !note.trim()} onClick={addNote}>Save Note</button>
-        <div className="mt-3 space-y-2 text-xs text-slate-300">{(selected?.notes ?? []).map((item) => <div key={item} className="rounded-lg bg-white/5 p-2">{item}</div>)}</div>
+        <div className="mt-3 space-y-2 text-xs text-slate-300">{safeSessionNotes(selected).map((item) => <div key={item} className="rounded-lg bg-white/5 p-2">{item}</div>)}</div>
       </GamePanel>
     </div>
   </div>;

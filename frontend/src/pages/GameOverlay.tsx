@@ -1,33 +1,76 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getLatestLiveVision } from "../api/client";
 import { analyzeGankRisk } from "../lib/gankRiskEngine";
-import { defaultGameState } from "../lib/gameTypes";
+import { disconnectedStatus, gameObservationFromLiveVision, mergeObservationIntoGameState, type GameObservation } from "../lib/gameObservation";
+import { defaultGameState, type GameState } from "../lib/gameTypes";
+import { highestRiskLane, laneLabels, normalizeCoaching, normalizeGankRisk } from "../lib/gameUi";
+import { readLiveGameState, subscribeLiveGameState } from "../lib/liveGameStateStore";
 import { getLiveCoaching } from "../lib/liveCoachingEngine";
 import { RiskBadge } from "../components/game/GameShell";
 
 export function GameOverlay() {
-  const [state] = useState(() => defaultGameState());
+  const [state, setState] = useState(() => readLiveGameState() ?? defaultGameState());
+  const latestObservation = useRef<GameObservation | null>(null);
   const risk = useMemo(() => analyzeGankRisk(state), [state]);
-  const coaching = useMemo(() => getLiveCoaching(state, risk), [state, risk]);
-  const goldRisk = risk.lanes.gold.risk;
+  const safeRisk = useMemo(() => normalizeGankRisk(risk), [risk]);
+  const coaching = useMemo(() => normalizeCoaching(getLiveCoaching(state, safeRisk)), [state, safeRisk]);
+  const highestLane = highestRiskLane(safeRisk);
+  const objectiveTimers = [
+    typeof state.objectiveTimers.turtle === "number" ? { label: "Turtle", seconds: state.objectiveTimers.turtle } : null,
+    typeof state.objectiveTimers.lord === "number" ? { label: "Lord", seconds: state.objectiveTimers.lord } : null
+  ].filter((timer): timer is { label: "Turtle" | "Lord"; seconds: number } => Boolean(timer)).sort((a, b) => a.seconds - b.seconds);
+  const objective = objectiveTimers[0];
+  const objectiveLabel = objective ? `${objective.label} ${objective.seconds}s` : "Objective ready";
+  const objectiveRisk = (objective?.seconds ?? 999) < 45 ? "high" : "medium";
+  const cvUnreliable = Boolean(state.cv?.connected && (state.cv.confidence === "low" || state.cv.stale || (state.cv.screenType === "live_hud" && !state.cv.minimapRecognized)));
+  const topWarning = cvUnreliable ? "CV uncertain. Trust manual calls." : coaching.warnings[0] ?? "No urgent warning.";
 
-  return <main className="min-h-screen bg-transparent p-2 text-white sm:p-5">
-    <section className="mx-auto max-w-5xl rounded-lg border border-white/10 bg-slate-950/95 p-3 shadow-2xl sm:p-5">
-      <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-12">
-        <div className="md:col-span-5">
-          <div className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-300">OBS Compact Overlay</div>
-          <div className="mt-2 text-2xl font-black leading-tight text-white sm:text-4xl">NEXT: {coaching.mainAction}</div>
-          <div className="mt-2 text-slate-300">{coaching.reason}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 md:col-span-3">
-          <RiskBadge risk={(state.objectiveTimers.turtle ?? 999) < 45 ? "high" : "medium"}>Turtle {state.objectiveTimers.turtle}s</RiskBadge>
-          <RiskBadge risk={goldRisk}>Gold {goldRisk}</RiskBadge>
-          <RiskBadge risk={state.enemyMissing.roam ? "critical" : "low"}>Roam {state.enemyMissing.roam ? "Missing" : "Seen"}</RiskBadge>
-          <RiskBadge risk={coaching.priority === "urgent" ? "critical" : coaching.priority === "high" ? "high" : "medium"}>{coaching.mode}</RiskBadge>
-        </div>
-        <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-4 md:col-span-4">
-          <div className="text-xs font-bold uppercase tracking-widest text-red-300">Risk</div>
-          <div className="mt-2 text-xl font-black sm:text-2xl">{coaching.warnings[0] ?? "No urgent warning."}</div>
-        </div>
+  useEffect(() => {
+    document.body.classList.add("obs-overlay-active");
+    const applyLatestObservation = (stored: GameState) => latestObservation.current
+      ? mergeObservationIntoGameState(stored, latestObservation.current)
+      : stored;
+    const unsubscribe = subscribeLiveGameState((stored) => setState(applyLatestObservation(stored)));
+    const interval = window.setInterval(() => {
+      const stored = readLiveGameState();
+      if (stored) setState(applyLatestObservation(stored));
+    }, 1000);
+    async function refreshVision() {
+      try {
+        const result = await getLatestLiveVision();
+        const observation = gameObservationFromLiveVision(result);
+        if (observation) {
+          latestObservation.current = observation;
+          setState((current) => mergeObservationIntoGameState(current, observation));
+        }
+      } catch {
+        latestObservation.current = null;
+        setState((current) => current.cv?.connected ? { ...current, cv: disconnectedStatus() } : current);
+      }
+    }
+    void refreshVision();
+    const visionInterval = window.setInterval(refreshVision, 1200);
+    return () => {
+      unsubscribe();
+      window.clearInterval(interval);
+      window.clearInterval(visionInterval);
+      document.body.classList.remove("obs-overlay-active");
+    };
+  }, []);
+
+  return <main className="obs-overlay-page">
+    <section className="obs-overlay-bar">
+      <div className="obs-overlay-next">
+        <span>Next</span>
+        <strong>{coaching.mainAction}</strong>
+      </div>
+      <div className="obs-overlay-pills">
+        <RiskBadge risk={objectiveRisk}>{objectiveLabel}</RiskBadge>
+        <RiskBadge risk={highestLane.risk}>{laneLabels[highestLane.lane]} {highestLane.risk}</RiskBadge>
+      </div>
+      <div className="obs-overlay-warning">
+        <span>Risk</span>
+        <strong>{topWarning}</strong>
       </div>
     </section>
   </main>;

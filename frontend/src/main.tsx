@@ -13,7 +13,13 @@ import { Calibration } from "./pages/Calibration";
 import { SkinGallery } from "./pages/SkinGallery";
 import { CvLab } from "./pages/CvLab";
 import { CvVideoTool } from "./pages/CvVideoTool";
+import { GameAnalysis } from "./pages/GameAnalysis";
+import { GameOverlay } from "./pages/GameOverlay";
+import { GamePage } from "./pages/GamePage";
+import { MapTrainer } from "./pages/MapTrainer";
+import { ModuleManager } from "./pages/ModuleManager";
 import { PerformanceMonitor } from "./pages/PerformanceMonitor";
+import { TacticalMap } from "./pages/TacticalMap";
 import { MlbbCounterOutput, MlbbHeroPicksOutput, MlbbLiveOutput, MlbbStreamControl, MlbbStreamOutput, MlbbTacticalMapOutput, MlbbTextPanelOutput } from "./pages/MlbbStreamPack";
 import "./styles.css";
 
@@ -25,6 +31,7 @@ const router = createBrowserRouter([
   { path: "/mlbb-text-output", element: <MlbbTextPanelOutput /> },
   { path: "/mlbb-counter-output", element: <MlbbCounterOutput /> },
   { path: "/mlbb-picks-output", element: <MlbbHeroPicksOutput /> },
+  { path: "/game-overlay", element: <GameOverlay /> },
   {
     path: "/",
     element: <Layout />,
@@ -32,10 +39,16 @@ const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       { path: "setup", element: <Setup /> },
       { path: "draft", element: <DraftRoom /> },
+      { path: "game", element: <GamePage /> },
+      { path: "analysis", element: <GameAnalysis /> },
+      { path: "game-analysis", element: <GameAnalysis /> },
       { path: "skins", element: <SkinGallery /> },
       { path: "build", element: <BuildLab /> },
       { path: "capture", element: <LiveCapture /> },
       { path: "mlbb-control", element: <MlbbStreamControl /> },
+      { path: "map", element: <TacticalMap /> },
+      { path: "map-trainer", element: <MapTrainer /> },
+      { path: "modules", element: <ModuleManager /> },
       { path: "calibration", element: <Calibration /> },
       { path: "cv-lab", element: <CvLab /> },
       { path: "cv-video", element: <CvVideoTool /> },

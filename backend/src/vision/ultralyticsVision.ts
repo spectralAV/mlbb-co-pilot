@@ -583,6 +583,17 @@ function detectedYoloSurface(detections: UltralyticsDetection[]) {
     battle_spell_marker: "draft",
     equipment_scoreboard: "scoreboard",
     attributes_scoreboard: "scoreboard",
+    match_timer: "live_hud",
+    ally_kill_counter: "live_hud",
+    enemy_kill_counter: "live_hud",
+    personal_kda: "live_hud",
+    personal_gold_counter: "live_hud",
+    live_hud_stats_region: "live_hud",
+    red_buff: "live_hud",
+    blue_buff: "live_hud",
+    jungle_creep: "live_hud",
+    little_wonder: "live_hud",
+    post_match_item_slot: "scoreboard",
   };
   const accepted = detections
     .filter((detection) => mappings[detection.className])

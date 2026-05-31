@@ -74,6 +74,7 @@ function getStatus(states: MapZoneState[] | undefined, id: MapZoneId): ZoneStatu
 
 export function BattlefieldMap({
   states,
+  riskZones,
   markers = [],
   projection,
   onZoneClick,
@@ -81,6 +82,7 @@ export function BattlefieldMap({
   showOverlay = false
 }: {
   states?: MapZoneState[];
+  riskZones?: Array<{ zone: MapZoneId; risk: "low" | "medium" | "high" | "critical"; reason: string }>;
   markers?: TacticalMapMarker[];
   projection?: MinimapProjectionLike;
   onZoneClick?: (id: MapZoneId) => void;
@@ -89,12 +91,14 @@ export function BattlefieldMap({
 }) {
   const shouldShowOverlay = showOverlay || Boolean(states?.length) || Boolean(onZoneClick);
 
-  return <div className={`relative aspect-[2856/1280] w-full overflow-hidden rounded-lg border border-white/10 bg-[#06121a] ${compact ? "min-h-64" : ""}`}>
+  return <div className={`game-battlefield-map relative aspect-[2856/1280] w-full overflow-hidden rounded-lg border border-white/10 bg-[#06121a] ${compact ? "min-h-64" : ""}`}>
     <img className="h-full w-full object-cover" src={tacticalMapReference} alt="MLBB tactical map reference" draggable={false} />
+    <div className="game-map-vignette" />
 
     {shouldShowOverlay && zones.map((zone) => {
       const status = getStatus(states, zone.id);
-      return <button key={zone.id} onClick={() => onZoneClick?.(zone.id)} className={`absolute min-h-8 -translate-x-1/2 -translate-y-1/2 rounded-lg border px-2 py-1 text-[10px] font-black shadow-lg backdrop-blur-sm sm:text-xs ${statusClass[status]}`} style={{ left: `${zone.x}%`, top: `${zone.y}%`, width: zone.w ? `${zone.w}%` : undefined, height: zone.h ? `${zone.h}%` : undefined }} title={zone.label}>
+      const riskZone = riskZones?.find((entry) => entry.zone === zone.id);
+      return <button key={zone.id} onClick={() => onZoneClick?.(zone.id)} className={`game-map-zone game-map-zone-${status} ${riskZone ? `game-map-zone-risk game-map-zone-risk-${riskZone.risk}` : ""} absolute min-h-8 -translate-x-1/2 -translate-y-1/2 rounded-lg border px-2 py-1 text-[10px] font-black shadow-lg backdrop-blur-sm sm:text-xs ${statusClass[status]}`} style={{ left: `${zone.x}%`, top: `${zone.y}%`, width: zone.w ? `${zone.w}%` : undefined, height: zone.h ? `${zone.h}%` : undefined }} title={riskZone ? `${zone.label}: ${riskZone.reason}` : zone.label}>
         {zone.label}
       </button>;
     })}

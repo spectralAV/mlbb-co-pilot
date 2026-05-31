@@ -121,7 +121,7 @@ MLBB Co-Pilot includes an experimental CV toolchain for local recognition workfl
 - CPU fallback for conservative local training and validation.
 - Optional WSL ROCm path for AMD training experiments.
 - OCR sidecar hooks for selected screen text regions.
-- Roboflow draft and minimap experiments kept separate from production detectors.
+- Roboflow draft and minimap exports can be staged as reviewed Ultralytics training enhancements.
 
 Check local CV readiness:
 
@@ -146,6 +146,27 @@ Run the explicit WSL ROCm bootstrap and status checks:
 ```powershell
 npm run cv:wsl:bootstrap
 npm run cv:wsl:status
+```
+
+Install and inspect optional Roboflow Inference support:
+
+```powershell
+npm run cv:roboflow:inference:install
+npm run cv:roboflow:inference:status
+```
+
+Convert a Roboflow YOLO export into the main Ultralytics training set:
+
+```powershell
+$env:ROBOFLOW_API_KEY = "<your key>"
+npm run cv:draft:roboflow:enhance -- --clean --force
+npm run cv:minimap:roboflow:enhance -- --clean --force
+npm run cv:minimap:roboflow:enhance:gladi -- --clean --force
+npm run cv:hud:roboflow:enhance:ocr -- --clean --force
+npm run cv:camera:roboflow:enhance:objectives -- --clean --force
+npm run cv:items:roboflow:enhance -- --clean --force
+npm run cv:prepare
+npm run cv:wsl:train
 ```
 
 ## Architecture
@@ -174,6 +195,8 @@ npm run cv:wsl:status
 | `npm run desktop:pack` | Build an unpacked desktop app for QA |
 | `npm run desktop:dist` | Build platform package targets |
 | `npm run cv:status` | Inspect local CV runtime status |
+| `npm run cv:roboflow:inference:status` | Inspect Roboflow Inference package/server readiness |
+| `npm run cv:roboflow:training:status` | Inspect staged Roboflow training enhancements |
 | `npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01"` | Extract frames from gameplay footage for review |
 
 ## Documentation

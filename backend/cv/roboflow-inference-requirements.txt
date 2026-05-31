@@ -1,0 +1,4 @@
+# Keep Roboflow Inference isolated from the main CV runtime. The CLI currently
+# depends on a narrower pydantic range than PaddleOCR/PaddleX in data/cv/.venv.
+inference-cli>=1.2,<2
+inference-sdk>=1.2,<2

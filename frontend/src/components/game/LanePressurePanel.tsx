@@ -14,13 +14,13 @@ export function laneRiskFromPressure(pressure: LanePressure): Risk {
 
 export function LanePressurePanel({ state, onChange }: { state: GameState; onChange: (patch: Partial<GameState>) => void }) {
   return <GamePanel title="Lane Pressure" icon={Activity}>
-    <div className="space-y-3">
+    <div className="lane-pressure-list">
       {lanes.map((lane) => {
         const pressure = state.lanePressure[lane];
         const risk = laneRiskFromPressure(pressure);
         const action = pressure === "losing" ? "Avoid forcing unless roam nearby." : pressure === "winning" ? "Can pressure and rotate." : "Clear wave before river.";
-        return <div key={lane} className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
-          <div className="flex items-center justify-between">
+        return <div key={lane} className="lane-pressure-card">
+          <div className="lane-pressure-card-head">
             <b className="uppercase text-slate-100">{lane}</b>
             <RiskBadge risk={risk}>{pressure}</RiskBadge>
           </div>

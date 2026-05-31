@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { Activity, Boxes, Crosshair, Database, Film, Images, Radio, Radar, ScanSearch, Settings, ShieldCheck, SlidersHorizontal, UserRound } from "lucide-react";
+import { Activity, Boxes, Crosshair, Database, Film, Gamepad2, History, Images, Map, Puzzle, Radio, Radar, ScanSearch, Settings, ShieldCheck, SlidersHorizontal, UserRound } from "lucide-react";
 import { CaptureRuntimeHost } from "./CaptureRuntimeHost";
 import { PerformanceTelemetryHost } from "./PerformanceTelemetryHost";
 import { getPlayerProfile } from "../api/client";
@@ -12,9 +12,14 @@ const links = [
   { to: "/capture", label: "Live Capture", icon: Radar },
   { to: "/calibration", label: "Screen Setup", icon: SlidersHorizontal },
   { to: "/draft", label: "Draft Assistant", icon: Crosshair },
+  { to: "/game", label: "Live Game", icon: Gamepad2 },
+  { to: "/analysis", label: "Game Review", icon: History },
   { to: "/build", label: "Build Data", icon: Boxes },
   { to: "/mlbb-control", label: "Stream Output", icon: Radio },
   { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/map", label: "Tactical Map", icon: Map, advanced: true },
+  { to: "/map-trainer", label: "Map Trainer", icon: SlidersHorizontal, advanced: true },
+  { to: "/modules", label: "Modules", icon: Puzzle, advanced: true },
   { to: "/cv-video", label: "CV Video", icon: Film, advanced: true },
   { to: "/performance", label: "Performance", icon: Activity, advanced: true },
   { to: "/", label: "Operations", icon: Activity, advanced: true },

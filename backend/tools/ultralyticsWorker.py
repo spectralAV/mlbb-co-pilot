@@ -36,6 +36,17 @@ CLASSES = [
     "ally_respawn_timer",
     "minimap_objective_timer",
     "score_counter",
+    "match_timer",
+    "ally_kill_counter",
+    "enemy_kill_counter",
+    "personal_kda",
+    "personal_gold_counter",
+    "live_hud_stats_region",
+    "red_buff",
+    "blue_buff",
+    "jungle_creep",
+    "little_wonder",
+    "post_match_item_slot",
 ]
 
 
@@ -190,6 +201,25 @@ def yolo_output_to_rows(output):
 
 
 def decode_onnx_detections(prediction, image_width, image_height, ratio, pad_x, pad_y, confidence):
+    if prediction.shape[1] == 6:
+        detections = []
+        for row in prediction:
+            score = float(row[4])
+            if score < confidence:
+                continue
+            class_id = int(round(float(row[5])))
+            if class_id < 0 or class_id >= len(CLASSES):
+                continue
+            left, top, right, bottom = [float(value) for value in row[:4]]
+            left = (left - pad_x) / ratio
+            top = (top - pad_y) / ratio
+            right = (right - pad_x) / ratio
+            bottom = (bottom - pad_y) / ratio
+            if right <= left or bottom <= top:
+                continue
+            detections.append(normalized_detection(class_id, score, left, top, right, bottom, image_width, image_height))
+        return sorted(detections, key=lambda detection: detection["confidence"], reverse=True)
+
     candidate_boxes_by_class = {class_id: [] for class_id in range(len(CLASSES))}
     candidate_scores_by_class = {class_id: [] for class_id in range(len(CLASSES))}
     candidate_raw_by_class = {class_id: [] for class_id in range(len(CLASSES))}

@@ -41,6 +41,7 @@ data/recognition-samples/lane-icon-vector-templates.json
 data/recognition-samples/crops/
 data/recognition-samples/labeled/
 data/cv/.venv/
+data/cv/.venv-roboflow/
 data/cv/.venv-rocm/
 data/cv/models/
 data/cv/runs/
@@ -75,6 +76,7 @@ data/cv/roboflow-minimap-2/labels/val/*
 data/cv/roboflow-minimap-2/models/
 data/cv/roboflow-minimap-2/runs/
 data/cv/roboflow-minimap-2/runtime/
+data/cv/roboflow-training/*
 data/cv/images/train/*
 data/cv/images/val/*
 data/cv/labels/train/*
@@ -96,6 +98,8 @@ data/cv/labels/*.cache
 !data/cv/roboflow-minimap-2/images/val/.gitkeep
 !data/cv/roboflow-minimap-2/labels/train/.gitkeep
 !data/cv/roboflow-minimap-2/labels/val/.gitkeep
+!data/cv/roboflow-training/.gitkeep
+!data/cv/roboflow-training/README.md
 data/overlay-media/*
 !data/overlay-media/.gitkeep
 repo-patches/

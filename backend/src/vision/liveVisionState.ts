@@ -386,16 +386,31 @@ function normalizeTimerFacts(value: unknown): TimerFact[] {
       text: String(fact?.text ?? ""),
       seconds: optionalNumber(fact?.seconds),
       value: optionalNumber(fact?.value),
+      kills: optionalNumber(fact?.kills),
+      deaths: optionalNumber(fact?.deaths),
+      assists: optionalNumber(fact?.assists),
       confidence: clamp01(fact?.confidence),
       source: String(fact?.source ?? ""),
       confirmedAt: Number(fact?.confirmedAt),
     }))
     .filter((fact) =>
-      ["turtle_respawn_timer", "lord_respawn_timer", "enemy_respawn_timer", "ally_respawn_timer", "minimap_objective_timer", "score_counter"].includes(fact.timerType) &&
+      [
+        "turtle_respawn_timer",
+        "lord_respawn_timer",
+        "enemy_respawn_timer",
+        "ally_respawn_timer",
+        "minimap_objective_timer",
+        "score_counter",
+        "match_timer",
+        "ally_kill_counter",
+        "enemy_kill_counter",
+        "personal_kda",
+        "personal_gold_counter",
+      ].includes(fact.timerType) &&
       fact.source === "timer-ocr" &&
       fact.confidence >= DETECTED_FACT_CONFIDENCE &&
       Number.isFinite(fact.confirmedAt) &&
-      (Number.isFinite(fact.seconds) || Number.isFinite(fact.value)))
+      (Number.isFinite(fact.seconds) || Number.isFinite(fact.value) || Number.isFinite(fact.kills)))
     .map((fact) => ({ ...fact, timerType: fact.timerType as TimerFact["timerType"], source: "timer-ocr" as const }))
     .slice(0, 8);
 }

@@ -2,6 +2,16 @@ export type Role = "jungle" | "exp" | "gold" | "mid" | "roam";
 export type Risk = "low" | "medium" | "high" | "critical";
 export type LaneId = "exp" | "mid" | "gold";
 export type LanePressure = "winning" | "even" | "losing" | "unknown";
+export type ObservationSource = "manual" | "cv" | "hybrid";
+export type CvScreenType =
+  | "unknown"
+  | "lobby"
+  | "draft"
+  | "loading"
+  | "live_hud"
+  | "death_replay"
+  | "scoreboard"
+  | "item_shop";
 
 export type MapZoneId =
   | "ally_base"
@@ -44,7 +54,22 @@ export interface GameEvent {
   label: string;
   zone?: MapZoneId;
   hero?: string;
+  source?: ObservationSource;
   confidence?: "low" | "medium" | "high";
+}
+
+export interface CvGameStatus {
+  source: "cv" | "hybrid";
+  connected: boolean;
+  lastObservationAt?: number;
+  confidence: "low" | "medium" | "high";
+  numericConfidence?: number;
+  screenType: CvScreenType;
+  minimapRecognized: boolean;
+  visibleEnemies: number;
+  estimatedEnemyZones: MapZoneId[];
+  stale: boolean;
+  warning?: string;
 }
 
 export interface GameState {
@@ -75,6 +100,7 @@ export interface GameState {
   };
   mapZones: MapZoneState[];
   events: GameEvent[];
+  cv?: CvGameStatus;
 }
 
 export interface GankRiskOutput {
@@ -141,12 +167,25 @@ export const defaultGameState = (): GameState => ({
   lastEnemySeen: { jungler: "enemy_red", roam: "river_gold" },
   objectiveTimers: { turtle: 38, allyBlue: 72, allyRed: 55, enemyBlue: 29 },
   mapZones: defaultMapZones(),
-  events: []
+  events: [],
+  cv: {
+    source: "hybrid",
+    connected: false,
+    confidence: "low",
+    numericConfidence: 0,
+    screenType: "unknown",
+    minimapRecognized: false,
+    visibleEnemies: 0,
+    estimatedEnemyZones: [],
+    stale: true,
+    warning: "CV disconnected"
+  }
 });
 
 export function formatMatchTime(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.max(0, seconds % 60);
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  const rest = safeSeconds % 60;
   return `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 

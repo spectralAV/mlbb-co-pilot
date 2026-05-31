@@ -31,6 +31,17 @@ CLASSES = [
     "ally_respawn_timer",
     "minimap_objective_timer",
     "score_counter",
+    "match_timer",
+    "ally_kill_counter",
+    "enemy_kill_counter",
+    "personal_kda",
+    "personal_gold_counter",
+    "live_hud_stats_region",
+    "red_buff",
+    "blue_buff",
+    "jungle_creep",
+    "little_wonder",
+    "post_match_item_slot",
 ]
 
 

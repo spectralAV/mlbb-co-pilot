@@ -30,7 +30,19 @@ CLASS_IDS = {
     "ally_respawn_timer": 19,
     "minimap_objective_timer": 20,
     "score_counter": 21,
+    "match_timer": 22,
+    "ally_kill_counter": 23,
+    "enemy_kill_counter": 24,
+    "personal_kda": 25,
+    "personal_gold_counter": 26,
+    "live_hud_stats_region": 27,
+    "red_buff": 28,
+    "blue_buff": 29,
+    "jungle_creep": 30,
+    "little_wonder": 31,
+    "post_match_item_slot": 32,
 }
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 DRAFT_REGIONS = {
     "ally_pick_rail": [0.0, 0.083042, 0.162621, 0.832224],
@@ -480,6 +492,57 @@ def add_user_annotations(project_root, cv_root, prepared):
             })
 
 
+def safe_training_name(value):
+    return "".join(char if char.isalnum() or char in ("-", "_", ".") else "-" for char in value).strip(".-") or "roboflow"
+
+
+def add_roboflow_training_samples(project_root, cv_root, prepared):
+    root = cv_root / "roboflow-training"
+    if not root.exists():
+        return
+    for dataset_root in sorted(path for path in root.iterdir() if path.is_dir()):
+        manifest_file = dataset_root / "manifest.json"
+        manifest = {}
+        if manifest_file.exists():
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            except Exception:
+                manifest = {}
+        dataset_entry = {
+            "name": dataset_root.name,
+            "profile": manifest.get("profile"),
+            "manifest": manifest_file.relative_to(project_root).as_posix() if manifest_file.exists() else None,
+            "train": 0,
+            "val": 0,
+            "objects": 0,
+        }
+        for split in ("train", "val"):
+            image_dir = dataset_root / "images" / split
+            label_dir = dataset_root / "labels" / split
+            if not image_dir.exists() or not label_dir.exists():
+                continue
+            for image in sorted(path for path in image_dir.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS):
+                label = label_dir / f"{image.stem}.txt"
+                if not label.exists():
+                    continue
+                labels = [line.strip() for line in label.read_text(encoding="ascii").splitlines() if line.strip()]
+                target_name = f"roboflow-{safe_training_name(dataset_root.name)}-{image.name}"
+                prepared[split].append(write_explicit_sample(
+                    project_root,
+                    cv_root,
+                    image,
+                    split,
+                    target_name,
+                    labels,
+                    f"roboflow:{dataset_root.name}:{manifest.get('profile') or 'converted'}",
+                    "roboflow-training-enhancement",
+                ))
+                dataset_entry[split] += 1
+                dataset_entry["objects"] += len(labels)
+        if dataset_entry["train"] or dataset_entry["val"]:
+            prepared["roboflowEnhancements"].append(dataset_entry)
+
+
 def main():
     project_root = Path(__file__).resolve().parents[2]
     manifest_file = project_root / "data" / "recognition-samples" / "screen-state-training-set.json"
@@ -502,6 +565,7 @@ def main():
         "val": [],
         "classesUsed": sorted(CLASS_IDS),
         "negativeClass": "loading",
+        "roboflowEnhancements": [],
         "officialAssetReferences": {
             "laneSprites": "data/adb-assets/textures/Atlas_ChooseLane02_add/sprites/LaneIcon01..05.png",
             "battleSpells": [f"data/adb-assets/textures/Atlas_SkillIcon/sprites/{name}" for name in SPELL_SPRITES],
@@ -553,6 +617,7 @@ def main():
     add_asset_synthetic_minimap_samples(project_root, cv_root, prepared)
     add_scoreboard_samples(project_root, cv_root, prepared)
     add_user_annotations(project_root, cv_root, prepared)
+    add_roboflow_training_samples(project_root, cv_root, prepared)
 
     output = cv_root / "runtime" / "bootstrap-dataset-manifest.json"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -569,6 +634,7 @@ def main():
             "battleSpells": len(SPELL_SPRITES),
             "minimapSprites": sum(len(paths) for paths in MINIMAP_SPRITE_FILES.values()) + 1,
         },
+        "roboflowEnhancements": prepared["roboflowEnhancements"],
         "manifest": str(output),
     }))
 

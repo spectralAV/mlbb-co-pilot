@@ -24,6 +24,11 @@ export const timerClasses = [
   "ally_respawn_timer",
   "minimap_objective_timer",
   "score_counter",
+  "match_timer",
+  "ally_kill_counter",
+  "enemy_kill_counter",
+  "personal_kda",
+  "personal_gold_counter",
 ] as const;
 export type TimerClass = typeof timerClasses[number];
 export type TimerFact = {
@@ -31,6 +36,9 @@ export type TimerFact = {
   text: string;
   seconds?: number;
   value?: number;
+  kills?: number;
+  deaths?: number;
+  assists?: number;
   confidence: number;
   source: "timer-ocr";
   confirmedAt: number;
@@ -79,7 +87,7 @@ export async function inferTimerCrop(image: Buffer, timerType: TimerClass = "ene
   await sharp(image).png().toFile(file);
   try {
     const result = await runOcr(["infer", "--image", file, "--timer-type", timerType], 180000);
-    const text = normalizeTimerText(result.text);
+    const text = normalizeOcrText(result.text, timerType);
     const parsed = text ? parseTimerValue(text, timerType) : null;
     return {
       ...result,
@@ -146,22 +154,37 @@ export function resetTimerRecognition() {
 }
 
 export function parseTimerValue(text: string, timerType: TimerClass) {
-  const normalized = normalizeTimerText(text);
+  const normalized = normalizeOcrText(text, timerType);
   if (!normalized) return null;
-  if (timerType === "score_counter") {
+  if (timerType === "personal_kda") {
+    const parts = normalized.split("/").map(Number);
+    if (parts.length !== 3) return null;
+    const [kills, deaths, assists] = parts;
+    return [kills, deaths, assists].every((part) => Number.isInteger(part) && part >= 0 && part <= 99)
+      ? { kills, deaths, assists }
+      : null;
+  }
+  if (timerType === "score_counter" || timerType === "ally_kill_counter" || timerType === "enemy_kill_counter" || timerType === "personal_gold_counter") {
     const value = Number(normalized);
-    return Number.isInteger(value) && value >= 0 && value <= 999 ? { value } : null;
+    return Number.isInteger(value) && value >= 0 && value <= 99999 ? { value } : null;
   }
   const parts = normalized.split(":").map(Number);
   if (parts.length === 2 && parts[1] > 59) return null;
   const seconds = parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0];
-  return Number.isInteger(seconds) && seconds >= 0 && seconds <= 599 ? { seconds } : null;
+  const maxSeconds = timerType === "match_timer" ? 5999 : 599;
+  return Number.isInteger(seconds) && seconds >= 0 && seconds <= maxSeconds ? { seconds } : null;
 }
 
 function timerValuesConsistent(previous: TimerCandidate, next: TimerCandidate) {
   const left = parseTimerValue(previous.text, previous.timerType);
   const right = parseTimerValue(next.text, next.timerType);
   if (!left || !right) return false;
+  if ("kills" in left || "kills" in right) {
+    return "kills" in left && "kills" in right &&
+      left.kills === right.kills &&
+      left.deaths === right.deaths &&
+      left.assists === right.assists;
+  }
   if ("value" in left || "value" in right) return "value" in left && "value" in right && left.value === right.value;
   const elapsed = Math.max(0, Math.round((next.observedAt - previous.observedAt) / 1000));
   return Math.abs((left.seconds - elapsed) - right.seconds) <= 2;
@@ -171,6 +194,19 @@ function normalizeTimerText(value: unknown) {
   const text = String(value ?? "").replace(/\s+/g, "").replace(/[Oo]/g, "0").replace(/[lI|]/g, "1");
   const match = text.match(/\d{1,3}:\d{2}|\d{1,3}/);
   return match?.[0];
+}
+
+function normalizeOcrText(value: unknown, timerType: TimerClass) {
+  const text = String(value ?? "").replace(/\s+/g, "").replace(/[Oo]/g, "0").replace(/[lI|]/g, "1");
+  if (timerType === "personal_kda") {
+    const match = text.match(/\d{1,2}[/:.-]\d{1,2}[/:.-]\d{1,2}/);
+    return match?.[0].replace(/[.:\\-]/g, "/");
+  }
+  if (timerType === "ally_kill_counter" || timerType === "enemy_kill_counter" || timerType === "personal_gold_counter") {
+    const match = text.match(/\d{1,5}/);
+    return match?.[0];
+  }
+  return normalizeTimerText(text);
 }
 
 function toCrop(rect: [number, number, number, number], width: number, height: number) {

@@ -16,6 +16,11 @@ def status(_project_root: Path):
             "ally_respawn_timer",
             "minimap_objective_timer",
             "score_counter",
+            "match_timer",
+            "ally_kill_counter",
+            "enemy_kill_counter",
+            "personal_kda",
+            "personal_gold_counter",
         ],
     }
 

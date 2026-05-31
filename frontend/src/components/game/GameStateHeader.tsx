@@ -1,26 +1,47 @@
-import type { GameState, Role } from "../../lib/gameTypes";
+import type { GameState, LiveCoachingOutput, Role } from "../../lib/gameTypes";
 import { formatMatchTime } from "../../lib/gameTypes";
 import { RiskBadge } from "./GameShell";
 
 const roles: Role[] = ["jungle", "exp", "gold", "mid", "roam"];
+const phaseLabels: Record<GameState["phase"], string> = { early: "Early", mid: "Mid", late: "Late" };
 
-export function GameStateHeader({ state, onChange }: { state: GameState; onChange: (patch: Partial<GameState>) => void }) {
-  const nextObjective = (state.objectiveTimers.turtle ?? 999) < 120 ? `Turtle in ${state.objectiveTimers.turtle}s` : (state.objectiveTimers.lord ?? 999) < 120 ? `Lord in ${state.objectiveTimers.lord}s` : "Farm window";
-  const goldRisk = state.goldState === "behind" ? "high" : state.goldState === "ahead" ? "low" : "medium";
+export function GameStateHeader({ state, coachingMode = "farm", onChange }: { state: GameState; coachingMode?: LiveCoachingOutput["mode"]; onChange: (patch: Partial<GameState>) => void }) {
+  const turtleTimer = state.objectiveTimers?.turtle;
+  const lordTimer = state.objectiveTimers?.lord;
+  const nextObjectiveTimers: Array<{ label: "Turtle" | "Lord"; seconds: number }> = [];
+  if (typeof turtleTimer === "number") nextObjectiveTimers.push({ label: "Turtle", seconds: turtleTimer });
+  if (typeof lordTimer === "number") nextObjectiveTimers.push({ label: "Lord", seconds: lordTimer });
+  const nextObjectiveTimer = nextObjectiveTimers.sort((a, b) => a.seconds - b.seconds)[0];
+  const nextObjective = nextObjectiveTimer ? `${nextObjectiveTimer.label} in ${nextObjectiveTimer.seconds}s` : "Farm window";
+  const nextObjectiveRisk = !nextObjectiveTimer ? "low" : nextObjectiveTimer.seconds < 30 ? "high" : nextObjectiveTimer.seconds < 60 ? "medium" : "low";
+  const goldState = state.goldState ?? "even";
+  const gameMode = state.mode ?? "live";
+  const goldRisk = goldState === "behind" ? "high" : goldState === "ahead" ? "low" : "medium";
+  const role = state.role ?? "jungle";
+  const phase = state.phase ?? "early";
+  const selectedHero = state.selectedHero || "Select Hero";
 
-  return <header className="rounded-lg border border-cyan-500/20 bg-slate-950/70 p-4 shadow-xl">
-    <div className="flex flex-wrap items-center justify-between gap-3">
+  return <header className="game-state-header">
+    <div className="game-state-header-grid">
       <div>
-        <div className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-300">MLBB Co-Pilot / Live Game</div>
-        <div className="mt-1 text-2xl font-black text-white">{state.selectedHero || "Select Hero"} {state.role.toUpperCase()} / {formatMatchTime(state.matchTimeSeconds)}</div>
+        <div className="game-kicker">MLBB Co-Pilot / Live Game</div>
+        <div className="game-state-title">{selectedHero} / {formatMatchTime(state.matchTimeSeconds ?? 0)}</div>
+        <div className="game-state-strip" aria-label="Live game state">
+          <div><span>Role</span><b>{role.toUpperCase()}</b></div>
+          <div><span>Phase</span><b>{phaseLabels[phase]}</b></div>
+          <div><span>Objective</span><b>{nextObjective}</b></div>
+          <div><span>Coach</span><b>{coachingMode}</b></div>
+        </div>
       </div>
-      <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
-        <select className="input h-11 w-full sm:w-auto" value={state.role} onChange={(e) => onChange({ role: e.target.value as Role })}>{roles.map((role) => <option key={role} value={role}>{role.toUpperCase()}</option>)}</select>
-        <input className="input h-11 w-full sm:w-32" value={state.selectedHero} onChange={(e) => onChange({ selectedHero: e.target.value })} />
-        <select className="input h-11 w-full sm:w-auto" value={state.goldState} onChange={(e) => onChange({ goldState: e.target.value as GameState["goldState"] })}><option value="ahead">Ahead</option><option value="even">Even</option><option value="behind">Behind</option></select>
-        <select className="input h-11 w-full sm:w-auto" value={state.mode} onChange={(e) => onChange({ mode: e.target.value as GameState["mode"] })}><option value="live">Live</option><option value="busy">Busy</option><option value="review">Review</option></select>
-        <RiskBadge risk={goldRisk}>{state.goldState}</RiskBadge>
-        <RiskBadge risk={(state.objectiveTimers.turtle ?? 999) < 45 ? "high" : "medium"}>{nextObjective}</RiskBadge>
+      <div className="game-state-controls">
+        <select className="input h-11 w-full sm:w-auto" value={role} onChange={(e) => onChange({ role: e.target.value as Role })}>{roles.map((role) => <option key={role} value={role}>{role.toUpperCase()}</option>)}</select>
+        <input className="input h-11 w-full sm:w-32" value={selectedHero === "Select Hero" ? "" : selectedHero} onChange={(e) => onChange({ selectedHero: e.target.value })} aria-label="Selected hero" />
+        <select className="input h-11 w-full sm:w-auto" value={phase} onChange={(e) => onChange({ phase: e.target.value as GameState["phase"] })}><option value="early">Early</option><option value="mid">Mid</option><option value="late">Late</option></select>
+        <select className="input h-11 w-full sm:w-auto" value={goldState} onChange={(e) => onChange({ goldState: e.target.value as GameState["goldState"] })}><option value="ahead">Ahead</option><option value="even">Even</option><option value="behind">Behind</option></select>
+        <select className="input h-11 w-full sm:w-auto" value={gameMode} onChange={(e) => onChange({ mode: e.target.value as GameState["mode"] })}><option value="live">Live</option><option value="busy">Busy</option><option value="review">Review</option></select>
+        <RiskBadge risk={goldRisk}>{goldState}</RiskBadge>
+        <RiskBadge risk={nextObjectiveRisk}>{nextObjective}</RiskBadge>
+        <RiskBadge risk="medium">{coachingMode}</RiskBadge>
       </div>
     </div>
   </header>;

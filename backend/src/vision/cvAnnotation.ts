@@ -36,6 +36,17 @@ export const ultralyticsClasses = [
   "ally_respawn_timer",
   "minimap_objective_timer",
   "score_counter",
+  "match_timer",
+  "ally_kill_counter",
+  "enemy_kill_counter",
+  "personal_kda",
+  "personal_gold_counter",
+  "live_hud_stats_region",
+  "red_buff",
+  "blue_buff",
+  "jungle_creep",
+  "little_wonder",
+  "post_match_item_slot",
 ] as const;
 
 type AnnotationMetadata = {
@@ -172,7 +183,7 @@ export function normalizeAnnotationBoxes(value: unknown): AnnotationBox[] {
     }
     if (isTranscriptClass(className)) {
       const transcript = String(box?.transcript ?? "").trim();
-      if (/^\d{1,3}(?::\d{2})?$/.test(transcript)) annotation.transcript = transcript;
+      if (isValidTranscript(className, transcript)) annotation.transcript = transcript;
     }
     return [annotation];
   });
@@ -184,9 +195,10 @@ function toYoloLine(box: AnnotationBox) {
 }
 
 function groupForClass(name: string) {
-  if (name.includes("respawn") || name.includes("counter") || name.includes("timer")) return "Counters";
-  if (name.includes("minimap") || name.includes("turret") || ["turtle", "lord"].includes(name)) return "Map";
+  if (name.includes("respawn") || name.includes("counter") || name.includes("timer") || name.includes("kda")) return "Counters";
+  if (name.includes("minimap") || name.includes("turret") || name.includes("buff") || name.includes("wonder") || name.includes("creep") || ["turtle", "lord"].includes(name)) return "Map";
   if (name.includes("pick") || name.includes("ban") || name.includes("lane") || name.includes("spell") || name.includes("draft")) return "Draft";
+  if (name.includes("item")) return "Items";
   return "HUD";
 }
 
@@ -195,7 +207,12 @@ function isHeroMarkerClass(name: string) {
 }
 
 function isTranscriptClass(name: string) {
-  return name.includes("respawn") || name.includes("counter") || name.includes("timer");
+  return name.includes("respawn") || name.includes("counter") || name.includes("timer") || name.includes("kda");
+}
+
+function isValidTranscript(name: string, transcript: string) {
+  if (name === "personal_kda") return /^\d{1,2}\s*[/:.-]\s*\d{1,2}\s*[/:.-]\s*\d{1,2}$/.test(transcript);
+  return /^\d{1,4}(?::\d{2})?$/.test(transcript);
 }
 
 async function exists(file: string) {

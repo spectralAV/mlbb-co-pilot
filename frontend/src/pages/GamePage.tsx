@@ -1,47 +1,91 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ReactElement } from "react";
-import { EditableGrid, type EditableGridItem } from "../components/EditableGrid";
+import { Link, useSearchParams } from "react-router-dom";
 import { BusyModeRecorder } from "../components/game/BusyModeRecorder";
 import { CoachingFeed } from "../components/game/CoachingFeed";
+import { CvStatusPanel } from "../components/game/CvStatusPanel";
 import { GameStateHeader } from "../components/game/GameStateHeader";
 import { GankRiskPanel } from "../components/game/GankRiskPanel";
 import { LanePressurePanel } from "../components/game/LanePressurePanel";
 import { MiniMapControl } from "../components/game/MiniMapControl";
 import { ObjectiveTimerPanel } from "../components/game/ObjectiveTimerPanel";
 import { QuickEventPad } from "../components/game/QuickEventPad";
+import { getLatestLiveVision } from "../api/client";
+import { disconnectedStatus, gameObservationFromLiveVision, mergeObservationIntoGameState, type GameObservation } from "../lib/gameObservation";
 import { analyzeGankRisk } from "../lib/gankRiskEngine";
 import { appendGameEvent, appendSnapshot, endGameSession, getActiveSession, startGameSession } from "../lib/gameSessionStore";
 import { defaultGameState, type GameEvent, type GameSession, type GameState } from "../lib/gameTypes";
+import { applyGameEventToState } from "../lib/liveGameEventEffects";
+import { readLiveGameState, writeLiveGameState } from "../lib/liveGameStateStore";
 import { getLiveCoaching } from "../lib/liveCoachingEngine";
-
-type PanelId = "objectives" | "lane" | "quick" | "map" | "recorder" | "coach" | "risk";
-
-const gameGridStorageKey = "mlbb.game.gridLayout.v1";
+import { useCaptureRuntimeStore } from "../runtime/captureRuntime";
 
 export function GamePage() {
-  const [state, setState] = useState<GameState>(() => defaultGameState());
+  const [searchParams] = useSearchParams();
+  const [state, setState] = useState<GameState>(() => readLiveGameState() ?? defaultGameState());
   const [session, setSession] = useState<GameSession | null>(() => getActiveSession());
+  const runtimeVision = useCaptureRuntimeStore((store) => store.liveVision);
+  const [observation, setObservation] = useState<GameObservation | null>(null);
   const risk = useMemo(() => analyzeGankRisk(state), [state]);
   const coaching = useMemo(() => getLiveCoaching(state, risk), [state, risk]);
+  const mapFocus = searchParams.get("mode") === "map";
 
   useEffect(() => {
-    if (session) appendSnapshot(session.id, coaching, risk);
-  }, [coaching.mainAction]);
+    if (!session?.id) return;
+    const updated = appendSnapshot(session.id, coaching, risk);
+    if (updated) setSession(updated);
+  }, [session?.id, coaching, risk]);
+
+  useEffect(() => {
+    writeLiveGameState(state);
+  }, [state]);
+
+  useEffect(() => {
+    const next = gameObservationFromLiveVision(runtimeVision);
+    if (next) setObservation(next);
+  }, [runtimeVision]);
+
+  useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const result = await getLatestLiveVision();
+        if (!active) return;
+        const next = gameObservationFromLiveVision(result);
+        if (next) setObservation(next);
+      } catch {
+        setState((current) => current.cv?.connected ? { ...current, cv: disconnectedStatus() } : current);
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 1200);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!observation) return;
+    setState((current) => mergeObservationIntoGameState(current, observation));
+    if (session?.id && observation.detectedEvents.length) {
+      let updated: GameSession | null = null;
+      for (const event of observation.detectedEvents) {
+        updated = appendGameEvent(session.id, event) ?? updated;
+      }
+      if (updated) setSession(updated);
+    }
+  }, [observation, session?.id]);
 
   function patch(patch: Partial<GameState>) {
     setState((current) => ({ ...current, ...patch }));
   }
 
   function addEvent(event: GameEvent) {
-    setState((current) => ({ ...current, events: [event, ...current.events] }));
+    setState((current) => applyGameEventToState(current, event));
     if (session) {
       const updated = appendGameEvent(session.id, event);
       if (updated) setSession(updated);
     }
-    if (event.label.includes("Roam Missing")) patch({ enemyMissing: { ...state.enemyMissing, roam: true } });
-    if (event.label.includes("Mid Missing")) patch({ enemyMissing: { ...state.enemyMissing, mid: true } });
-    if (event.label.includes("Jungler Seen Top")) patch({ enemyMissing: { ...state.enemyMissing, jungler: false }, lastEnemySeen: { ...state.lastEnemySeen, jungler: "exp_lane" } });
-    if (event.label.includes("Jungler Seen Bot")) patch({ enemyMissing: { ...state.enemyMissing, jungler: false }, lastEnemySeen: { ...state.lastEnemySeen, jungler: "gold_lane" } });
   }
 
   function toggleSession() {
@@ -53,31 +97,37 @@ export function GamePage() {
     }
   }
 
-  const panels: Record<PanelId, { label: string; layout: Omit<EditableGridItem, "title" | "content" | "id">; render: () => ReactElement }> = {
-    objectives: { label: "Objectives", layout: { x: 0, y: 0, w: 3, h: 4, minW: 3, minH: 3 }, render: () => <ObjectiveTimerPanel state={state} onChange={patch} /> },
-    lane: { label: "Lane Pressure", layout: { x: 0, y: 4, w: 3, h: 4, minW: 3, minH: 3 }, render: () => <LanePressurePanel state={state} onChange={patch} /> },
-    quick: { label: "Quick Events", layout: { x: 9, y: 4, w: 3, h: 4, minW: 3, minH: 3 }, render: () => <QuickEventPad state={state} onEvent={addEvent} /> },
-    map: { label: "Tactical Map Control", layout: { x: 3, y: 0, w: 6, h: 5, minW: 4, minH: 4 }, render: () => <MiniMapControl state={state} onChange={patch} /> },
-    recorder: { label: "Busy Recorder", layout: { x: 3, y: 5, w: 6, h: 4, minW: 4, minH: 3 }, render: () => <BusyModeRecorder session={session} events={state.events} /> },
-    coach: { label: "Coaching Feed", layout: { x: 9, y: 0, w: 3, h: 4, minW: 3, minH: 3 }, render: () => <CoachingFeed coaching={coaching} /> },
-    risk: { label: "Gank Risk", layout: { x: 0, y: 8, w: 3, h: 3, minW: 3, minH: 2 }, render: () => <GankRiskPanel risk={risk} /> }
-  };
-  const gridItems: EditableGridItem[] = (Object.entries(panels) as Array<[PanelId, typeof panels[PanelId]]>).map(([id, panel]) => ({
-    id,
-    title: panel.label,
-    ...panel.layout,
-    content: panel.render()
-  }));
-
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-3">
+  return <div className={`game-cockpit-page ${mapFocus ? "game-cockpit-page-map-focus" : ""}`}>
+    <div className="game-cockpit-hero">
       <div>
-        <h2 className="text-3xl font-black">Game</h2>
-        <p className="text-slate-400">Active match cockpit for map control, gank risk, objective timing, and short coaching calls.</p>
+        <h2>Game</h2>
+        <p>Active match cockpit for map control, gank risk, objective timing, and short coaching calls.</p>
       </div>
-      <button className="btn" onClick={toggleSession}>{session ? "Stop Recording" : "Start Busy Recording"}</button>
+      <div className="game-cockpit-actions">
+        <Link className="game-mode-link" to={mapFocus ? "/game" : "/game?mode=map"}>{mapFocus ? "Cockpit View" : "Map Focus"}</Link>
+        <div className={`game-session-pill ${session ? "game-session-pill-live" : ""}`}>
+          <span />
+          {session ? "Busy recording active" : "Recorder idle"}
+        </div>
+        <button className="btn" onClick={toggleSession}>{session ? "Stop Recording" : "Start Busy Recording"}</button>
+      </div>
     </div>
-    <GameStateHeader state={state} onChange={patch} />
-    <EditableGrid storageKey={gameGridStorageKey} items={gridItems} rowHeight={96} />
+    <GameStateHeader state={state} coachingMode={coaching.mode} onChange={patch} />
+    <div className="game-cockpit-grid">
+      <aside className="game-cockpit-column">
+        <ObjectiveTimerPanel state={state} onChange={patch} />
+        <LanePressurePanel state={state} onChange={patch} />
+        <QuickEventPad state={state} onEvent={addEvent} />
+        <CvStatusPanel cv={state.cv} />
+      </aside>
+      <main className="game-cockpit-map-column">
+        <MiniMapControl state={state} risk={risk} onChange={patch} />
+        <BusyModeRecorder session={session} events={state.events} />
+      </main>
+      <aside className="game-cockpit-column">
+        <CoachingFeed coaching={coaching} compact />
+        <GankRiskPanel risk={risk} />
+      </aside>
+    </div>
   </div>;
 }
