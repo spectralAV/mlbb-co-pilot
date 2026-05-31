@@ -95,6 +95,7 @@ export const getLaneRecognitionManifest = () => apiGet<any>("/api/vision/lanes/m
 export const getLatestDraftRecognition = () => apiGet<any>("/api/vision/draft/latest");
 export const ingestDraftRecognition = (state: unknown) => apiPost<any>("/api/vision/draft/recognition", state);
 export const getLatestLiveVision = () => apiGet<any>("/api/vision/live/latest");
+export const getLatestLiveObservation = () => apiGet<any>("/api/vision/live/observation");
 export const ingestLiveVisionFrame = (state: unknown) => apiPost<any>("/api/vision/live/frame", state);
 export const getScreenStateModel = () => apiGet<any>("/api/vision/models/screen-state");
 export const getScreenStateTrainingStatus = () => apiGet<any>("/api/vision/models/screen-state/status");

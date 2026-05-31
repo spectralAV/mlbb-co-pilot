@@ -38,6 +38,7 @@ export async function analyzeDraft(state:any) {
   const candidates = allHeroes.filter((h) => !picked.has(normalize(h.id)) && !picked.has(normalize(h.name ?? h.hero_name)));
   const selectedLane = (state.selectedLane ?? profile.preferredLane) as DraftLane | undefined;
   const comfortHeroes = state.myHeroPool?.length ? state.myHeroPool : profile.comfortHeroes;
+  const heroPerformance = profile.heroPerformance ?? [];
   const scored = candidates.map((hero) => scoreDraftHero(hero, {
     allies: ally,
     enemies: enemy,
@@ -45,7 +46,9 @@ export async function analyzeDraft(state:any) {
     role: state.myRole ?? state.selectedRole,
     lane: selectedLane,
     laneDetected: Boolean(state.selectedLane),
-    runtimeHero: runtimeByName.get(normalize(hero.name ?? hero.hero_name))
+    runtimeHero: runtimeByName.get(normalize(hero.name ?? hero.hero_name)),
+    rankProfile: profile.rankProfile,
+    heroPerformance
   })).sort((a, b) => b.score - a.score);
 
   const bestPick = scored[0] ?? null;
@@ -66,7 +69,9 @@ export async function analyzeDraft(state:any) {
       heroPool: comfortHeroes,
       selectedLane,
       laneDetected: Boolean(state.selectedLane),
-      runtimeByName
+      runtimeByName,
+      rankProfile: profile.rankProfile,
+      heroPerformance
     }),
     banSuggestions: suggestBans(state, enemy),
     context: {
@@ -74,6 +79,10 @@ export async function analyzeDraft(state:any) {
       selectedLaneSource: state.selectedLane ? "detected" : "profile",
       selfSlot: state.selfSlot ?? null,
       comfortHeroes,
+      rone: {
+        rankProfile: profile.rankProfile,
+        heroPerformance: heroPerformance.slice(0, 8),
+      },
     },
     battleSpells: recommendBattleSpells({
       selectedLane,

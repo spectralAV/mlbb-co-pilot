@@ -40,6 +40,78 @@ test("hero scoring favors comfort heroes that fit a detected lane", () => {
   assert.match(wrongLane.risks[0], /does not match detected gold lane/i);
 });
 
+test("hero scoring uses RONE hero performance and rank profile", () => {
+  const hero = { name: "Aamon", lanes: ["Jungle"], roles: ["Assassin"], semantic_tags: ["burst", "mobility"] };
+  const strongRone = scoreDraftHero(hero, {
+    allies: [],
+    enemies: [],
+    heroPool: [],
+    lane: "jungle",
+    laneDetected: true,
+    rankProfile: "Mythical Glory 52 stars",
+    heroPerformance: [{ hero: "Aamon", matches: 34, wins: 24, winRate: 70.6, bestScore: 850, source: "rone" }],
+    runtimeHero: { meta: { winRate: 56, appearanceRate: 12 } },
+  });
+  const weakRone = scoreDraftHero(hero, {
+    allies: [],
+    enemies: [],
+    heroPool: [],
+    lane: "jungle",
+    laneDetected: true,
+    rankProfile: "Mythical Glory 52 stars",
+    heroPerformance: [{ hero: "Aamon", matches: 34, wins: 13, winRate: 38.2, bestScore: 610, source: "rone" }],
+    runtimeHero: { meta: { winRate: 56, appearanceRate: 12 } },
+  });
+
+  assert.equal(strongRone.score > weakRone.score, true);
+  assert.ok(strongRone.reasons.some((reason) => /RONE profile: 34 matches \/ 70\.6% WR/i.test(reason)));
+  assert.ok(weakRone.risks.some((risk) => /RONE profile is only 38\.2% WR/i.test(risk)));
+});
+
+test("hero scoring prefers current-season RONE form over weak overall history", () => {
+  const currentSeasonForm = scoreDraftHero(
+    { name: "Lancelot", lanes: ["Jungle"], roles: ["Assassin"], semantic_tags: ["burst", "mobility"] },
+    {
+      allies: [],
+      enemies: [],
+      heroPool: [],
+      lane: "jungle",
+      laneDetected: true,
+      heroPerformance: [
+        { hero: "Lancelot", matches: 18, wins: 13, winRate: 72.2, bestScore: 910, source: "rone", scope: "current-season", seasonId: 37 },
+        { hero: "Lancelot", matches: 140, wins: 66, winRate: 47.1, bestScore: 760, source: "rone", scope: "overall" },
+      ],
+    },
+  );
+
+  assert.ok(currentSeasonForm.reasons.some((reason) => /RONE current season: 18 matches \/ 72\.2% WR/i.test(reason)));
+  assert.ok(currentSeasonForm.reasons.some((reason) => /overrides 47\.1% overall WR/i.test(reason)));
+  assert.equal(currentSeasonForm.risks.some((risk) => /47\.1% WR/i.test(risk)), false);
+});
+
+test("hero scoring falls back to overall RONE mechanics when current season is missing", () => {
+  const overallOnly = scoreDraftHero(
+    { name: "Fanny", lanes: ["Jungle"], roles: ["Assassin"], semantic_tags: ["mobility", "dive"] },
+    {
+      allies: [],
+      enemies: [],
+      heroPool: [],
+      lane: "jungle",
+      laneDetected: true,
+      heroPerformance: [
+        { hero: "Fanny", matches: 95, wins: 65, winRate: 68.4, bestScore: 920, source: "rone", scope: "overall" },
+      ],
+    },
+  );
+  const noRone = scoreDraftHero(
+    { name: "Fanny", lanes: ["Jungle"], roles: ["Assassin"], semantic_tags: ["mobility", "dive"] },
+    { allies: [], enemies: [], heroPool: [], lane: "jungle", laneDetected: true },
+  );
+
+  assert.equal(overallOnly.score > noRone.score, true);
+  assert.ok(overallOnly.reasons.some((reason) => /RONE overall mechanics: 95 matches \/ 68\.4% WR/i.test(reason)));
+});
+
 test("jungler recommendations favor utility jungle when team lacks control", () => {
   const heroes = [
     {
@@ -119,6 +191,42 @@ test("jungler recommendations expose runtime matchup risks", () => {
   assert.equal(aamon?.warningLevel, "high");
   assert.ok(aamon?.risks.some((risk) => /Akai/i.test(risk)));
   assert.ok((aamon?.breakdown.relations ?? 0) < 0);
+});
+
+test("jungler recommendations apply RONE frequent-hero performance", () => {
+  const heroes = [
+    {
+      id: 109,
+      name: "Aamon",
+      roles: ["Assassin"],
+      lanes: ["Jungle"],
+      specialties: ["Chase", "Magic Damage"],
+      semantic_tags: ["burst", "mobility", "magic-damage", "dive"]
+    },
+    {
+      id: 8,
+      name: "Karina",
+      roles: ["Assassin"],
+      lanes: ["Jungle"],
+      specialties: ["Finisher", "Magic Damage"],
+      semantic_tags: ["burst", "magic-damage"]
+    }
+  ];
+
+  const result = recommendJunglers(heroes, {
+    allies: [],
+    enemies: [],
+    unavailable: new Set(),
+    heroPool: [],
+    selectedLane: "jungle",
+    laneDetected: true,
+    runtimeByName: new Map(),
+    heroPerformance: [{ hero: "Karina", matches: 42, wins: 31, winRate: 73.8, bestScore: 870, source: "rone" }],
+    rankProfile: "Mythical Honor 31 stars"
+  });
+
+  assert.equal(result[0]?.hero, "Karina");
+  assert.ok(result[0]?.reasons.some((reason) => /RONE profile: 42 matches \/ 73\.8% WR/i.test(reason)));
 });
 
 test("draft auxiliary recognition is backed by installed-game atlas references", () => {

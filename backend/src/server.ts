@@ -29,7 +29,7 @@ import { getLatestDraftRecognition, ingestDraftRecognition } from "./vision/draf
 import { getHeroRecognitionManifest, getHeroRecognitionReference, heroRecognitionScenes } from "./vision/heroRecognition.js";
 import { getLaneRecognitionManifest, getLaneRecognitionReference } from "./vision/laneRecognition.js";
 import { compileSkinPortraitSignatures, fetchSkinPortrait, getSkinPortraitManifest, getSkinSignatureManifest, getSkinSignatureStatus, syncSkinPortraitManifest } from "./vision/skinPortraitRecognition.js";
-import { getLatestLiveVision, ingestLiveVisionFrame } from "./vision/liveVisionState.js";
+import { getLatestLiveVision, getLatestLiveVisionObservation, ingestLiveVisionFrame, parseLiveVisionFrameInput } from "./vision/liveVisionState.js";
 import { getScreenStateModel, getScreenStateTrainingStatus, trainScreenStateModel } from "./vision/screenStateTraining.js";
 import { getDraftHeroModel, getDraftHeroModelStatus, trainDraftHeroModel } from "./vision/draftHeroModelTraining.js";
 import { getLatestLiveReasoning, ingestLiveReasoning, listCoachReasoningScenarios } from "./engines/liveReasoningEngine.js";
@@ -234,7 +234,14 @@ app.get("/api/vision/scenes", async () => ({ success:true, data: heroRecognition
 app.get("/api/vision/draft/latest", async () => ({ success:true, data:getLatestDraftRecognition() }));
 app.post("/api/vision/draft/recognition", async (req) => ({ success:true, data:await ingestDraftRecognition(req.body as any) }));
 app.get("/api/vision/live/latest", async () => ({ success:true, data:getLatestLiveVision() }));
-app.post("/api/vision/live/frame", async (req) => ({ success:true, data:ingestLiveVisionFrame(req.body as any) }));
+app.get("/api/vision/live/observation", async () => ({ success:true, data:getLatestLiveVisionObservation() }));
+app.post("/api/vision/live/frame", async (req, reply) => {
+  try {
+    return { success:true, data:ingestLiveVisionFrame(parseLiveVisionFrameInput(req.body)) };
+  } catch (error) {
+    return reply.code(400).send({ success:false, error: error instanceof Error ? error.message : "Invalid live vision frame." });
+  }
+});
 app.get("/api/vision/reflections", async (req) => {
   const limit = Number((req.query as { limit?: string })?.limit ?? 50);
   return { success: true, data: await getVisionReflectionSummary(limit) };

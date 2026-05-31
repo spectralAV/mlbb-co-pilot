@@ -66,6 +66,8 @@ export interface CvGameStatus {
   numericConfidence?: number;
   screenType: CvScreenType;
   minimapRecognized: boolean;
+  objectiveTimersRecognized?: boolean;
+  recognizedObjectiveTimers?: string[];
   visibleEnemies: number;
   estimatedEnemyZones: MapZoneId[];
   stale: boolean;
@@ -175,6 +177,8 @@ export const defaultGameState = (): GameState => ({
     numericConfidence: 0,
     screenType: "unknown",
     minimapRecognized: false,
+    objectiveTimersRecognized: false,
+    recognizedObjectiveTimers: [],
     visibleEnemies: 0,
     estimatedEnemyZones: [],
     stale: true,

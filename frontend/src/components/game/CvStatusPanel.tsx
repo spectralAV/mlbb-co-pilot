@@ -20,9 +20,10 @@ export function CvStatusPanel({ cv }: { cv?: CvGameStatus }) {
   return <GamePanel title="CV Signal" icon={Radio} actions={<RiskBadge risk={connected ? riskForConfidence(confidence) : "high"}>{connected ? confidence : "offline"}</RiskBadge>}>
     <div className="cv-status-grid">
       <div><span>Status</span><b>{connected ? "Connected" : "Disconnected"}</b></div>
-      <div><span>Last obs</span><b>{ageLabel(cv?.lastObservationAt)}</b></div>
+      <div><span>Frame age</span><b>{ageLabel(cv?.lastObservationAt)}</b></div>
       <div><span>Screen</span><b>{(cv?.screenType ?? "unknown").replace(/_/g, " ")}</b></div>
       <div><span>Minimap</span><b>{cv?.minimapRecognized ? "Recognized" : "Uncertain"}</b></div>
+      <div><span>Timers</span><b>{cv?.objectiveTimersRecognized ? "Objective OCR" : "Not recognized"}</b></div>
       <div><span>Enemies</span><b>{cv?.visibleEnemies ?? 0} visible</b></div>
       <div><span>Source</span><b>{cv?.source ?? "hybrid"}</b></div>
     </div>

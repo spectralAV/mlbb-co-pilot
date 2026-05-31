@@ -148,6 +148,10 @@ function normalizeCvStatus(value: unknown, fallback: CvGameStatus | undefined): 
     numericConfidence: typeof value.numericConfidence === "number" ? value.numericConfidence : undefined,
     screenType,
     minimapRecognized: Boolean(value.minimapRecognized),
+    objectiveTimersRecognized: Boolean(value.objectiveTimersRecognized),
+    recognizedObjectiveTimers: Array.isArray(value.recognizedObjectiveTimers)
+      ? value.recognizedObjectiveTimers.filter((timer): timer is string => typeof timer === "string").slice(0, 4)
+      : [],
     visibleEnemies: Math.max(0, Math.floor(Number(value.visibleEnemies) || 0)),
     estimatedEnemyZones: Array.isArray(value.estimatedEnemyZones) ? value.estimatedEnemyZones.map(normalizeZoneId).filter((zone): zone is MapZoneId => Boolean(zone)) : [],
     stale: Boolean(value.stale),

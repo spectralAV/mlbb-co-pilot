@@ -54,11 +54,19 @@ export function startGameSession(input: { hero?: string; role: Role }) {
 export function appendGameEvent(sessionId: string, event: GameEvent) {
   const sessions = readSessions().map((session) => {
     if (session.id !== sessionId) return session;
-    if (session.events.some((existing) => existing.id === event.id)) return session;
+    if (session.events.some((existing) => isDuplicateSessionEvent(existing, event))) return session;
     return { ...session, events: [event, ...session.events].slice(0, 120) };
   });
   writeSessions(sessions);
   return sessions.find((session) => session.id === sessionId) ?? null;
+}
+
+export function isDuplicateSessionEvent(existing: GameEvent, incoming: GameEvent) {
+  if (existing.id === incoming.id) return true;
+  if (incoming.source !== "cv" || existing.source !== "cv") return false;
+  return existing.type === incoming.type &&
+    existing.label === incoming.label &&
+    Math.abs(existing.timestamp - incoming.timestamp) < 10_000;
 }
 
 export function appendSnapshot(sessionId: string, coaching: LiveCoachingOutput, risk: GankRiskOutput) {

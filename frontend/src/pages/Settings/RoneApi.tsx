@@ -12,6 +12,7 @@ type Snapshot = {
   ranks?: any;
   matches?: any;
   frequentHeroes?: any;
+  overallFrequentHeroes?: any;
   friends?: any;
 };
 
@@ -254,6 +255,7 @@ export function RoneApi() {
   const peakRank = rankInfo(info.history_rank_level, snapshot.ranks ?? catalog?.ranks);
   const matches = payloadItems(snapshot.matches);
   const frequentHeroes = payloadItems(snapshot.frequentHeroes);
+  const overallFrequentHeroes = payloadItems(snapshot.overallFrequentHeroes);
   const friendCount = (snapshot.friends?.data?.fs?.length ?? 0) + (snapshot.friends?.data?.wfs?.length ?? 0);
   const winRate = percent(stats.wc, stats.tc);
   const statHighlights = [
@@ -354,12 +356,13 @@ export function RoneApi() {
       const ranks = await getRonePublic("academy/ranks", { size: 100, lang: "en" }).catch(() => catalog?.ranks ?? null);
       const nextSeason = selectedSeason || firstSeasonId(seasons, stats);
       if (!selectedSeason && nextSeason) setSeasonId(String(nextSeason));
-      const [matches, frequentHeroes, friends] = nextSeason ? await Promise.all([
+      const [matches, frequentHeroes, overallFrequentHeroes, friends] = nextSeason ? await Promise.all([
         getRoneUser("matches", token, { sid: nextSeason, limit: 10, lang: "en" }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) })),
         getRoneUser("heroes/frequent", token, { sid: nextSeason, limit: 12, lang: "en" }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) })),
+        getRoneUser("heroes/frequent", token, { limit: 30, lang: "en" }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) })),
         getRoneUser("friends", token, { sid: nextSeason, lang: "en" }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) })),
-      ]) : [null, null, null];
-      const nextSnapshot = { info, stats, seasons, ranks, matches, frequentHeroes, friends };
+      ]) : [null, null, null, null];
+      const nextSnapshot = { info, stats, seasons, ranks, matches, frequentHeroes, overallFrequentHeroes, friends };
       setSnapshot(nextSnapshot);
       const saved = await saveRoneSnapshot({ seasonId: nextSeason || undefined, snapshot: nextSnapshot });
       setSnapshotStoredAt(String(saved?.data?.storedAt ?? new Date().toISOString()));
@@ -485,7 +488,8 @@ export function RoneApi() {
             <SnapshotMetric label="MVPs" value={stats.mvpc ?? "-"} detail={stats.wsc ? `${stats.wsc} win streak` : "Season record"} />
             <SnapshotMetric label="Seasons" value={seasons.length || "-"} detail={seasons.slice(0, 4).join(", ")} />
             <SnapshotMetric label="Recent" value={matches.length || "-"} detail={snapshot.matches?.error ?? "Matches loaded"} />
-            <SnapshotMetric label="Frequent" value={frequentHeroes.length || "-"} detail={snapshot.frequentHeroes?.error ?? heroNames(snapshot.frequentHeroes)} />
+            <SnapshotMetric label="Season Heroes" value={frequentHeroes.length || "-"} detail={snapshot.frequentHeroes?.error ?? heroNames(snapshot.frequentHeroes)} />
+            <SnapshotMetric label="Overall Heroes" value={overallFrequentHeroes.length || "-"} detail={snapshot.overallFrequentHeroes?.error ?? heroNames(snapshot.overallFrequentHeroes)} />
             <SnapshotMetric label="Friends" value={friendCount || "-"} detail={snapshot.friends?.error ?? "Rone friends list"} />
           </div>
         </div>

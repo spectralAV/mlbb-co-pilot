@@ -3,8 +3,9 @@ import { ingestLiveReasoning } from "../engines/liveReasoningEngine.js";
 import { DETECTED_FACT_CONFIDENCE, getMatchState, updateMatchVision } from "../state/matchState.js";
 import { updateMinimapMonitor, type MinimapMonitorSnapshot } from "./minimapMonitor.js";
 import type { ScreenTextFact } from "./screenTextRecognition.js";
-import type { TimerFact } from "./timerRecognition.js";
+import { timerClasses, type TimerFact } from "./timerRecognition.js";
 import { recordVisionReflection } from "./visionReflection.js";
+import { z } from "zod";
 
 export type VisionScreenState =
   | "unknown"
@@ -17,6 +18,19 @@ export type VisionScreenState =
   | "item_shop";
 
 export type VisionDirectorScene = "main" | "map" | "text" | "counter" | "picks";
+
+const visionScreenStates: readonly VisionScreenState[] = ["unknown", "lobby", "draft", "loading", "live_hud", "death_replay", "scoreboard", "item_shop"];
+const liveVisionFrameEnvelopeSchema = z.object({
+  frameId: z.unknown().optional(),
+  source: z.unknown().optional(),
+  timestamp: z.unknown().optional(),
+  screen: z.unknown().optional(),
+  confidence: z.unknown().optional(),
+  evidence: z.unknown().optional(),
+  regions: z.unknown().optional(),
+  minimapMarkers: z.unknown().optional(),
+  signals: z.unknown().optional(),
+}).passthrough();
 
 type NormalizedMarker = {
   id: string;
@@ -81,6 +95,7 @@ type VisionFrameInput = {
     enemyHealingThreats?: string[];
     enemyItems?: string[];
     enemyEquipment?: EquipmentFact[];
+    allyItems?: string[];
     allyEquipment?: EquipmentFact[];
     yoloDetections?: ModelDetectionFact[];
     minimapObjects?: MapObjectFact[];
@@ -122,11 +137,65 @@ export type LiveVisionSnapshot = {
   updatedAt: string;
 };
 
+export type LiveVisionObservationSummary = {
+  available: boolean;
+  connected: boolean;
+  stale: boolean;
+  timestamp: number | null;
+  ageMs: number | null;
+  source: string | null;
+  screen: VisionScreenState;
+  confidence: "low" | "medium" | "high";
+  numericConfidence: number;
+  minimap: {
+    recognized: boolean;
+    markerCount: number;
+    visibleAllies: number;
+    visibleEnemies: number;
+    lastSeenEnemies: number;
+    objectCount: number;
+    visibleObjectives: Array<"turtle" | "lord">;
+  };
+  objectiveTimers: {
+    recognized: boolean;
+    timerTypes: string[];
+  };
+  detections: {
+    yolo: number;
+    equipment: {
+      ally: number;
+      enemy: number;
+    };
+    screenText: number;
+  };
+  warning?: string;
+  updatedAt: string | null;
+};
+
+const staleObservationMs = 5000;
 let latest: LiveVisionSnapshot | null = null;
 let rememberedEnemyItems: string[] = [];
 let rememberedEnemyEquipment: EquipmentFact[] = [];
 let rememberedAllyItems: string[] = [];
 let rememberedAllyEquipment: EquipmentFact[] = [];
+
+export function parseLiveVisionFrameInput(payload: unknown): VisionFrameInput {
+  const parsed = liveVisionFrameEnvelopeSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("Live vision frame must be a JSON object.");
+  const input = parsed.data;
+  const signals = parseInputSignals(input.signals);
+  return {
+    frameId: optionalString(input.frameId),
+    source: optionalString(input.source),
+    timestamp: optionalNumber(input.timestamp),
+    screen: normalizeScreen(input.screen),
+    confidence: optionalNumber(input.confidence),
+    evidence: normalizeStrings(input.evidence),
+    regions: parseInputRegions(input.regions),
+    minimapMarkers: parseInputMarkers(input.minimapMarkers),
+    ...(signals ? { signals } : {}),
+  };
+}
 
 export function ingestLiveVisionFrame(input: VisionFrameInput) {
   const screen = normalizeScreen(input.screen);
@@ -208,8 +277,286 @@ export function getLatestLiveVision() {
   return latest;
 }
 
-function normalizeScreen(value?: VisionScreenState): VisionScreenState {
-  return ["unknown", "lobby", "draft", "loading", "live_hud", "death_replay", "scoreboard", "item_shop"].includes(String(value))
+export function getLatestLiveVisionObservation(now = Date.now()): LiveVisionObservationSummary {
+  if (!latest) return emptyObservationSummary();
+  const ageMs = Math.max(0, now - latest.timestamp);
+  const stale = ageMs > staleObservationMs;
+  const timerTypes = latest.signals.timerFacts
+    .filter((fact) => ["turtle_respawn_timer", "lord_respawn_timer", "minimap_objective_timer"].includes(fact.timerType))
+    .map((fact) => fact.timerType);
+  const markerCount = latest.minimapMarkers.length;
+  const monitor = latest.signals.mapMonitor;
+  const minimapRecognized = latest.screen === "live_hud" &&
+    latest.confidence >= DETECTED_FACT_CONFIDENCE &&
+    (markerCount > 0 || monitor.visibleAllies > 0 || monitor.visibleEnemies > 0 || latest.regions.minimap !== undefined);
+  return {
+    available: true,
+    connected: !stale,
+    stale,
+    timestamp: latest.timestamp,
+    ageMs,
+    source: latest.source,
+    screen: latest.screen,
+    confidence: confidenceLabel(latest.confidence, stale),
+    numericConfidence: latest.confidence,
+    minimap: {
+      recognized: minimapRecognized,
+      markerCount,
+      visibleAllies: monitor.visibleAllies,
+      visibleEnemies: monitor.visibleEnemies,
+      lastSeenEnemies: monitor.lastSeenEnemies,
+      objectCount: monitor.objects.length,
+      visibleObjectives: monitor.visibleObjectives,
+    },
+    objectiveTimers: {
+      recognized: timerTypes.length > 0,
+      timerTypes,
+    },
+    detections: {
+      yolo: latest.signals.yoloDetections.length,
+      equipment: {
+        ally: latest.signals.allyEquipment.length,
+        enemy: latest.signals.enemyEquipment.length,
+      },
+      screenText: latest.signals.screenTextFacts.length,
+    },
+    warning: stale
+      ? "CV observation stale"
+      : latest.screen === "live_hud" && !minimapRecognized
+        ? "Minimap not confidently recognized"
+        : latest.signals.warning,
+    updatedAt: latest.updatedAt,
+  };
+}
+
+function emptyObservationSummary(): LiveVisionObservationSummary {
+  return {
+    available: false,
+    connected: false,
+    stale: true,
+    timestamp: null,
+    ageMs: null,
+    source: null,
+    screen: "unknown",
+    confidence: "low",
+    numericConfidence: 0,
+    minimap: {
+      recognized: false,
+      markerCount: 0,
+      visibleAllies: 0,
+      visibleEnemies: 0,
+      lastSeenEnemies: 0,
+      objectCount: 0,
+      visibleObjectives: [],
+    },
+    objectiveTimers: {
+      recognized: false,
+      timerTypes: [],
+    },
+    detections: {
+      yolo: 0,
+      equipment: { ally: 0, enemy: 0 },
+      screenText: 0,
+    },
+    warning: "CV disconnected",
+    updatedAt: null,
+  };
+}
+
+function parseInputRegions(value: unknown): VisionFrameInput["regions"] | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const regions: VisionFrameInput["regions"] = {};
+  for (const [key, rawMetrics] of Object.entries(record)) {
+    const metrics = asRecord(rawMetrics);
+    if (!metrics) continue;
+    regions[key] = {
+      mean: optionalNumber(metrics.mean),
+      contrast: optionalNumber(metrics.contrast),
+      changed: optionalNumber(metrics.changed),
+      active: typeof metrics.active === "boolean" ? metrics.active : undefined,
+    };
+  }
+  return Object.keys(regions).length ? regions : undefined;
+}
+
+function parseInputMarkers(value: unknown): NormalizedMarker[] | undefined {
+  const markers = recordArray(value)
+    .map((marker, index) => {
+      const side = marker.side === "enemy" || marker.side === "ally" ? marker.side : null;
+      const minimap = normalizePoint(marker.minimap);
+      const confidence = optionalNumber(marker.confidence);
+      if (!side || !minimap || confidence === undefined) return null;
+      const heroName = optionalString(marker.heroName);
+      const heroId = optionalNumber(marker.heroId);
+      const heroIcon = optionalString(marker.heroIcon);
+      const identityConfidence = optionalNumber(marker.identityConfidence);
+      return {
+        id: optionalString(marker.id) ?? `${side}-${index}`,
+        side,
+        markerClass: marker.markerClass === "ultralytics-yolo" ? "ultralytics-yolo" as const : "team-color-candidate" as const,
+        minimap,
+        confidence,
+        ...(Number.isFinite(heroId) ? { heroId } : {}),
+        ...(heroName ? { heroName } : {}),
+        ...(heroIcon ? { heroIcon } : {}),
+        ...(identityConfidence !== undefined ? { identityConfidence } : {}),
+        ...(marker.identitySource === "minimap-hero-identity" ? { identitySource: "minimap-hero-identity" as const } : {}),
+      };
+    })
+    .filter((marker): marker is NormalizedMarker => Boolean(marker))
+    .slice(0, 20);
+  return markers.length ? markers : undefined;
+}
+
+function parseInputSignals(value: unknown): VisionFrameInput["signals"] | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const signals: NonNullable<VisionFrameInput["signals"]> = {};
+  if (typeof record.objectiveSoon === "boolean") signals.objectiveSoon = record.objectiveSoon;
+  signals.objectiveName = optionalString(record.objectiveName);
+  signals.objectiveSpawnsInSec = optionalNumber(record.objectiveSpawnsInSec);
+  signals.missingEnemyCount = optionalNumber(record.missingEnemyCount);
+  signals.missingEnemies = normalizeStrings(record.missingEnemies);
+  if (typeof record.riverVision === "boolean") signals.riverVision = record.riverVision;
+  signals.warning = optionalString(record.warning);
+  if (typeof record.teamHasAntiHeal === "boolean") signals.teamHasAntiHeal = record.teamHasAntiHeal;
+  signals.enemyHealingThreats = normalizeStrings(record.enemyHealingThreats);
+  signals.enemyItems = normalizeStrings(record.enemyItems);
+  signals.allyItems = normalizeStrings(record.allyItems);
+  signals.enemyEquipment = parseInputEquipmentFacts(record.enemyEquipment, "enemy");
+  signals.allyEquipment = parseInputEquipmentFacts(record.allyEquipment, "ally");
+  signals.yoloDetections = parseInputModelDetections(record.yoloDetections);
+  signals.minimapObjects = parseInputMapObjects(record.minimapObjects);
+  signals.timerFacts = parseInputTimerFacts(record.timerFacts);
+  signals.screenTextFacts = parseInputScreenTextFacts(record.screenTextFacts);
+
+  for (const key of Object.keys(signals) as Array<keyof typeof signals>) {
+    const entry = signals[key];
+    if (Array.isArray(entry) && !entry.length) delete signals[key];
+    else if (entry === undefined) delete signals[key];
+  }
+  return Object.keys(signals).length ? signals : undefined;
+}
+
+function parseInputEquipmentFacts(value: unknown, side: "ally" | "enemy"): EquipmentFact[] {
+  return recordArray(value)
+    .map((fact) => ({
+      itemId: Number(fact.itemId),
+      itemName: String(fact.itemName ?? "").trim(),
+      side,
+      row: Number(fact.row),
+      slot: Number(fact.slot),
+      confidence: Number(fact.confidence),
+      source: "equipment-item-icon" as const,
+    }))
+    .filter((fact) => Number.isFinite(fact.itemId) && Boolean(fact.itemName) && Number.isFinite(fact.confidence))
+    .slice(0, 30);
+}
+
+function parseInputModelDetections(value: unknown): ModelDetectionFact[] {
+  return recordArray(value)
+    .map((fact) => {
+      const bbox = normalizeBox(fact.bbox);
+      const center = normalizePoint(fact.center);
+      const trackId = optionalString(fact.trackId);
+      if (!bbox || !center) return null;
+      const detection: ModelDetectionFact = {
+        classId: Number(fact.classId),
+        className: String(fact.className ?? "").trim(),
+        confidence: Number(fact.confidence),
+        bbox,
+        center,
+        source: "ultralytics-yolo" as const,
+      };
+      const trackAge = optionalNumber(fact.trackAge);
+      const trackMissingFrames = optionalNumber(fact.trackMissingFrames);
+      if (trackId) detection.trackId = trackId;
+      if (trackAge !== undefined) detection.trackAge = trackAge;
+      if (trackMissingFrames !== undefined) detection.trackMissingFrames = trackMissingFrames;
+      return detection;
+    })
+    .filter((fact): fact is ModelDetectionFact => Boolean(fact && Number.isInteger(fact.classId) && fact.className && Number.isFinite(fact.confidence)))
+    .slice(0, 64);
+}
+
+function parseInputMapObjects(value: unknown): MapObjectFact[] {
+  return recordArray(value)
+    .map((fact) => {
+      const objectType = String(fact.objectType ?? "");
+      const minimap = normalizePoint(fact.minimap);
+      if (!["turtle", "lord", "ally_turret", "enemy_turret"].includes(objectType) || !minimap) return null;
+      return {
+        objectType: objectType as MapObjectFact["objectType"],
+        minimap,
+        confidence: Number(fact.confidence),
+        source: "ultralytics-yolo" as const,
+      };
+    })
+    .filter((fact): fact is MapObjectFact => Boolean(fact && Number.isFinite(fact.confidence)))
+    .slice(0, 24);
+}
+
+function parseInputTimerFacts(value: unknown): TimerFact[] {
+  return recordArray(value)
+    .map((fact) => {
+      const timerType = String(fact.timerType ?? "");
+      if (!timerClasses.includes(timerType as TimerFact["timerType"]) || fact.source !== "timer-ocr") return null;
+      const timerFact: TimerFact = {
+        timerType: timerType as TimerFact["timerType"],
+        text: String(fact.text ?? ""),
+        confidence: Number(fact.confidence),
+        source: "timer-ocr" as const,
+        confirmedAt: Number(fact.confirmedAt),
+      };
+      const seconds = optionalNumber(fact.seconds);
+      const value = optionalNumber(fact.value);
+      const kills = optionalNumber(fact.kills);
+      const deaths = optionalNumber(fact.deaths);
+      const assists = optionalNumber(fact.assists);
+      if (seconds !== undefined) timerFact.seconds = seconds;
+      if (value !== undefined) timerFact.value = value;
+      if (kills !== undefined) timerFact.kills = kills;
+      if (deaths !== undefined) timerFact.deaths = deaths;
+      if (assists !== undefined) timerFact.assists = assists;
+      return timerFact;
+    })
+    .filter((fact): fact is TimerFact => Boolean(fact && Number.isFinite(fact.confidence) && Number.isFinite(fact.confirmedAt)))
+    .slice(0, 8);
+}
+
+function parseInputScreenTextFacts(value: unknown): ScreenTextFact[] {
+  return recordArray(value)
+    .map((fact) => {
+      const rect = normalizeBox(fact.rect);
+      if (!rect || fact.source !== "paddleocr-screen") return null;
+      const screenTextFact: ScreenTextFact = {
+        region: String(fact.region ?? "").trim(),
+        text: String(fact.text ?? "").replace(/\s+/g, " ").trim(),
+        confidence: Number(fact.confidence),
+        rect,
+        words: recordArray(fact.words)
+          .map((word) => {
+            const candidate: ScreenTextFact["words"][number] = {
+              text: String(word.text ?? "").replace(/\s+/g, " ").trim(),
+              confidence: Number(word.confidence),
+            };
+            if (word.bbox !== undefined) candidate.bbox = word.bbox;
+            return candidate;
+          })
+          .filter((word) => word.text && Number.isFinite(word.confidence))
+          .slice(0, 16),
+        source: "paddleocr-screen" as const,
+        observedAt: Number(fact.observedAt),
+      };
+      return screenTextFact;
+    })
+    .filter((fact): fact is ScreenTextFact => Boolean(fact && fact.region && fact.text && Number.isFinite(fact.confidence) && Number.isFinite(fact.observedAt)))
+    .slice(0, 8);
+}
+
+function normalizeScreen(value?: unknown): VisionScreenState {
+  return visionScreenStates.includes(String(value) as VisionScreenState)
     ? value as VisionScreenState
     : "unknown";
 }
@@ -272,6 +619,19 @@ function optionalNumber(value: unknown) {
   return Number.isFinite(number) ? number : undefined;
 }
 
+function optionalString(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text ? text : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function recordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(asRecord(item))) : [];
+}
+
 function normalizeStrings(value: unknown) {
   return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 10) : [];
 }
@@ -279,15 +639,18 @@ function normalizeStrings(value: unknown) {
 function normalizeEquipmentFacts(value: unknown, side: "ally" | "enemy"): EquipmentFact[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((fact: any) => ({
-      itemId: Number(fact?.itemId),
-      itemName: String(fact?.itemName ?? "").trim(),
-      side,
-      row: Number(fact?.row),
-      slot: Number(fact?.slot),
-      confidence: clamp01(fact?.confidence),
-      source: "equipment-item-icon" as const,
-    }))
+    .map((value) => {
+      const fact = asRecord(value);
+      return {
+        itemId: Number(fact?.itemId),
+        itemName: String(fact?.itemName ?? "").trim(),
+        side,
+        row: Number(fact?.row),
+        slot: Number(fact?.slot),
+        confidence: clamp01(fact?.confidence),
+        source: "equipment-item-icon" as const,
+      };
+    })
     .filter((fact) =>
       Number.isFinite(fact.itemId) &&
       Boolean(fact.itemName) &&
@@ -300,7 +663,8 @@ function normalizeEquipmentFacts(value: unknown, side: "ally" | "enemy"): Equipm
 function normalizeModelDetections(value: unknown): ModelDetectionFact[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((fact: any) => {
+    .map((value) => {
+      const fact = asRecord(value);
       const trackId = String(fact?.trackId ?? "").trim();
       return {
         classId: Number(fact?.classId),
@@ -365,12 +729,15 @@ function reflectLiveVisionSnapshot(snapshot: LiveVisionSnapshot) {
 function normalizeMapObjects(value: unknown): MapObjectFact[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((fact: any) => ({
-      objectType: String(fact?.objectType ?? ""),
-      minimap: normalizePoint(fact?.minimap),
-      confidence: clamp01(fact?.confidence),
-      source: "ultralytics-yolo" as const,
-    }))
+    .map((value) => {
+      const fact = asRecord(value);
+      return {
+        objectType: String(fact?.objectType ?? ""),
+        minimap: normalizePoint(fact?.minimap),
+        confidence: clamp01(fact?.confidence),
+        source: "ultralytics-yolo" as const,
+      };
+    })
     .filter((fact): fact is MapObjectFact =>
       ["turtle", "lord", "ally_turret", "enemy_turret"].includes(fact.objectType) &&
       fact.minimap !== null &&
@@ -381,18 +748,21 @@ function normalizeMapObjects(value: unknown): MapObjectFact[] {
 function normalizeTimerFacts(value: unknown): TimerFact[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((fact: any) => ({
-      timerType: String(fact?.timerType),
-      text: String(fact?.text ?? ""),
-      seconds: optionalNumber(fact?.seconds),
-      value: optionalNumber(fact?.value),
-      kills: optionalNumber(fact?.kills),
-      deaths: optionalNumber(fact?.deaths),
-      assists: optionalNumber(fact?.assists),
-      confidence: clamp01(fact?.confidence),
-      source: String(fact?.source ?? ""),
-      confirmedAt: Number(fact?.confirmedAt),
-    }))
+    .map((value) => {
+      const fact = asRecord(value);
+      return {
+        timerType: String(fact?.timerType),
+        text: String(fact?.text ?? ""),
+        seconds: optionalNumber(fact?.seconds),
+        value: optionalNumber(fact?.value),
+        kills: optionalNumber(fact?.kills),
+        deaths: optionalNumber(fact?.deaths),
+        assists: optionalNumber(fact?.assists),
+        confidence: clamp01(fact?.confidence),
+        source: String(fact?.source ?? ""),
+        confirmedAt: Number(fact?.confirmedAt),
+      };
+    })
     .filter((fact) =>
       [
         "turtle_respawn_timer",
@@ -418,21 +788,27 @@ function normalizeTimerFacts(value: unknown): TimerFact[] {
 function normalizeScreenTextFacts(value: unknown): ScreenTextFact[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((fact: any) => ({
-      region: String(fact?.region ?? "").trim(),
-      text: String(fact?.text ?? "").replace(/\s+/g, " ").trim(),
-      confidence: clamp01(fact?.confidence),
-      rect: normalizeBox(fact?.rect),
-      words: Array.isArray(fact?.words)
-        ? fact.words.map((word: any) => ({
-          text: String(word?.text ?? "").replace(/\s+/g, " ").trim(),
-          confidence: clamp01(word?.confidence),
-          bbox: word?.bbox,
-        })).filter((word: any) => word.text).slice(0, 16)
-        : [],
-      source: String(fact?.source ?? ""),
-      observedAt: Number(fact?.observedAt),
-    }))
+    .map((value) => {
+      const fact = asRecord(value);
+      return {
+        region: String(fact?.region ?? "").trim(),
+        text: String(fact?.text ?? "").replace(/\s+/g, " ").trim(),
+        confidence: clamp01(fact?.confidence),
+        rect: normalizeBox(fact?.rect),
+        words: Array.isArray(fact?.words)
+          ? fact.words.map((value: unknown) => {
+            const word = asRecord(value);
+            return {
+              text: String(word?.text ?? "").replace(/\s+/g, " ").trim(),
+              confidence: clamp01(word?.confidence),
+              bbox: word?.bbox,
+            };
+          }).filter((word) => word.text).slice(0, 16)
+          : [],
+        source: String(fact?.source ?? ""),
+        observedAt: Number(fact?.observedAt),
+      };
+    })
     .filter((fact) =>
       Boolean(fact.region) &&
       Boolean(fact.text) &&
@@ -463,6 +839,13 @@ function isAntiHealItem(item: string) {
 function finiteOrZero(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+function confidenceLabel(value: number, stale = false): "low" | "medium" | "high" {
+  if (stale) return "low";
+  if (value >= 0.72) return "high";
+  if (value >= DETECTED_FACT_CONFIDENCE) return "medium";
+  return "low";
 }
 
 function clamp01(value: unknown) {

@@ -20,6 +20,7 @@ export type GameObservation = {
   lanePressure?: Partial<Record<LaneId, LanePressure>>;
   dangerZones: MapZoneId[];
   objectiveTimers?: Partial<GameState["objectiveTimers"]>;
+  recognizedObjectiveTimers: string[];
   detectedEvents: GameEvent[];
   raw?: unknown;
 };
@@ -39,6 +40,7 @@ export function gameObservationFromLiveVision(snapshot: unknown): GameObservatio
   const estimatedEnemyZones = estimateEnemyZones(markers);
   const timerFacts = recordArray(signals.timerFacts);
   const objectiveTimers = objectiveTimersFromFacts(timerFacts);
+  const recognizedObjectiveTimers = recognizedObjectiveTimerTypes(timerFacts);
   const matchTimeSeconds = matchTimerFromFacts(timerFacts);
   const dangerZones = [
     ...estimatedEnemyZones,
@@ -58,6 +60,7 @@ export function gameObservationFromLiveVision(snapshot: unknown): GameObservatio
     lanePressure: normalizeLanePressure(signals.lanePressure),
     dangerZones: uniqueZones(dangerZones),
     objectiveTimers,
+    recognizedObjectiveTimers,
     detectedEvents: detectedEventsFromVision(screenType, confidence, timestamp),
     raw: sourceData
   };
@@ -124,6 +127,8 @@ export function cvStatusFromObservation(observation: GameObservation): CvGameSta
     numericConfidence: observation.confidence,
     screenType: observation.screenType,
     minimapRecognized: observation.minimapRecognized,
+    objectiveTimersRecognized: observation.recognizedObjectiveTimers.length > 0,
+    recognizedObjectiveTimers: observation.recognizedObjectiveTimers,
     visibleEnemies: observation.visibleEnemies,
     estimatedEnemyZones: observation.estimatedEnemyZones,
     stale,
@@ -139,6 +144,8 @@ export function disconnectedStatus(): CvGameStatus {
     numericConfidence: 0,
     screenType: "unknown",
     minimapRecognized: false,
+    objectiveTimersRecognized: false,
+    recognizedObjectiveTimers: [],
     visibleEnemies: 0,
     estimatedEnemyZones: [],
     stale: true,
@@ -159,6 +166,16 @@ function objectiveTimersFromFacts(timerFacts: Array<Record<string, unknown>>): P
     if (fact.timerType === "lord_respawn_timer") timers.lord = seconds;
     return timers;
   }, {} as Partial<GameState["objectiveTimers"]>);
+}
+
+function recognizedObjectiveTimerTypes(timerFacts: Array<Record<string, unknown>>) {
+  return timerFacts
+    .filter((fact) =>
+      fact?.source === "timer-ocr" &&
+      Number(fact?.confidence ?? 0) >= strongCvConfidence &&
+      ["turtle_respawn_timer", "lord_respawn_timer", "minimap_objective_timer"].includes(String(fact?.timerType)))
+    .map((fact) => String(fact.timerType))
+    .slice(0, 4);
 }
 
 function matchTimerFromFacts(timerFacts: Array<Record<string, unknown>>) {

@@ -1,3 +1,6 @@
+import type { HeroPerformance } from "../services/playerProfile.js";
+import { rankDraftSignal, roneHeroSignal } from "./roneDraftSignals.js";
+
 export type JunglerBoots = "Tough Boots" | "Warrior Boots" | "Arcane Boots" | "Swift Boots" | "Magic Shoes";
 export type JunglerBlessing = "Ice" | "Flame" | "Bloody";
 
@@ -51,6 +54,8 @@ type RecommendationContext = {
   selectedLane?: string;
   laneDetected?: boolean;
   runtimeByName?: Map<string, RuntimeHero>;
+  rankProfile?: string;
+  heroPerformance?: HeroPerformance[];
 };
 
 const PHYSICAL_ROLES = new Set(["fighter", "marksman", "assassin"]);
@@ -356,19 +361,26 @@ export function recommendJunglers(allHeroes: any[], context: RecommendationConte
       const name = compactName(hero);
       const comfort = comfortPool.has(normalize(name)) ? 10 : comfortPool.size ? -5 : 0;
       const laneAdjustment = selectedLane && selectedLane !== "jungle" ? -8 : selectedLane === "jungle" ? 5 : 0;
-      const score = clampScore(58 + meta + team.score + enemy.score + relations.score + comfort + laneAdjustment);
+      const roneSignal = roneHeroSignal(name, context.heroPerformance);
+      const rankSignal = rankDraftSignal(context.rankProfile, clampScore(55 + meta), clampScore(55 + enemy.score + relations.score));
+      const score = clampScore(58 + meta + team.score + enemy.score + relations.score + comfort + laneAdjustment + (roneSignal?.adjustment ?? 0) + rankSignal.adjustment);
       const risks = unique([
         ...team.risks,
         ...enemy.risks,
         ...relations.risks,
+        ...(roneSignal?.risk ? [roneSignal.risk] : []),
+        ...(rankSignal.risk ? [rankSignal.risk] : []),
         ...(selectedLane && selectedLane !== "jungle" ? [`Detected lane is ${selectedLane}; use this only if you are switching to jungle`] : [])
       ]);
       const reasons = unique([
         ...(comfort > 0 ? ["Comfort-pick match"] : []),
+        ...(roneSignal?.reason ? [roneSignal.reason] : []),
         ...(selectedLane === "jungle" ? [context.laneDetected ? "Fits detected jungle lane" : "Fits preferred jungle lane"] : []),
         ...team.reasons,
         ...enemy.reasons,
         ...relations.reasons,
+        ...(roneSignal?.secondaryReason ? [roneSignal.secondaryReason] : []),
+        ...(rankSignal.reason ? [rankSignal.reason] : []),
         ...(meta > 5 ? ["Strong current meta signal"] : [])
       ]);
       if (!reasons.length) reasons.push("Stable jungle option for the current draft");
@@ -388,7 +400,7 @@ export function recommendJunglers(allHeroes: any[], context: RecommendationConte
           teamBalance: Math.round(team.score),
           enemyFit: Math.round(enemy.score),
           relations: Math.round(relations.score),
-          comfort: Math.round(comfort + laneAdjustment)
+          comfort: Math.round(comfort + laneAdjustment + (roneSignal?.adjustment ?? 0))
         },
         reasons: reasons.slice(0, 5),
         risks: risks.slice(0, 4),

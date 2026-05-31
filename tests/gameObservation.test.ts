@@ -31,7 +31,20 @@ test("CV observation updates objective timers only when confidence is high", () 
       ]
     }
   });
-  assert.equal(mergeObservationIntoGameState(state, high).objectiveTimers.turtle, 22);
+  const merged = mergeObservationIntoGameState(state, high);
+  assert.equal(merged.objectiveTimers.turtle, 22);
+  assert.equal(merged.cv?.objectiveTimersRecognized, true);
+  assert.deepEqual(merged.cv?.recognizedObjectiveTimers, ["turtle_respawn_timer"]);
+});
+
+test("manual-only fallback keeps disconnected CV status without changing live inputs", () => {
+  const state = defaultGameState();
+  const merged = mergeObservationIntoGameState(state, null);
+
+  assert.equal(merged.cv?.connected, false);
+  assert.equal(merged.cv?.objectiveTimersRecognized, false);
+  assert.equal(merged.objectiveTimers.turtle, state.objectiveTimers.turtle);
+  assert.deepEqual(merged.lanePressure, state.lanePressure);
 });
 
 test("low-confidence CV lowers status but does not invent enemy positions", () => {

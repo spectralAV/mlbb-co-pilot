@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { RONE_API_BASE } from "../config.js";
 import { cache } from "../services/cacheService.js";
-import { getPlayerProfile, savePlayerProfile } from "../services/playerProfile.js";
+import { getPlayerProfile, savePlayerProfile, type HeroPerformance } from "../services/playerProfile.js";
 import { RoneApiError, roneApi } from "../services/roneApiService.js";
 
 const AccountSchema = z.object({
@@ -111,6 +111,49 @@ function heroName(item: any) {
   return item?.hid_e?.n ?? data?.hero?.data?.name ?? data?.name ?? data?.n ?? "";
 }
 
+function numberValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function rateValue(value: unknown) {
+  const parsed = numberValue(value);
+  if (parsed <= 0) return 0;
+  return parsed <= 1 ? parsed * 100 : Math.min(100, parsed);
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    const parsed = numberValue(value);
+    if (parsed > 0) return parsed;
+  }
+  return 0;
+}
+
+function frequentHeroPerformance(item: any, scope: HeroPerformance["scope"], seasonId?: number): HeroPerformance | null {
+  const data = item?.data ?? item;
+  const hero = heroName(item);
+  if (!hero) return null;
+
+  const matches = Math.max(0, Math.round(firstNumber(item?.tc, data?.tc, item?.total_matches, data?.total_matches, item?.matches, data?.matches)));
+  const rawWins = Math.max(0, Math.round(firstNumber(item?.wc, data?.wc, item?.wins, data?.wins)));
+  const wins = matches > 0 ? Math.min(matches, rawWins) : rawWins;
+  const directWinRate = rateValue(item?.wr ?? data?.wr ?? item?.win_rate ?? data?.win_rate ?? item?.winRate ?? data?.winRate);
+  const winRate = directWinRate || (matches > 0 ? (wins / matches) * 100 : 0);
+  const bestScore = firstNumber(item?.bs, data?.bs, item?.best_score, data?.best_score, item?.bestScore, data?.bestScore);
+
+  return {
+    hero,
+    matches,
+    wins,
+    winRate,
+    ...(bestScore > 0 ? { bestScore } : {}),
+    source: "rone",
+    ...(scope ? { scope } : {}),
+    ...(seasonId ? { seasonId } : {}),
+  };
+}
+
 function mythicName(stars: number) {
   if (stars >= 100) return "Mythical Immortal";
   if (stars >= 50) return "Mythical Glory";
@@ -128,16 +171,39 @@ function rankProfile(levelValue: unknown) {
   return `Rank ${level}`;
 }
 
-async function syncSnapshotToPlayerProfile(snapshot: any) {
+function uniqueHeroes(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const hero = String(value ?? "").trim();
+    const key = hero.toLowerCase();
+    if (!hero || seen.has(key)) continue;
+    seen.add(key);
+    result.push(hero);
+  }
+  return result;
+}
+
+async function syncSnapshotToPlayerProfile(snapshot: any, seasonId?: number) {
   const info = snapshot?.info?.data ?? {};
-  const comfortHeroes = payloadItems(snapshot?.frequentHeroes).map(heroName).filter(Boolean).slice(0, 30);
+  const frequentHeroes = payloadItems(snapshot?.frequentHeroes);
+  const overallFrequentHeroes = payloadItems(snapshot?.overallFrequentHeroes);
+  const currentPerformance = frequentHeroes.map((item) => frequentHeroPerformance(item, seasonId ? "current-season" : undefined, seasonId)).filter(Boolean) as HeroPerformance[];
+  const overallPerformance = overallFrequentHeroes.map((item) => frequentHeroPerformance(item, "overall")).filter(Boolean) as HeroPerformance[];
+  const heroPerformance = [...currentPerformance, ...overallPerformance].slice(0, 90);
+  const comfortHeroes = uniqueHeroes([
+    ...currentPerformance.map((hero) => hero.hero),
+    ...overallPerformance.map((hero) => hero.hero),
+    ...frequentHeroes.map(heroName),
+  ]).slice(0, 30);
   const rank = rankProfile(info.rank_level);
-  if (!comfortHeroes.length && !rank) return null;
+  if (!comfortHeroes.length && !rank && !heroPerformance.length) return null;
   const profile = await getPlayerProfile();
   return savePlayerProfile({
     ...profile,
     rankProfile: rank || profile.rankProfile,
     comfortHeroes: comfortHeroes.length ? comfortHeroes : profile.comfortHeroes,
+    heroPerformance: heroPerformance.length ? heroPerformance : profile.heroPerformance,
   });
 }
 
@@ -194,7 +260,7 @@ export async function roneRoutes(app: FastifyInstance) {
       seasonId: data.seasonId,
       account: data.account
     });
-    const profile = await syncSnapshotToPlayerProfile(parsed.data.snapshot);
+    const profile = await syncSnapshotToPlayerProfile(parsed.data.snapshot, parsed.data.seasonId);
     return { ok: true, data, profile };
   });
 
