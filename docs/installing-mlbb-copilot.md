@@ -21,7 +21,7 @@ C:\Users\<you>\Downloads\scrcpy-win64-v4.0
 ## 2. Open The Project Folder
 
 ```powershell
-cd "C:\Users\rokas\Documents\MLBB CoPilot"
+cd "C:\Users\<you>\Documents\MLBB CoPilot"
 ```
 
 If PowerShell blocks local scripts for the current terminal session, run:

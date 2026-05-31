@@ -23,7 +23,7 @@ export type PlayerProfile = {
 
 const file = "player-profile.json";
 const defaultProfile: PlayerProfile = {
-  displayName: "Rokas",
+  displayName: "Player",
   rankProfile: "Mythic",
   preferredLane: "jungle",
   comfortHeroes: [],

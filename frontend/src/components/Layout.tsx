@@ -38,7 +38,7 @@ const laneLabels: Record<string, string> = {
 export function Layout() {
   const profile = useQuery({ queryKey: ["player-profile"], queryFn: getPlayerProfile, staleTime: 30_000 });
   const profileData = profile.data?.data;
-  const profileName = String(profileData?.displayName ?? "Rokas");
+  const profileName = String(profileData?.displayName ?? "Player");
   const profileMeta = [profileData?.rankProfile, laneLabels[String(profileData?.preferredLane ?? "")] ?? profileData?.preferredLane]
     .filter(Boolean)
     .join(" / ");

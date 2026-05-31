@@ -64,7 +64,7 @@ function DeveloperSettings() {
 function PlayerProfileSettings() {
   const queryClient = useQueryClient();
   const profile = useQuery({ queryKey: ["player-profile"], queryFn: getPlayerProfile });
-  const [displayName, setDisplayName] = useState("Rokas");
+  const [displayName, setDisplayName] = useState("Player");
   const [rankProfile, setRankProfile] = useState("Mythic");
   const [preferredLane, setPreferredLane] = useState("jungle");
   const [comfortHeroes, setComfortHeroes] = useState("");
@@ -81,7 +81,7 @@ function PlayerProfileSettings() {
   useEffect(() => {
     const data = profile.data?.data;
     if (!data) return;
-    setDisplayName(data.displayName ?? "Rokas");
+    setDisplayName(data.displayName ?? "Player");
     setRankProfile(data.rankProfile ?? "Mythic");
     setPreferredLane(data.preferredLane ?? "jungle");
     setComfortHeroes((data.comfortHeroes ?? []).join(", "));
@@ -91,7 +91,7 @@ function PlayerProfileSettings() {
     <div className="card p-5">
       <h3 className="mb-3 font-bold">Player Profile</h3>
       <label>Display Name
-        <input className="input mt-2 block w-full" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Rokas" />
+        <input className="input mt-2 block w-full" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Player" />
       </label>
       <label className="mt-4 block">Rank Profile
         <select className="input mt-2 block w-full" value={rankProfile} onChange={(event) => setRankProfile(event.target.value)}>
