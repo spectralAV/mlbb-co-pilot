@@ -33,7 +33,7 @@ export async function buildHeroRoutes(app: FastifyInstance) {
       const response = await fetch(`https://mlbb.io/api/item/item-build/hero/${encodeURIComponent(heroName)}`, {
         headers: {
           accept: "application/json, text/plain, */*",
-          "user-agent": "MLBB-Co-Pilot/0.4.0"
+          "user-agent": "MLBB-Co-Pilot/0.4.1-live-cockpit"
         }
       });
 

@@ -1,7 +1,7 @@
 {
   "name": "mlbb-co-pilot",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1-live-cockpit",
   "description": "Semantic tactical intelligence system for Mobile Legends: Bang Bang.",
   "main": "electron/main.cjs",
   "author": "SpectralAV",

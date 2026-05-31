@@ -39,7 +39,7 @@ export class GmsClient {
         'x-actid': String(GMS_ACT_ID),
         'x-appid': String(GMS_APP_ID),
         'x-lang': this.lang,
-        'user-agent': 'MLBB-Co-Pilot/0.4.0'
+        'user-agent': 'MLBB-Co-Pilot/0.4.1-live-cockpit'
       },
       body: JSON.stringify({ pageSize: 200, pageIndex: 1, filters: [], sorts: [], object: [], ...body })
     });

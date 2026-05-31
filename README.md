@@ -30,7 +30,7 @@
 
 MLBB Co-Pilot is a Windows-first public alpha that combines a React tactical workspace, Fastify backend, Electron desktop shell, computer-vision tooling, map/runtime data, and OBS-ready overlays. It is designed to help players and creators reason about draft picks, counter picks, item builds, objective timing, lane pressure, gank risk, and live match context from local data.
 
-The project is moving toward `1.0.0`. Current release: `v0.4.0`.
+The project is moving toward `1.0.0`. Current release: `v0.4.1-live-cockpit`.
 
 ## Status
 
@@ -94,8 +94,8 @@ Container tags:
 
 ```text
 ghcr.io/spectralav/mlbb-co-pilot:latest
-ghcr.io/spectralav/mlbb-co-pilot:0.4.0
-ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.4.0
+ghcr.io/spectralav/mlbb-co-pilot:0.4.1-live-cockpit
+ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.4.1-live-cockpit
 ```
 
 ## Capabilities

@@ -48,7 +48,7 @@ export class RoneApiService {
 
     const headers: Record<string, string> = {
       accept: "application/json, text/plain, */*",
-      "user-agent": "MLBB-Co-Pilot/0.4.0"
+      "user-agent": "MLBB-Co-Pilot/0.4.1-live-cockpit"
     };
     if (options.authorization) headers.authorization = options.authorization;
     if (options.body != null) headers["content-type"] = "application/json";
