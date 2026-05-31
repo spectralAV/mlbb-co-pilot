@@ -34,6 +34,7 @@ Focus areas:
 
 - Dataset coverage reporting.
 - Calibration UX improvements.
+- Device-adaptive normalized ROI profiles instead of per-resolution production models.
 - Confidence gates for draft, minimap, timer, and scoreboard surfaces.
 - Clear training/inference runtime status.
 

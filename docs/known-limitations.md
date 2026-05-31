@@ -13,6 +13,7 @@ MLBB Co-Pilot is currently a public alpha. The project is useful for local testi
 - Phone capture depends on local ADB authorization, scrcpy availability, device permissions, and USB/network stability.
 - OBS integration depends on local OBS configuration and source freshness.
 - CV accuracy depends on screen resolution, UI language, device aspect ratio, graphics settings, dataset coverage, and calibration quality.
+- CV should adapt to device differences through normalized ROIs, dynamic UI anchors, aspect-ratio profiles, calibration fallback, confidence gates, and manual override. Separate production models per device or screen size are out of scope.
 - DirectML is the preferred Windows AMD inference path today. WSL ROCm training is experimental and can stress the Windows display driver on some hardware.
 - OCR is optional and should be treated as a sidecar helper, not the source of truth for match-state decisions.
 

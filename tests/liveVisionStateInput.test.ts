@@ -10,6 +10,11 @@ test("live vision frame parser sanitizes known CV facts without rejecting option
     screen: "live_hud",
     confidence: "0.86",
     evidence: ["minimap", 2, null],
+    layoutProfile: { id: "phone_20_9", label: "20:9 phone", aspectRatio: 2.222, sourceWidth: 2400, sourceHeight: 1080, confidence: 0.98 },
+    anchors: [
+      { key: "minimap", label: "Minimap", rect: [0.02, 0, 0.14, 0.31], confidence: 0.9, active: true },
+      { key: "bad", label: "Broken", rect: [2, 0, 1, 1], confidence: 0.9, active: true },
+    ],
     regions: {
       minimap: { mean: "22", contrast: 41, changed: 9, active: true },
       broken: "ignored",
@@ -34,6 +39,8 @@ test("live vision frame parser sanitizes known CV facts without rejecting option
   assert.equal(input.screen, "live_hud");
   assert.equal(input.timestamp, 1234);
   assert.equal(input.confidence, 0.86);
+  assert.equal(input.layoutProfile?.id, "phone_20_9");
+  assert.equal(input.anchors?.length, 1);
   assert.equal(input.regions?.minimap?.active, true);
   assert.equal(input.regions?.broken, undefined);
   assert.equal(input.minimapMarkers?.length, 1);

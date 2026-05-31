@@ -27,6 +27,8 @@ const liveVisionFrameEnvelopeSchema = z.object({
   screen: z.unknown().optional(),
   confidence: z.unknown().optional(),
   evidence: z.unknown().optional(),
+  layoutProfile: z.unknown().optional(),
+  anchors: z.unknown().optional(),
   regions: z.unknown().optional(),
   minimapMarkers: z.unknown().optional(),
   signals: z.unknown().optional(),
@@ -74,6 +76,23 @@ type EquipmentFact = {
   source: "equipment-item-icon";
 };
 
+type LayoutProfileFact = {
+  id: string;
+  label: string;
+  aspectRatio: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  confidence: number;
+};
+
+type UiAnchorFact = {
+  key: string;
+  label: string;
+  rect: [number, number, number, number];
+  confidence: number;
+  active: boolean;
+};
+
 type VisionFrameInput = {
   frameId?: string;
   source?: string;
@@ -81,6 +100,8 @@ type VisionFrameInput = {
   screen?: VisionScreenState;
   confidence?: number;
   evidence?: string[];
+  layoutProfile?: LayoutProfileFact;
+  anchors?: UiAnchorFact[];
   regions?: Record<string, { mean?: number; contrast?: number; changed?: number; active?: boolean }>;
   minimapMarkers?: NormalizedMarker[];
   signals?: {
@@ -111,6 +132,8 @@ export type LiveVisionSnapshot = {
   screen: VisionScreenState;
   confidence: number;
   evidence: string[];
+  layoutProfile?: LayoutProfileFact;
+  anchors: UiAnchorFact[];
   regions: Record<string, { mean: number; contrast: number; changed: number; active: boolean }>;
   minimapMarkers: NormalizedMarker[];
   signals: {
@@ -191,6 +214,8 @@ export function parseLiveVisionFrameInput(payload: unknown): VisionFrameInput {
     screen: normalizeScreen(input.screen),
     confidence: optionalNumber(input.confidence),
     evidence: normalizeStrings(input.evidence),
+    layoutProfile: parseLayoutProfile(input.layoutProfile),
+    anchors: parseUiAnchors(input.anchors),
     regions: parseInputRegions(input.regions),
     minimapMarkers: parseInputMarkers(input.minimapMarkers),
     ...(signals ? { signals } : {}),
@@ -235,6 +260,8 @@ export function ingestLiveVisionFrame(input: VisionFrameInput) {
     screen,
     confidence: clamp01(input.confidence),
     evidence: Array.isArray(input.evidence) ? input.evidence.map(String).slice(0, 12) : [],
+    layoutProfile: input.layoutProfile,
+    anchors: normalizeUiAnchors(input.anchors),
     regions: normalizeRegions(input.regions),
     minimapMarkers,
     signals: {
@@ -361,6 +388,70 @@ function emptyObservationSummary(): LiveVisionObservationSummary {
     warning: "CV disconnected",
     updatedAt: null,
   };
+}
+
+function parseLayoutProfile(value: unknown): LayoutProfileFact | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const id = optionalString(record.id);
+  const label = optionalString(record.label);
+  const aspectRatio = optionalNumber(record.aspectRatio);
+  const sourceWidth = optionalNumber(record.sourceWidth);
+  const sourceHeight = optionalNumber(record.sourceHeight);
+  const confidence = optionalNumber(record.confidence);
+  if (!id || !label || aspectRatio === undefined || sourceWidth === undefined || sourceHeight === undefined || confidence === undefined) {
+    return undefined;
+  }
+  return {
+    id,
+    label,
+    aspectRatio,
+    sourceWidth,
+    sourceHeight,
+    confidence: clamp01(confidence),
+  };
+}
+
+function parseUiAnchors(value: unknown): UiAnchorFact[] | undefined {
+  const anchors = normalizeUiAnchors(recordArray(value)
+    .map((anchor) => {
+      const rect = normalizeNormalizedRect(anchor.rect);
+      const key = optionalString(anchor.key);
+      const label = optionalString(anchor.label);
+      if (!key || !label || !rect) return null;
+      return {
+        key,
+        label,
+        rect,
+        confidence: clamp01(anchor.confidence),
+        active: Boolean(anchor.active),
+      };
+    })
+    .filter((anchor): anchor is UiAnchorFact => Boolean(anchor)));
+  return anchors.length ? anchors : undefined;
+}
+
+function normalizeUiAnchors(value: unknown): UiAnchorFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((anchor): anchor is UiAnchorFact => Boolean(anchor && typeof anchor === "object"))
+    .map((anchor) => ({
+      key: String(anchor.key ?? "").trim(),
+      label: String(anchor.label ?? "").trim(),
+      rect: normalizeNormalizedRect(anchor.rect) ?? [0, 0, 0, 0],
+      confidence: clamp01(anchor.confidence),
+      active: Boolean(anchor.active),
+    }))
+    .filter((anchor) => anchor.key && anchor.label && anchor.rect[2] > 0 && anchor.rect[3] > 0)
+    .slice(0, 12);
+}
+
+function normalizeNormalizedRect(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const rect = value.map(Number);
+  return rect.every((coordinate) => Number.isFinite(coordinate) && coordinate >= 0 && coordinate <= 1) && rect[2] > 0 && rect[3] > 0
+    ? rect as [number, number, number, number]
+    : null;
 }
 
 function parseInputRegions(value: unknown): VisionFrameInput["regions"] | undefined {

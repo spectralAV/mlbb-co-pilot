@@ -2,6 +2,8 @@
 
 This dataset is for local Ultralytics object detection. It locates visual facts; exact hero, spell, and item identity remains a second-stage comparison against extracted official assets.
 
+Production CV is device-adaptive, not device-specific. The model should learn stable MLBB UI surfaces, while runtime support for different phones, emulators, capture cards, and aspect ratios comes from normalized ROIs, dynamic UI anchors, aspect-ratio layout profiles, calibration fallback, confidence gates, and manual override. See `../../docs/cv-device-adaptation.md`.
+
 ## Initial Labels
 
 `minimap_panel`, `draft_screen`, `equipment_scoreboard`, `attributes_scoreboard`, `ally_pick_slot`, `enemy_pick_slot`, `ally_ban_slot`, `enemy_ban_slot`, `lane_marker`, `battle_spell_marker`, `ally_hero_marker`, `enemy_hero_marker`, `turtle`, `lord`, `ally_turret`, `enemy_turret`.
@@ -19,6 +21,8 @@ class_id center_x center_y width height
 ```
 
 All coordinates are normalized from `0` to `1`.
+
+Keep source annotations and saved runtime regions normalized. Pixel coordinates are temporary values for frame cropping, rendering overlays, and inference worker boundaries only.
 
 ## Commands
 
@@ -42,7 +46,7 @@ The extractor writes frames to `data/cv/footage/<name>/frames`, plus `manifest.j
 
 Training writes the selected model to `data/cv/models/mlbb-detect.pt`. The app uses model detections only when that file exists and detections clear the confidence gate.
 
-Training and native inference use unmirrored fixed-layout frames. Horizontal/vertical flips and mosaic are disabled because draft side ownership is semantic (`ally` and `enemy` cannot be swapped by augmentation), and `960` pixel inference preserves tiny lane/spell badge detail.
+Training and native inference use unmirrored semantic-layout frames. Horizontal/vertical flips and mosaic are disabled because draft side ownership is semantic (`ally` and `enemy` cannot be swapped by augmentation), and `960` pixel inference preserves tiny lane/spell badge detail. This does not make one device resolution authoritative; runtime should adapt ROIs from anchors, aspect-ratio profiles, and saved calibration.
 
 `cv:prepare` builds the detection set from human-reviewed Legend and Mythic capture frames, extracts additional spaced frames from stable periods, adds staged Roboflow training enhancements, and adds the recorded equipment/attributes modal fixtures. It labels draft screen/slot surfaces, live minimap panel, finalized-draft lane and battle-spell badge locations, and scoreboard modal bodies; loading frames serve as negative examples.
 

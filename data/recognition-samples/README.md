@@ -6,6 +6,8 @@ Image samples are ignored by Git because they can contain personal avatars, frie
 
 ## Current Region Map
 
+These maps are sample geometry from one capture shape, not production truth. Convert useful regions into normalized layout profiles, validate dynamic anchors at runtime, and keep calibration/manual override as the fallback for devices whose UI placement differs.
+
 `region-map-ranked-lobby-2856x1280.json` maps the Ranked lobby avatar banner and queue slot regions from a `2856x1280` capture.
 
 `region-map-ranked-choose-lane-2856x1280.json` maps the Ranked Choose Lane overlay. That screen is different from the lobby banner layout and includes six large cards:
@@ -42,7 +44,7 @@ This set adds coverage for:
 - equipment and attributes scoreboard modals
 - item shop recommendation and build-path panels
 
-Use this set to build a first-pass screen-state classifier before attempting OCR or deeper recognition. The same `2856x1280` region scale applies to the existing region maps.
+Use this set to build a first-pass screen-state classifier before attempting OCR or deeper recognition. The `2856x1280` region scale applies only to these source maps; production CV should adapt normalized ROIs through aspect-ratio profiles, dynamic UI anchors, saved calibration, and manual override.
 
 ## Ranked Match Video Set
 

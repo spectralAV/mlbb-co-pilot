@@ -116,6 +116,7 @@ ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.4.1-live-cockpit
 MLBB Co-Pilot includes an experimental CV toolchain for local recognition workflows:
 
 - Ultralytics YOLO detection pipeline for MLBB screen regions.
+- Device-adaptive ROI flow based on normalized coordinates, layout anchors, aspect-ratio profiles, calibration fallback, confidence gates, and manual override.
 - ONNX Runtime DirectML inference path for Windows AMD/DirectX 12 GPUs.
 - CUDA path when a CUDA-enabled PyTorch runtime is installed.
 - CPU fallback for conservative local training and validation.
@@ -209,6 +210,7 @@ npm run cv:wsl:train
 | [Support Guide](docs/support.md) | What to include when opening issues |
 | [Release Checklist](docs/release-checklist.md) | Pre-release and release validation steps |
 | [Coach Reasoning Model](docs/coach-reasoning-model.md) | Notes on tactical reasoning and coaching flow |
+| [CV Device Adaptation](docs/cv-device-adaptation.md) | Contract for normalized ROI adaptation instead of device-specific models |
 | [CV Dataset Notes](data/cv/README.md) | Local dataset and CV runtime guidance |
 
 ## Roadmap

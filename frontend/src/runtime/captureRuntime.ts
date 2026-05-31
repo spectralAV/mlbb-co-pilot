@@ -22,6 +22,22 @@ type NdiRawFrameMeta = { type: "ndi_frame"; frameId: string; width: number; heig
 type RawFrameMeta = { frameId?: string; width: number; height: number; capturedAt: string; pixelFormat?: string };
 type PixelRegion = { x: number; y: number; w: number; h: number };
 type VisionProbe = { key: string; rect: [number, number, number, number] };
+export type LayoutProfileId = "phone_20_9" | "phone_19_5_9" | "phone_19_9" | "video_16_9" | "tablet_4_3" | "tablet_3_2" | "custom";
+export type LayoutProfileSelection = {
+  id: LayoutProfileId;
+  label: string;
+  aspectRatio: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  confidence: number;
+};
+export type UiAnchor = {
+  key: "minimap" | "top_hud" | "timer_hud" | "draft_left_rail" | "draft_right_rail" | "scoreboard_modal";
+  label: string;
+  rect: [number, number, number, number];
+  confidence: number;
+  active: boolean;
+};
 type DraftVisualContextCache = ReturnType<typeof detectDraftVisualContext>;
 type UltralyticsDetection = {
   classId: number;
@@ -63,6 +79,8 @@ export type LiveVisionFrame = {
   screen: VisionScreenState;
   confidence: number;
   evidence: string[];
+  layoutProfile?: LayoutProfileSelection;
+  anchors?: UiAnchor[];
   directorScene?: "main" | "map" | "text" | "counter" | "picks";
   timestamp: number;
   source?: string;
@@ -105,6 +123,39 @@ const defaultVisionProbes: VisionProbe[] = [
   { key: "center_panel", rect: [0.27, 0.1, 0.48, 0.64] },
   { key: "modal_body", rect: [0.1, 0.13, 0.8, 0.78] }
 ];
+
+const layoutProfiles: Array<{ id: Exclude<LayoutProfileId, "custom">; label: string; aspectRatio: number }> = [
+  { id: "phone_20_9", label: "20:9 phone", aspectRatio: 20 / 9 },
+  { id: "phone_19_5_9", label: "19.5:9 phone", aspectRatio: 19.5 / 9 },
+  { id: "phone_19_9", label: "19:9 phone", aspectRatio: 19 / 9 },
+  { id: "video_16_9", label: "16:9 video", aspectRatio: 16 / 9 },
+  { id: "tablet_3_2", label: "3:2 tablet", aspectRatio: 3 / 2 },
+  { id: "tablet_4_3", label: "4:3 tablet", aspectRatio: 4 / 3 },
+];
+
+export function selectLayoutProfile(width: number, height: number): LayoutProfileSelection {
+  const sourceWidth = Math.max(0, Number(width) || 0);
+  const sourceHeight = Math.max(0, Number(height) || 0);
+  const aspectRatio = sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : 0;
+  const nearest = layoutProfiles
+    .map((profile) => ({ ...profile, distance: Math.abs(profile.aspectRatio - aspectRatio) / profile.aspectRatio }))
+    .sort((left, right) => left.distance - right.distance)[0];
+  if (!nearest || !aspectRatio) {
+    return { id: "custom", label: "Custom", aspectRatio, sourceWidth, sourceHeight, confidence: 0 };
+  }
+  const confidence = Math.max(0, Math.min(1, 1 - nearest.distance / 0.14));
+  if (confidence < 0.45) {
+    return { id: "custom", label: "Custom", aspectRatio, sourceWidth, sourceHeight, confidence: 1 - confidence };
+  }
+  return {
+    id: nearest.id,
+    label: nearest.label,
+    aspectRatio,
+    sourceWidth,
+    sourceHeight,
+    confidence,
+  };
+}
 
 function calibratedRuntimeRegions() {
   const resolved = defaultRegions.map((region) => ({
@@ -193,6 +244,8 @@ type CaptureRuntimeState = {
   buffered: number;
   nativeCrops: number;
   sourceSize: { width: number; height: number };
+  layoutProfile: LayoutProfileSelection | null;
+  uiAnchors: UiAnchor[];
   lastFrameAge: number | null;
   metrics: Record<RegionKey, RegionMetrics>;
   minimapDetections: MinimapMarkerDetection[];
@@ -217,6 +270,8 @@ export const useCaptureRuntimeStore = create<CaptureRuntimeState>((set) => ({
   buffered: 0,
   nativeCrops: 0,
   sourceSize: { width: 0, height: 0 },
+  layoutProfile: null,
+  uiAnchors: [],
   lastFrameAge: null,
   metrics: emptyMetrics(),
   minimapDetections: [],
@@ -415,7 +470,7 @@ export function stopCaptureRuntime() {
   const mode = useCaptureRuntimeStore.getState().sourceMode;
   if (mode === "scrcpy") void stopScrcpy().catch(() => {});
   if (mode === "ndi") void stopNdiDirectCapture().catch(() => {});
-  useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", stream: null, adbPreviewUrl: "", nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
+  useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", stream: null, adbPreviewUrl: "", nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, layoutProfile: null, uiAnchors: [], minimapDetections: [], liveVision: null });
 }
 
 export function startSelectedCaptureRuntime() {
@@ -446,7 +501,7 @@ async function startScrcpyCapture() {
     if (selectedCodec !== "h264") {
       const message = `${selectedCodec.toUpperCase()} is selectable as a source preset, but live browser preview/CV currently supports H.264 only. Use H.264 for realtime capture until backend decoding is wired for ${selectedCodec.toUpperCase()}.`;
       addCaptureLog("warn", message);
-      useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", error: message, fps: 0, buffered: 0, nativeCrops: 0, sourceSize: { width: 0, height: 0 } });
+      useCaptureRuntimeStore.setState({ running: false, sourceMode: "idle", error: message, fps: 0, buffered: 0, nativeCrops: 0, sourceSize: { width: 0, height: 0 }, layoutProfile: null, uiAnchors: [] });
       return;
     }
     if (!canDecode) {
@@ -457,7 +512,7 @@ async function startScrcpyCapture() {
     }
     resetBuffers();
     runtime.videoCodec = selectedCodec;
-    useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 }, adbPreviewUrl: "" });
+    useCaptureRuntimeStore.setState({ sourceMode: "scrcpy", running: true, sourceSize: { width: 0, height: 0 }, layoutProfile: null, uiAnchors: [], adbPreviewUrl: "" });
     startAgeTimer();
     await stopScrcpy().catch(() => {});
     await startScrcpyH264Decode();
@@ -819,7 +874,7 @@ async function startNdiCapture() {
     const result = await startNdiDirectCapture(sourceName, sourceUrl || undefined, 60);
     if (!result.ok) throw new Error(result.error ?? "Direct NDI receiver failed to start.");
     addCaptureLog("info", `Direct NDI receiver started: ${sourceName}.`);
-    useCaptureRuntimeStore.setState({ sourceMode: "ndi", running: true, stream: null, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 } });
+    useCaptureRuntimeStore.setState({ sourceMode: "ndi", running: true, stream: null, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 }, layoutProfile: null, uiAnchors: [] });
     startAgeTimer();
     startNdiDirectRawSocket();
   } catch (caught) {
@@ -856,7 +911,7 @@ async function startCaptureCardCapture() {
       await runtime.video.play();
     }
     addCaptureLog("info", `Capture card stream opened${deviceId ? " from selected video input" : " from default video input"}.`);
-    useCaptureRuntimeStore.setState({ sourceMode: "capture_card", running: true, stream, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 } });
+    useCaptureRuntimeStore.setState({ sourceMode: "capture_card", running: true, stream, adbPreviewUrl: "", sourceSize: { width: 0, height: 0 }, layoutProfile: null, uiAnchors: [] });
     scheduleFrame();
     startAgeTimer();
   } catch (caught) {
@@ -924,7 +979,7 @@ function resetBuffers() {
   runtime.lastVisionPostedAt = 0;
   runtime.visionPostInFlight = false;
   runtime.visionStability = createVisionStabilityState();
-  useCaptureRuntimeStore.setState({ buffered: 0, nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, minimapDetections: [], liveVision: null });
+  useCaptureRuntimeStore.setState({ buffered: 0, nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, layoutProfile: null, uiAnchors: [], minimapDetections: [], liveVision: null });
 }
 
 function trimFrameTimes(times: number[], now: number) {
@@ -1223,10 +1278,13 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
   if (!ctx) return;
   void ensureActiveCalibrationRegions();
   const now = performance.now();
+  const layoutProfile = selectLayoutProfile(width, height);
   const frameRegions = calibratedRuntimeRegions();
+  const visionProbes = calibratedVisionProbes();
   const metrics = emptyMetrics();
   for (const region of frameRegions) metrics[region.key] = sampleRegion(ctx, width, height, region, runtime.previous[region.key]);
-  const probeMetrics = Object.fromEntries(calibratedVisionProbes().map((probe) => [probe.key, sampleRegion(ctx, width, height, probe)]));
+  const probeMetrics = Object.fromEntries(visionProbes.map((probe) => [probe.key, sampleRegion(ctx, width, height, probe)]));
+  const uiAnchors = detectUiAnchors(metrics, probeMetrics, frameRegions, visionProbes);
   runtime.previous = metrics;
 
   runtime.lastFrameAt ||= now;
@@ -1235,7 +1293,11 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
   queueNativeWindowCrops(canvas, width, height, now, metrics, frameRegions);
   const minimapDetections = detectMinimapMarkers(ctx, width, height, now, frameRegions);
   const draftContext = detectCachedDraftContext(canvas, now);
-  const rawVision = classifyVisionFrame(metrics, probeMetrics, minimapDetections, Boolean(draftContext.selfSlot || draftContext.firstPickSide), runtime.trainedScreenModel);
+  const rawVision = {
+    ...classifyVisionFrame(metrics, probeMetrics, minimapDetections, Boolean(draftContext.selfSlot || draftContext.firstPickSide), runtime.trainedScreenModel),
+    layoutProfile,
+    anchors: uiAnchors,
+  };
   const liveVision = sourceOverride === "recording"
     ? rawVision
     : stabilizeVisionFrame(rawVision, runtime.visionStability);
@@ -1252,6 +1314,8 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
     fps: currentRenderFps(),
     analysisFps: runtime.frameTimes.length,
     lastFrameAge: 0,
+    layoutProfile,
+    uiAnchors,
     minimapDetections: trustedMinimapDetections,
     liveVision
   });
@@ -1264,6 +1328,87 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
   }
   queueDraftBanIconRecognition(canvas, liveVision, sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode);
   return liveVision;
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function metricConfidence(metric: RegionMetrics | undefined, contrastTarget: number, meanTarget = 0) {
+  if (!metric) return 0;
+  const contrastScore = metric.contrast / contrastTarget;
+  const meanScore = meanTarget > 0 ? metric.mean / meanTarget : 1;
+  const activeBoost = metric.active ? 0.1 : 0;
+  return clamp01(Math.min(contrastScore, meanScore) + activeBoost);
+}
+
+function regionRect(regions: Region[], key: RegionKey) {
+  return regions.find((region) => region.key === key)?.rect ?? defaultRegions.find((region) => region.key === key)!.rect;
+}
+
+function probeRect(probes: VisionProbe[], key: string, fallback: [number, number, number, number]) {
+  return probes.find((probe) => probe.key === key)?.rect ?? fallback;
+}
+
+function detectUiAnchors(
+  metrics: Record<RegionKey, RegionMetrics>,
+  probes: Record<string, RegionMetrics>,
+  frameRegions: Region[],
+  visionProbes: VisionProbe[]
+): UiAnchor[] {
+  const topHudConfidence = metricConfidence(probes.top_hud, 28, 18);
+  const modalConfidence = Math.max(
+    metricConfidence(probes.modal_body, 34, 18),
+    metricConfidence(metrics.equipment_window, 34, 18),
+    metricConfidence(metrics.attributes_window, 34, 18)
+  );
+  const anchors: UiAnchor[] = [
+    {
+      key: "minimap",
+      label: "Minimap",
+      rect: regionRect(frameRegions, "minimap"),
+      confidence: metricConfidence(metrics.minimap, 24, 12),
+      active: Boolean(metrics.minimap?.active),
+    },
+    {
+      key: "top_hud",
+      label: "Top HUD",
+      rect: probeRect(visionProbes, "top_hud", [0.28, 0, 0.45, 0.08]),
+      confidence: topHudConfidence,
+      active: Boolean(probes.top_hud?.active),
+    },
+    {
+      key: "timer_hud",
+      label: "Timer HUD",
+      rect: regionRect(frameRegions, "scoreboard"),
+      confidence: metricConfidence(metrics.scoreboard, 24, 18),
+      active: Boolean(metrics.scoreboard?.active),
+    },
+    {
+      key: "draft_left_rail",
+      label: "Draft Left Rail",
+      rect: probeRect(visionProbes, "draft_left_rail", [0, 0.08, 0.22, 0.84]),
+      confidence: metricConfidence(probes.draft_left_rail, 30, 8),
+      active: Boolean(probes.draft_left_rail?.active),
+    },
+    {
+      key: "draft_right_rail",
+      label: "Draft Right Rail",
+      rect: probeRect(visionProbes, "draft_right_rail", [0.78, 0.08, 0.22, 0.84]),
+      confidence: metricConfidence(probes.draft_right_rail, 30, 8),
+      active: Boolean(probes.draft_right_rail?.active),
+    },
+    {
+      key: "scoreboard_modal",
+      label: "Scoreboard Modal",
+      rect: probeRect(visionProbes, "modal_body", scoreboardBodyRect),
+      confidence: modalConfidence,
+      active: Boolean(probes.modal_body?.active || metrics.equipment_window?.active || metrics.attributes_window?.active),
+    },
+  ];
+  return anchors
+    .map((anchor) => ({ ...anchor, confidence: clamp01(anchor.confidence) }))
+    .filter((anchor) => anchor.confidence >= 0.2 || anchor.active);
 }
 
 function sampleRegion(ctx: CanvasRenderingContext2D, width: number, height: number, region: Region | VisionProbe, previous?: RegionMetrics): RegionMetrics {
@@ -1399,6 +1544,8 @@ export function stabilizeVisionFrame(frame: LiveVisionFrame, state: VisionStabil
       ...current,
       timestamp: frame.timestamp,
       confidence: Math.max(0.55, current.confidence * 0.97),
+      layoutProfile: frame.layoutProfile ?? current.layoutProfile,
+      anchors: frame.anchors ?? current.anchors,
       evidence: [...current.evidence.slice(0, 2), `held ${current.screen} through weak ${frame.screen} signal`]
     };
     return state.confirmed;
@@ -1435,6 +1582,8 @@ export function stabilizeVisionFrame(frame: LiveVisionFrame, state: VisionStabil
     ...current,
     timestamp: frame.timestamp,
     confidence: Math.max(0.55, current.confidence - 0.02),
+    layoutProfile: frame.layoutProfile ?? current.layoutProfile,
+    anchors: frame.anchors ?? current.anchors,
     evidence: [...current.evidence.slice(0, 2), `holding ${current.screen}; ${frame.screen} pending (${state.candidateFrames}/${required})`]
   };
   return state.confirmed;
@@ -1465,6 +1614,8 @@ function queueLiveVisionFrame(
       evidence: equipmentItems.length
         ? [...vision.evidence, `${allyEquipment.length} ally / ${enemyEquipment.length} enemy equipment icons confirmed`]
         : vision.evidence,
+      layoutProfile: vision.layoutProfile,
+      anchors: vision.anchors,
       regions: { ...metrics, ...probes },
       minimapMarkers,
       ...(equipmentItems.length ? { signals: { allyEquipment, enemyEquipment } } : {}),
@@ -1476,6 +1627,8 @@ function queueLiveVisionFrame(
         screen: data.screen ?? vision.screen,
         confidence: Number(data.confidence ?? vision.confidence),
         evidence: data.evidence ?? vision.evidence,
+        layoutProfile: data.layoutProfile ?? vision.layoutProfile,
+        anchors: data.anchors ?? vision.anchors,
         directorScene: data.directorScene,
         timestamp: Number(data.timestamp ?? vision.timestamp),
         source: data.source ?? source,
@@ -1507,6 +1660,8 @@ function queueUltralyticsLiveFrame(canvas: HTMLCanvasElement, vision: LiveVision
       timestamp: Date.now(),
       screen,
       confidence,
+      layoutProfile: vision.layoutProfile,
+      anchors: vision.anchors,
       evidence: [
         ...vision.evidence,
         ...(surface ? [`YOLO surface: ${surface.label}`] : []),
@@ -1522,6 +1677,8 @@ function queueUltralyticsLiveFrame(canvas: HTMLCanvasElement, vision: LiveVision
         screen: ingested.screen ?? screen,
         confidence: Number(ingested.confidence ?? confidence),
         evidence: ingested.evidence ?? vision.evidence,
+        layoutProfile: ingested.layoutProfile ?? vision.layoutProfile,
+        anchors: ingested.anchors ?? vision.anchors,
         directorScene: ingested.directorScene,
         timestamp: Number(ingested.timestamp ?? Date.now()),
         source: ingested.source ?? "ultralytics-yolo",
@@ -1615,9 +1772,9 @@ function queueNativeWindowCrops(canvas: HTMLCanvasElement, width: number, height
 }
 
 function updateSourceSize(width: number, height: number) {
-  const current = useCaptureRuntimeStore.getState().sourceSize;
-  if (current.width === width && current.height === height) return;
-  useCaptureRuntimeStore.setState({ sourceSize: { width, height } });
+  const state = useCaptureRuntimeStore.getState();
+  if (state.sourceSize.width === width && state.sourceSize.height === height && state.layoutProfile) return;
+  useCaptureRuntimeStore.setState({ sourceSize: { width, height }, layoutProfile: selectLayoutProfile(width, height) });
 }
 
 function startAgeTimer() {

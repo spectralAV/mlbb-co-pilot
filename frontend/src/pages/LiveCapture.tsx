@@ -48,6 +48,8 @@ export function LiveCapture() {
     buffered,
     nativeCrops,
     sourceSize,
+    layoutProfile,
+    uiAnchors,
     lastFrameAge,
     metrics,
     liveVision,
@@ -386,8 +388,10 @@ export function LiveCapture() {
             <Metric label="Latency" value={lastFrameAge == null ? "-" : `${Math.round(lastFrameAge)}ms`} />
             <Metric label="Mode" value={sourceMode === "adb" ? "ADB" : sourceMode === "scrcpy" ? "scrcpy" : sourceMode === "ndi" ? "Direct NDI" : sourceMode === "capture_card" ? "Capture card" : sourceMode === "obs" ? "OBS bridge" : running ? "Live" : "Idle"} />
             <Metric label={sourceMode === "ndi" ? "Receiver FPS" : "ROI Crops"} value={sourceMode === "ndi" ? (ndiDirectStatus?.receiverFps ?? 0) : `${nativeCrops}/${maxNativeCrops}`} />
+            <Metric className="col-span-2" label="Layout" value={layoutProfile ? `${layoutProfile.label} ${Math.round(layoutProfile.confidence * 100)}%` : "-"} />
             <Metric className="col-span-2" label="Codec" value={selectedSource === "scrcpy" ? selectedCodec.toUpperCase() : sourceMode === "ndi" ? "NDI SDK frame" : sourceMode === "capture_card" ? "UVC camera frame" : selectedSource === "obs" ? "Native decoded" : "-"} />
             <Metric className="col-span-2" label={sourceMode === "browser" ? "CV Surface" : sourceMode === "ndi" ? "Direct Source" : sourceMode === "capture_card" ? "Video Input" : "Native Source"} value={sourceSize.width ? `${sourceSize.width}x${sourceSize.height}` : "-"} />
+            <Metric className="col-span-2" label="Anchors" value={uiAnchors.length ? uiAnchors.map((anchor) => `${anchor.label} ${Math.round(anchor.confidence * 100)}%`).slice(0, 3).join(" / ") : "-"} />
           </div>
         </div>
 
