@@ -61,7 +61,7 @@
     "start": "npm run dev"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2",
+    "concurrently": "^10.0.0",
     "electron": "^42.3.0",
     "electron-builder": "^26.8.1"
   },
