@@ -1,27 +1,46 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
+import type { ComponentType } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "./components/Layout";
-import { Dashboard } from "./pages/Dashboard";
-import { Setup } from "./pages/Setup";
-import { DraftRoom } from "./pages/DraftRoom";
-import { BuildLab } from "./pages/BuildLab";
-import { LiveCapture } from "./pages/LiveCapture";
-import { Settings } from "./pages/Settings";
-import { Calibration } from "./pages/Calibration";
-import { SkinGallery } from "./pages/SkinGallery";
-import { CvLab } from "./pages/CvLab";
-import { CvVideoTool } from "./pages/CvVideoTool";
-import { GameAnalysis } from "./pages/GameAnalysis";
-import { GameOverlay } from "./pages/GameOverlay";
-import { GamePage } from "./pages/GamePage";
-import { MapTrainer } from "./pages/MapTrainer";
-import { ModuleManager } from "./pages/ModuleManager";
-import { PerformanceMonitor } from "./pages/PerformanceMonitor";
-import { TacticalMap } from "./pages/TacticalMap";
-import { MlbbCounterOutput, MlbbHeroPicksOutput, MlbbLiveOutput, MlbbStreamControl, MlbbStreamOutput, MlbbTacticalMapOutput, MlbbTextPanelOutput } from "./pages/MlbbStreamPack";
 import "./styles.css";
+
+function lazyNamed(loader: () => Promise<any>, exportName: string) {
+  return lazy(async () => {
+    const module = await loader();
+    return { default: module[exportName] as ComponentType };
+  });
+}
+
+function RouteFallback() {
+  return <div className="grid min-h-screen place-items-center bg-[#050505] p-6 text-sm font-black uppercase text-cyan-100" role="status" aria-live="polite">Loading</div>;
+}
+
+const Dashboard = lazyNamed(() => import("./pages/Dashboard"), "Dashboard");
+const Setup = lazyNamed(() => import("./pages/Setup"), "Setup");
+const DraftRoom = lazyNamed(() => import("./pages/DraftRoom"), "DraftRoom");
+const BuildLab = lazyNamed(() => import("./pages/BuildLab"), "BuildLab");
+const LiveCapture = lazyNamed(() => import("./pages/LiveCapture"), "LiveCapture");
+const Settings = lazyNamed(() => import("./pages/Settings"), "Settings");
+const Calibration = lazyNamed(() => import("./pages/Calibration"), "Calibration");
+const SkinGallery = lazyNamed(() => import("./pages/SkinGallery"), "SkinGallery");
+const CvLab = lazyNamed(() => import("./pages/CvLab"), "CvLab");
+const CvVideoTool = lazyNamed(() => import("./pages/CvVideoTool"), "CvVideoTool");
+const GameAnalysis = lazyNamed(() => import("./pages/GameAnalysis"), "GameAnalysis");
+const GameOverlay = lazyNamed(() => import("./pages/GameOverlay"), "GameOverlay");
+const GamePage = lazyNamed(() => import("./pages/GamePage"), "GamePage");
+const MapTrainer = lazyNamed(() => import("./pages/MapTrainer"), "MapTrainer");
+const ModuleManager = lazyNamed(() => import("./pages/ModuleManager"), "ModuleManager");
+const PerformanceMonitor = lazyNamed(() => import("./pages/PerformanceMonitor"), "PerformanceMonitor");
+const TacticalMap = lazyNamed(() => import("./pages/TacticalMap"), "TacticalMap");
+const MlbbStreamOutput = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbStreamOutput");
+const MlbbTacticalMapOutput = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbTacticalMapOutput");
+const MlbbTextPanelOutput = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbTextPanelOutput");
+const MlbbCounterOutput = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbCounterOutput");
+const MlbbHeroPicksOutput = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbHeroPicksOutput");
+const MlbbLiveOutput = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbLiveOutput");
+const MlbbStreamControl = lazyNamed(() => import("./pages/MlbbStreamPack"), "MlbbStreamControl");
 
 const queryClient = new QueryClient();
 const router = createBrowserRouter([
@@ -61,7 +80,9 @@ const router = createBrowserRouter([
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <Suspense fallback={<RouteFallback />}>
+        <RouterProvider router={router} />
+      </Suspense>
     </QueryClientProvider>
   </React.StrictMode>
 );
