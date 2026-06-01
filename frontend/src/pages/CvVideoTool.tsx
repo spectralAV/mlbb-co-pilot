@@ -660,21 +660,28 @@ export function CvVideoTool() {
     }
   }
 
-  async function train() {
+  async function train(scope: "correction" | "full" = "correction") {
     if (trainingBlocked) {
       setMessage(cpuTrainingDisabledMessage);
       return;
     }
-    setBusy("train");
-    setMessage("Synchronizing saved video frames and training at 960px on the configured GPU runtime.");
+    const quick = scope === "correction";
+    setBusy(quick ? "quick-train" : "train");
+    setMessage(quick
+      ? "Synchronizing saved corrections and quick fine-tuning recent manual frames."
+      : "Synchronizing all saved frames and running a full 960px detector rebuild.");
     try {
       await syncCvAnnotations();
-      const result = await trainUltralyticsModel({ epochs: 30, imageSize: 960 });
+      const result = await trainUltralyticsModel(quick
+        ? { trainingScope: "correction", epochs: 8, imageSize: 640, batch: 4, recentLimit: 32, repeatManual: 8 }
+        : { trainingScope: "full", epochs: 30, imageSize: 960, batch: 4 });
       setModel(result.data ?? result);
       await refresh();
-      setMessage("Training complete. Updated detector weights are ready for checks.");
+      setMessage(quick
+        ? "Quick correction fine-tune complete. Updated detector weights are ready for checks."
+        : "Full training complete. Updated detector weights are ready for checks.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Training failed.");
+      setMessage(error instanceof Error ? error.message : quick ? "Quick correction fine-tune failed." : "Training failed.");
     } finally {
       setBusy("");
     }
@@ -903,8 +910,8 @@ export function CvVideoTool() {
         <button className="cv-ghost-button inline-flex items-center gap-2" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
           <Upload size={16} />Import Video
         </button>
-        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train()}>
-          <Play size={16} />{busy === "train" ? "Training..." : "Start Training"}
+        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("correction")}>
+          <Play size={16} />{busy === "quick-train" ? "Fine-tuning..." : "Quick Fine-Tune"}
         </button>
         <input
           ref={fileRef}
@@ -1304,8 +1311,8 @@ export function CvVideoTool() {
           </div>
         </label>
       </div>
-      <button className="cv-validation-button" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train()}>
-        <Play size={16} />Run Validation
+      <button className="cv-validation-button" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("full")}>
+        <Play size={16} />Full Train
       </button>
     </section>
   </div>;

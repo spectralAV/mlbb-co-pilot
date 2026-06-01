@@ -326,10 +326,173 @@ def parse_bool(value):
     raise ValueError(f"Expected a boolean value, got: {value}")
 
 
-def train(project_root: Path, base_model: str, epochs: int, image_size: int, device: str | None, batch: int | None, workers: int | None, amp: bool | None):
+def copy_recent_annotations(paths, target_root: Path, split: str, limit: int, repeat: int):
+    metadata_dir = paths["root"] / "annotations" / "metadata" / split
+    if not metadata_dir.exists():
+        return []
+    image_dir = target_root / "images" / split
+    label_dir = target_root / "labels" / split
+    image_dir.mkdir(parents=True, exist_ok=True)
+    label_dir.mkdir(parents=True, exist_ok=True)
+    entries = []
+    metadata_files = sorted(metadata_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for metadata_file in metadata_files[:max(1, limit)]:
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        image_name = metadata.get("imageName")
+        if not image_name:
+            continue
+        source_image = paths["root"] / "annotations" / "images" / split / image_name
+        source_label = paths["root"] / "annotations" / "labels" / split / f"{metadata.get('id', metadata_file.stem)}.txt"
+        if not source_image.exists() or not source_label.exists():
+            continue
+        for index in range(max(1, repeat)):
+            suffix = f"-r{index}" if repeat > 1 else ""
+            target_image = image_dir / f"{metadata_file.stem}{suffix}{source_image.suffix.lower()}"
+            target_label = label_dir / f"{target_image.stem}.txt"
+            shutil.copy2(source_image, target_image)
+            shutil.copy2(source_label, target_label)
+            entries.append((target_image, target_label))
+    return entries
+
+
+def mirror_quick_validation(target_root: Path, train_entries):
+    image_dir = target_root / "images" / "val"
+    label_dir = target_root / "labels" / "val"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    label_dir.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for image, label in train_entries[:min(8, len(train_entries))]:
+        target_image = image_dir / image.name
+        target_label = label_dir / label.name
+        shutil.copy2(image, target_image)
+        shutil.copy2(label, target_label)
+        entries.append((target_image, target_label))
+    return entries
+
+
+def prepare_correction_dataset(paths, recent_limit: int, repeat_manual: int):
+    target_root = paths["runtime"] / "quick-correction"
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    train_entries = copy_recent_annotations(paths, target_root, "train", recent_limit, repeat_manual)
+    val_entries = copy_recent_annotations(paths, target_root, "val", max(1, min(8, recent_limit)), 1)
+    if not train_entries:
+        raise RuntimeError("Save at least one training annotation before quick correction fine-tune.")
+    if not val_entries:
+        val_entries = mirror_quick_validation(target_root, train_entries)
+    dataset = target_root / "mlbb-correction.yaml"
+    dataset.write_text(
+        paths["dataset"].read_text(encoding="utf-8").replace("path: .", f"path: '{target_root.as_posix()}'", 1),
+        encoding="utf-8",
+    )
+    return {
+        "dataset": str(dataset),
+        "root": str(target_root),
+        "trainImages": len(train_entries),
+        "validationImages": len(val_entries),
+        "sourceFrames": max(1, len(train_entries) // max(1, repeat_manual)),
+        "repeatManual": max(1, repeat_manual),
+    }
+
+
+def should_stage_wsl_training(project_root: Path):
+    return os.name != "nt" and project_root.as_posix().startswith("/mnt/")
+
+
+def copy_training_tree(source_root: Path, target_root: Path):
+    for relative in ("images/train", "images/val", "labels/train", "labels/val"):
+        source = source_root / relative
+        target = target_root / relative
+        if target.exists():
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.exists():
+            shutil.copytree(source, target)
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_existing_model(project_root: Path, base_model: str):
+    candidate = Path(base_model)
+    if not candidate.is_absolute():
+        candidate = project_root / base_model
+    return candidate if candidate.exists() else None
+
+
+def stage_training_workspace(project_root: Path, paths, dataset: Path, base_model: str, run_name: str, training_scope: str, quick_dataset):
+    if not should_stage_wsl_training(project_root):
+        return {
+            "dataset": dataset,
+            "baseModel": base_model,
+            "project": paths["runs"],
+            "staging": None,
+        }
+
+    work_root = Path(os.environ.get("MLBB_WSL_TRAINING_ROOT", Path.home() / ".mlbb-copilot" / "training")).expanduser()
+    workspace = work_root / training_scope
+    data_root = workspace / "dataset"
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    source_root = Path(quick_dataset["root"]) if quick_dataset else paths["root"]
+    copy_training_tree(source_root, data_root)
+
+    staged_dataset = workspace / f"{run_name}.yaml"
+    staged_dataset.write_text(
+        paths["dataset"].read_text(encoding="utf-8").replace("path: .", f"path: '{data_root.as_posix()}'", 1),
+        encoding="utf-8",
+    )
+
+    staged_base_model = base_model
+    existing_model = resolve_existing_model(project_root, base_model)
+    if existing_model:
+        staged_model = workspace / "base-model.pt"
+        shutil.copy2(existing_model, staged_model)
+        staged_base_model = str(staged_model)
+
+    return {
+        "dataset": staged_dataset,
+        "baseModel": staged_base_model,
+        "project": workspace / "runs",
+        "staging": {
+            "enabled": True,
+            "workspace": str(workspace),
+            "datasetRoot": str(data_root),
+            "sourceRoot": str(source_root),
+        },
+    }
+
+
+def mirror_staged_run(run_save_dir: Path, paths, run_name: str, staging):
+    if not staging:
+        return
+    target = paths["runs"] / run_name
+    if target.exists():
+        shutil.rmtree(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(run_save_dir, target)
+
+
+def train(
+    project_root: Path,
+    base_model: str,
+    epochs: int,
+    image_size: int,
+    device: str | None,
+    batch: int | None,
+    workers: int | None,
+    amp: bool | None,
+    training_scope: str,
+    recent_limit: int,
+    repeat_manual: int,
+):
     paths = project_paths(project_root)
     current = status(project_root, device)
-    if current["training"]["images"] == 0 or current["training"]["labels"] == 0:
+    quick_dataset = None
+    if training_scope == "correction":
+        quick_dataset = prepare_correction_dataset(paths, recent_limit, repeat_manual)
+    elif current["training"]["images"] == 0 or current["training"]["labels"] == 0:
         raise RuntimeError("Add labelled images and YOLO annotations before training.")
     require_training_accelerator(current["device"])
     selected_device = training_device_argument(current["device"])
@@ -337,18 +500,24 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
     paths["runs"].mkdir(parents=True, exist_ok=True)
     paths["runtime"].mkdir(parents=True, exist_ok=True)
     paths["weights"].parent.mkdir(parents=True, exist_ok=True)
-    dataset = paths["runtime"] / "mlbb-training.yaml"
-    dataset.write_text(
-        paths["dataset"].read_text(encoding="utf-8").replace("path: .", f"path: '{paths['root'].as_posix()}'", 1),
-        encoding="utf-8",
-    )
-    model = YOLO(base_model)
+    if quick_dataset:
+        dataset = Path(quick_dataset["dataset"])
+        run_name = "mlbb-correction"
+    else:
+        dataset = paths["runtime"] / "mlbb-training.yaml"
+        dataset.write_text(
+            paths["dataset"].read_text(encoding="utf-8").replace("path: .", f"path: '{paths['root'].as_posix()}'", 1),
+            encoding="utf-8",
+        )
+        run_name = "mlbb-detection"
+    staged = stage_training_workspace(project_root, paths, dataset, base_model, run_name, training_scope, quick_dataset)
+    model = YOLO(staged["baseModel"])
     train_options = {
-        "data": str(dataset),
+        "data": str(staged["dataset"]),
         "epochs": epochs,
         "imgsz": image_size,
-        "project": str(paths["runs"]),
-        "name": "mlbb-detection",
+        "project": str(staged["project"]),
+        "name": run_name,
         "exist_ok": True,
         "fliplr": 0.0,
         "flipud": 0.0,
@@ -363,11 +532,21 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
         train_options["workers"] = workers
     if amp is not None:
         train_options["amp"] = amp
+    if training_scope == "correction":
+        train_options.update({
+            "lr0": 0.002,
+            "warmup_epochs": 0.5,
+            "patience": 10,
+            "plots": False,
+        })
     run = model.train(**train_options)
     best = Path(run.save_dir) / "weights" / "best.pt"
-    if not best.exists():
-        raise RuntimeError("Ultralytics training finished without a best.pt model.")
-    shutil.copy2(best, paths["weights"])
+    last = Path(run.save_dir) / "weights" / "last.pt"
+    selected_weights = best if best.exists() else last
+    if not selected_weights.exists():
+        raise RuntimeError("Ultralytics training finished without a saved model.")
+    shutil.copy2(selected_weights, paths["weights"])
+    mirror_staged_run(Path(run.save_dir), paths, run_name, staged["staging"])
     if paths["onnx"].exists():
         paths["onnx"].unlink()
     return {
@@ -376,6 +555,9 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
         "baseModel": base_model,
         "epochs": epochs,
         "imageSize": image_size,
+        "trainingScope": training_scope,
+        "quickDataset": quick_dataset,
+        "trainingStorage": staged["staging"],
     }
 
 
@@ -447,13 +629,28 @@ def main():
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--amp", default=None)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--training-scope", choices=["full", "correction"], default="full")
+    parser.add_argument("--recent-limit", type=int, default=32)
+    parser.add_argument("--repeat-manual", type=int, default=8)
     args = parser.parse_args()
     root = Path(args.project_root).resolve()
     try:
         if args.command == "status":
             result = status(root, args.device)
         elif args.command == "train":
-            result = train(root, args.base_model, args.epochs, args.image_size, args.device, args.batch, args.workers, parse_bool(args.amp))
+            result = train(
+                root,
+                args.base_model,
+                args.epochs,
+                args.image_size,
+                args.device,
+                args.batch,
+                args.workers,
+                parse_bool(args.amp),
+                args.training_scope,
+                args.recent_limit,
+                args.repeat_manual,
+            )
         else:
             if not args.image:
                 raise RuntimeError("--image is required for inference.")

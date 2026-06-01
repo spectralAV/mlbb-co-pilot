@@ -393,22 +393,38 @@ export async function installUltralyticsRuntime() {
   return getUltralyticsStatus();
 }
 
-export async function trainUltralyticsModel(options: { epochs?: number; imageSize?: number; baseModel?: string; device?: string; batch?: number; workers?: number; amp?: boolean } = {}) {
+export async function trainUltralyticsModel(options: {
+  epochs?: number;
+  imageSize?: number;
+  baseModel?: string;
+  device?: string;
+  batch?: number;
+  workers?: number;
+  amp?: boolean;
+  trainingScope?: string;
+  recentLimit?: number;
+  repeatManual?: number;
+} = {}) {
   const runner = trainingPythonRunner();
   if (runner.runtime === "windows" && !(await exists(managedPython))) throw new Error("Install the Ultralytics runtime before training.");
   const status = await runJson(["status", "--device", ultralyticsDevice(options.device)], 20000, runner);
   assertTrainingAccelerator(status.device);
   const resolvedBaseModel = await resolveTrainingBaseModel(options.baseModel);
   const baseModel = runner.runtime === "wsl" && path.isAbsolute(resolvedBaseModel) ? wslPath(resolvedBaseModel) : resolvedBaseModel;
+  const trainingScope = options.trainingScope === "correction" ? "correction" : "full";
+  const defaultWorkers = runner.runtime === "wsl" ? 2 : 0;
   const args = [
     "train",
     "--base-model", baseModel,
     "--epochs", String(Math.max(1, Number(options.epochs ?? 60))),
     "--image-size", String(Math.max(320, Number(options.imageSize ?? 960))),
     "--batch", String(Math.max(1, Number(options.batch ?? 4))),
-    "--workers", String(Math.max(0, Number(options.workers ?? 0))),
+    "--workers", String(Math.max(0, Number(options.workers ?? defaultWorkers))),
     "--amp", String(Boolean(options.amp ?? false)),
     "--device", ultralyticsDevice(options.device),
+    "--training-scope", trainingScope,
+    "--recent-limit", String(Math.max(1, Number(options.recentLimit ?? 32))),
+    "--repeat-manual", String(Math.max(1, Number(options.repeatManual ?? 8))),
   ];
   const result = await runJson(args, 24 * 60 * 60 * 1000, runner);
   shutdownWorker("Ultralytics model was retrained; reloading weights.");

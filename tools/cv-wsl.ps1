@@ -4,11 +4,15 @@ param(
   [int]$Epochs = 60,
   [int]$ImageSize = 640,
   [int]$Batch = 2,
-  [int]$Workers = 0,
+  [int]$Workers = 2,
   [ValidateSet("true", "false")]
   [string]$Amp = "false",
   [string]$BaseModel = "yolo26n.pt",
-  [string]$Device = "auto"
+  [string]$Device = "auto",
+  [ValidateSet("full", "correction")]
+  [string]$TrainingScope = "full",
+  [int]$RecentLimit = 32,
+  [int]$RepeatManual = 8
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +53,17 @@ $args = @(
 )
 
 if ($Action -eq "train") {
-  $args += @("--epochs", "$Epochs", "--image-size", "$ImageSize", "--batch", "$Batch", "--workers", "$Workers", "--amp", $Amp, "--base-model", $BaseModel)
+  $args += @(
+    "--epochs", "$Epochs",
+    "--image-size", "$ImageSize",
+    "--batch", "$Batch",
+    "--workers", "$Workers",
+    "--amp", $Amp,
+    "--base-model", $BaseModel,
+    "--training-scope", $TrainingScope,
+    "--recent-limit", "$RecentLimit",
+    "--repeat-manual", "$RepeatManual"
+  )
 }
 
 & wsl @args
