@@ -3,8 +3,15 @@ import { Camera, Check, CheckCircle2, ChevronDown, Cpu, Download, Eye, EyeOff, F
 import {
   getCvAnnotationClasses,
   getCvAnnotations,
+  getHeroRecognitionManifest,
+  getScreenOcrStatus,
+  getTimerOcrStatus,
   getUltralyticsStatus,
+  inferScreenOcrFrame,
+  inferTimerCrop,
   inferUltralyticsFrame,
+  installScreenOcrRuntime,
+  installTimerOcrRuntime,
   installUltralyticsRuntime,
   saveCvAnnotation,
   syncCvAnnotations,
@@ -14,7 +21,9 @@ import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingUnavailable } from "../utils/cvTraining";
 
 type LabelClass = { id: number; name: string; group: string };
+type HeroOption = { id: number; name: string };
 type Rect = NormalizedRect;
+type AnnotationBox = { classId: number; rect: Rect; heroId?: number; heroName?: string; transcript?: string };
 type ReviewBox = {
   id: string;
   classId: number;
@@ -24,12 +33,15 @@ type ReviewBox = {
   suggested: boolean;
   source: "manual" | "model";
   trackId?: string;
+  heroId?: number;
+  heroName?: string;
+  transcript?: string;
 };
 type AnnotationSample = {
   id: string;
   split: "train" | "val";
   source: string;
-  boxes: Array<{ classId: number; rect: Rect }>;
+  boxes: AnnotationBox[];
 };
 type QueuedFrame = {
   id: string;
@@ -38,7 +50,7 @@ type QueuedFrame = {
   source: string;
   blob: Blob;
   previewUrl: string;
-  boxes: Array<{ classId: number; rect: Rect }>;
+  boxes: AnnotationBox[];
   width: number;
   height: number;
   negative?: boolean;
@@ -56,6 +68,7 @@ type CandidateFrame = {
   topConfidence: number;
 };
 type OverlayLayerKey = "accepted" | "model" | "ally" | "enemy";
+type BoxDragState = { id: string; mode: "move" | "resize"; origin: { x: number; y: number }; initial: Rect };
 type TimelineItem =
   | { id: string; type: "candidate"; time: number; count: number; item: CandidateFrame }
   | { id: string; type: "queue"; time: number; count: number; item: QueuedFrame };
@@ -80,8 +93,11 @@ export function CvVideoTool() {
   const queuePreviewUrlsRef = useRef<string[]>([]);
   const candidatePreviewUrlsRef = useRef<string[]>([]);
   const [classes, setClasses] = useState<LabelClass[]>([]);
+  const [heroes, setHeroes] = useState<HeroOption[]>([]);
   const [samples, setSamples] = useState<AnnotationSample[]>([]);
   const [model, setModel] = useState<any>(null);
+  const [timerOcr, setTimerOcr] = useState<any>(null);
+  const [screenOcr, setScreenOcr] = useState<any>(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
   const [videoSize, setVideoSize] = useState({ width: 16, height: 9 });
@@ -97,6 +113,7 @@ export function CvVideoTool() {
   const [selectedId, setSelectedId] = useState("");
   const [start, setStart] = useState<{ x: number; y: number } | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const [boxDrag, setBoxDrag] = useState<BoxDragState | null>(null);
   const [frameQueue, setFrameQueue] = useState<QueuedFrame[]>([]);
   const [candidateFrames, setCandidateFrames] = useState<CandidateFrame[]>([]);
   const [scanSeconds, setScanSeconds] = useState(12);
@@ -135,6 +152,7 @@ export function CvVideoTool() {
   const pendingCount = reviewBoxes.length - acceptedBoxes.length;
   const candidateLabelCount = candidateFrames.reduce((sum, item) => sum + item.boxes.length, 0);
   const modelReady = Boolean(model?.packageAvailable && model?.modelAvailable);
+  const ocrReady = Boolean(timerOcr?.packageAvailable && timerOcr?.paddleAvailable && screenOcr?.packageAvailable && screenOcr?.paddleAvailable);
   const sampleCount = samples.length;
   const queuedLabelCount = frameQueue.reduce((sum, item) => sum + item.boxes.length, 0);
   const hardNegativeCount = frameQueue.filter((item) => item.negative).length;
@@ -146,15 +164,27 @@ export function CvVideoTool() {
   ] : null;
 
   async function refresh() {
-    const [classResult, sampleResult, modelResult] = await Promise.allSettled([
+    const [classResult, sampleResult, modelResult, heroResult, timerResult, screenOcrResult] = await Promise.allSettled([
       getCvAnnotationClasses(),
       getCvAnnotations(),
       getUltralyticsStatus(),
+      getHeroRecognitionManifest(),
+      getTimerOcrStatus(),
+      getScreenOcrStatus(),
     ]);
     if (classResult.status === "fulfilled") setClasses(classResult.value.data ?? []);
     if (sampleResult.status === "fulfilled") setSamples(sampleResult.value.data ?? []);
     if (modelResult.status === "fulfilled") setModel(modelResult.value.data ?? modelResult.value);
-    if ([classResult, sampleResult, modelResult].every((result) => result.status === "rejected")) {
+    if (heroResult.status === "fulfilled") {
+      const nextHeroes = (heroResult.value.data?.heroes ?? [])
+        .map((hero: any) => ({ id: Number(hero.id), name: String(hero.name ?? "").trim() }))
+        .filter((hero: HeroOption) => Number.isInteger(hero.id) && Boolean(hero.name))
+        .sort((left: HeroOption, right: HeroOption) => left.name.localeCompare(right.name));
+      setHeroes(nextHeroes);
+    }
+    if (timerResult.status === "fulfilled") setTimerOcr(timerResult.value.data ?? null);
+    if (screenOcrResult.status === "fulfilled") setScreenOcr(screenOcrResult.value.data ?? null);
+    if ([classResult, sampleResult, modelResult, heroResult, timerResult, screenOcrResult].every((result) => result.status === "rejected")) {
       setMessage("CV model status is unavailable.");
     }
   }
@@ -171,6 +201,7 @@ export function CvVideoTool() {
     setDuration(0);
     setBoxes([]);
     setSelectedId("");
+    setBoxDrag(null);
     setLastCheckedAt(null);
     setScanProgress(0);
     setMessage(`${file.name} loaded. Pause on a frame, check detections, then accept or fix labels.`);
@@ -229,15 +260,46 @@ export function CvVideoTool() {
     setSelectedId("");
     setStart(null);
     setCursor(null);
+    setBoxDrag(null);
     setLastCheckedAt(null);
   }
 
-  function point(event: PointerEvent<HTMLDivElement>) {
-    const rect = boardRef.current!.getBoundingClientRect();
+  function point(event: PointerEvent<HTMLElement>) {
+    const board = boardRef.current;
+    if (!board) return { x: 0, y: 0 };
+    const rect = board.getBoundingClientRect();
     return {
       x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
       y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
     };
+  }
+
+  function beginBoxDrag(event: PointerEvent<HTMLElement>, box: ReviewBox, mode: BoxDragState["mode"]) {
+    if (!videoUrl) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    videoRef.current?.pause();
+    setSelectedId(box.id);
+    setStart(null);
+    setCursor(null);
+    setBoxDrag({
+      id: box.id,
+      mode,
+      origin: point(event),
+      initial: box.rect,
+    });
+  }
+
+  function updateBoxDrag(next: { x: number; y: number }) {
+    if (!boxDrag) return;
+    const rect = draggedRect(boxDrag, next);
+    setBoxes((current) => current.map((box) => box.id === boxDrag.id ? { ...box, rect } : box));
+  }
+
+  function finishBoxDrag(next: { x: number; y: number }) {
+    updateBoxDrag(next);
+    setBoxDrag(null);
+    setLastCheckedAt(videoRef.current?.currentTime ?? currentTime);
   }
 
   function addManualBox(end: { x: number; y: number }) {
@@ -266,9 +328,41 @@ export function CvVideoTool() {
   }
 
   function updateBoxClass(id: string, classId: number) {
+    const nextName = classMap.get(classId)?.name ?? "";
+    setBoxes((current) => current.map((box) => {
+      if (box.id !== id) return box;
+      const previousName = boxName(box);
+      return {
+        ...box,
+        classId,
+        className: nextName,
+        heroId: isHeroMarkerClass(nextName) && isHeroMarkerClass(previousName) ? box.heroId : undefined,
+        heroName: isHeroMarkerClass(nextName) && isHeroMarkerClass(previousName) ? box.heroName : undefined,
+        transcript: isTranscriptClass(nextName) && isTranscriptClass(previousName) ? box.transcript : undefined,
+      };
+    }));
+  }
+
+  function updateBoxHero(id: string, heroId: number) {
+    const hero = heroes.find((item) => item.id === heroId);
     setBoxes((current) => current.map((box) => box.id === id
-      ? { ...box, classId, className: classMap.get(classId)?.name }
+      ? { ...box, heroId: hero?.id, heroName: hero?.name }
       : box));
+  }
+
+  function updateBoxTranscript(id: string, transcript: string) {
+    setBoxes((current) => current.map((box) => box.id === id ? { ...box, transcript } : box));
+  }
+
+  function updateBoxRectPart(id: string, index: 0 | 1 | 2 | 3, rawValue: number) {
+    if (!Number.isFinite(rawValue)) return;
+    setBoxes((current) => current.map((box) => {
+      if (box.id !== id) return box;
+      const next: Rect = [...box.rect] as Rect;
+      next[index] = rawValue / 100;
+      const rect = normalizeReviewRect(next);
+      return rect ? { ...box, rect } : box;
+    }));
   }
 
   function removeBox(id: string) {
@@ -293,6 +387,68 @@ export function CvVideoTool() {
       setMessage("Ultralytics runtime is ready.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ultralytics installation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function installOcr() {
+    setBusy("install-ocr");
+    try {
+      const [timerResult, screenResult] = await Promise.all([
+        installTimerOcrRuntime(),
+        installScreenOcrRuntime(),
+      ]);
+      setTimerOcr(timerResult.data);
+      setScreenOcr(screenResult.data);
+      setMessage("OCR runtime is available for timers and screen text.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "OCR installation failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function readTimerValue(box: ReviewBox) {
+    const timerType = boxName(box);
+    if (!isTranscriptClass(timerType) || !videoUrl) return;
+    setBusy("timer-ocr");
+    try {
+      const frame = await captureCurrentFrame();
+      const crop = await cropBlob(frame, box.rect);
+      const result = await inferTimerCrop(crop, timerType);
+      const text = String(result.data?.text ?? "").trim();
+      if (text) {
+        updateBoxTranscript(box.id, text);
+        setMessage(`Timer OCR suggested ${text} at ${Math.round(Number(result.data?.confidence ?? 0) * 100)}%.`);
+      } else {
+        setMessage("Timer OCR found no readable digits in this crop.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Timer OCR failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function readScreenText() {
+    if (!videoUrl) return;
+    setBusy("screen-ocr");
+    try {
+      const frame = await captureCurrentFrame();
+      const result = await inferScreenOcrFrame(frame, { maxRegions: 5 });
+      const regions = (result.data?.regions ?? []).filter((item: any) => String(item?.text ?? "").trim());
+      if (!regions.length) {
+        setMessage("Screen OCR found no readable text in the calibrated regions.");
+        return;
+      }
+      const summary = regions
+        .slice(0, 3)
+        .map((item: any) => `${String(item.region ?? "screen").replace(/_/g, " ")}: ${String(item.text ?? "").slice(0, 48)}`)
+        .join(" / ");
+      setMessage(`Screen OCR: ${summary}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Screen OCR failed.");
     } finally {
       setBusy("");
     }
@@ -593,6 +749,9 @@ export function CvVideoTool() {
         rect: box.rect,
         suggested: false,
         source: "manual",
+        heroId: box.heroId,
+        heroName: box.heroName,
+        transcript: box.transcript,
       });
       return normalized ? [normalized] : [];
     });
@@ -707,6 +866,8 @@ export function CvVideoTool() {
   const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
   const selectedBox = reviewBoxes.find((box) => box.id === selectedId);
   const selectedName = selectedBox ? boxName(selectedBox) : "";
+  const selectedIsHeroMarker = isHeroMarkerClass(selectedName);
+  const selectedIsTranscript = isTranscriptClass(selectedName);
   const visibleBoxes = reviewBoxes.filter(boxVisible);
   const hasVideo = Boolean(videoUrl);
   const hiddenBoxCount = reviewBoxes.length - visibleBoxes.length;
@@ -791,14 +952,27 @@ export function CvVideoTool() {
           className="cv-video-stage relative select-none bg-black touch-none"
           style={{ aspectRatio: `${videoSize.width} / ${videoSize.height}` }}
           onPointerDown={(event) => {
-            if (!videoUrl || playing || (event.target as HTMLElement).closest("[data-review-box]")) return;
+            if (!videoUrl || playing || boxDrag || (event.target as HTMLElement).closest("[data-review-box]")) return;
             event.currentTarget.setPointerCapture(event.pointerId);
             const next = point(event);
             setStart(next);
             setCursor(next);
           }}
-          onPointerMove={(event) => { if (start) setCursor(point(event)); }}
-          onPointerUp={(event) => addManualBox(point(event))}
+          onPointerMove={(event) => {
+            const next = point(event);
+            if (boxDrag) updateBoxDrag(next);
+            else if (start) setCursor(next);
+          }}
+          onPointerUp={(event) => {
+            const next = point(event);
+            if (boxDrag) finishBoxDrag(next);
+            else addManualBox(next);
+          }}
+          onPointerCancel={(event) => {
+            if (boxDrag) finishBoxDrag(point(event));
+            setStart(null);
+            setCursor(null);
+          }}
         >
           {videoUrl
             ? <video
@@ -835,14 +1009,19 @@ export function CvVideoTool() {
               type="button"
               title={name}
               key={box.id}
-              onPointerDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => beginBoxDrag(event, box, "move")}
               onClick={(event) => { event.stopPropagation(); setSelectedId(box.id); }}
-              className={`cv-review-box absolute border-2 text-left ${boxColor(name, box.suggested)} ${active ? "ring-2 ring-white" : ""}`}
+              className={`cv-review-box absolute cursor-move border-2 text-left ${boxColor(name, box.suggested)} ${active ? "ring-2 ring-white" : ""}`}
               style={{ left: `${box.rect[0] * 100}%`, top: `${box.rect[1] * 100}%`, width: `${box.rect[2] * 100}%`, height: `${box.rect[3] * 100}%` }}
             >
               <span className="absolute left-0 top-0 max-w-full truncate bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-white">
                 {name.replace(/_/g, " ")}{box.confidence != null ? ` ${Math.round(box.confidence * 100)}%` : ""}
               </span>
+              {active ? <span
+                aria-hidden="true"
+                className="absolute bottom-0 right-0 h-3 w-3 cursor-nwse-resize border-l border-t border-black/60 bg-white shadow-[0_0_0_1px_rgba(0,0,0,.45)]"
+                onPointerDown={(event) => beginBoxDrag(event, box, "resize")}
+              /> : null}
             </button>;
           })}
           {hasVideo && drag ? <div className="absolute border-2 border-emerald-300 bg-emerald-500/10" style={{ left: `${drag[0] * 100}%`, top: `${drag[1] * 100}%`, width: `${drag[2] * 100}%`, height: `${drag[3] * 100}%` }} /> : null}
@@ -895,7 +1074,7 @@ export function CvVideoTool() {
 
           {inspectorTab === "detections" ? <div className="p-4">
             <div className="mb-3 flex items-center justify-between text-xs font-bold uppercase text-slate-400">
-              <span>Detected objects ({sortedBoxes.length})</span>
+              <span>Frame labels ({sortedBoxes.length})</span>
               <span>Confidence <ChevronDown className="ml-1 inline h-3 w-3" /></span>
             </div>
             <div className="space-y-1">
@@ -924,11 +1103,39 @@ export function CvVideoTool() {
                 <select className="input mt-3 min-h-10 w-full py-1 text-sm" value={selectedBox.classId} onChange={(event) => updateBoxClass(selectedBox.id, Number(event.target.value))}>
                   {classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
+                <div className="mt-3 grid grid-cols-4 gap-2">
+                  {(["X", "Y", "W", "H"] as const).map((label, index) => <label key={label} className="block text-[10px] font-black uppercase text-slate-500">
+                    {label}
+                    <input
+                      className="input mt-1 min-h-9 w-full px-2 py-1 text-xs"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.05}
+                      value={(selectedBox.rect[index] * 100).toFixed(2)}
+                      onChange={(event) => updateBoxRectPart(selectedBox.id, index as 0 | 1 | 2 | 3, Number(event.target.value))}
+                    />
+                  </label>)}
+                </div>
+                {selectedIsHeroMarker ? <label className="mt-3 block text-[11px] font-bold uppercase text-slate-400">
+                  Hero identity
+                  <select className="input mt-1 min-h-9 w-full py-1 text-xs font-medium normal-case" value={selectedBox.heroId ?? ""} onChange={(event) => updateBoxHero(selectedBox.id, Number(event.target.value))}>
+                    <option value="">Unassigned</option>
+                    {heroes.map((hero) => <option key={hero.id} value={hero.id}>{hero.name}</option>)}
+                  </select>
+                </label> : null}
+                {selectedIsTranscript ? <label className="mt-3 block text-[11px] font-bold uppercase text-slate-400">
+                  Timer value
+                  <span className="mt-1 flex gap-2">
+                    <input className="input min-h-9 min-w-0 flex-1 py-1 text-xs font-medium normal-case" value={selectedBox.transcript ?? ""} placeholder="45 or 01:20" inputMode="numeric" onChange={(event) => updateBoxTranscript(selectedBox.id, event.target.value)} />
+                    <button type="button" className="cv-control-button min-h-9 px-3 text-xs" disabled={!timerOcr?.packageAvailable || Boolean(busy)} onClick={() => void readTimerValue(selectedBox)}>Read</button>
+                  </span>
+                </label> : null}
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button className="cv-control-button" disabled={!selectedBox.suggested} onClick={() => acceptBox(selectedBox.id)}><Check size={15} />Accept</button>
                   <button className="cv-control-button cv-control-danger" onClick={() => removeBox(selectedBox.id)}><Trash2 size={15} />Reject</button>
                 </div>
-              </> : <p className="mt-3 text-sm text-slate-400">Select a box on the video or in the detection list to correct class, accept it, or reject it.</p>}
+              </> : <p className="mt-3 text-sm text-slate-400">Select a box on the video or in the detection list to move, resize, classify, accept, or reject it.</p>}
             </div>
           </div> : null}
 
@@ -1072,10 +1279,14 @@ export function CvVideoTool() {
           <div className="cv-rail-label">Frame actions</div>
           <div className="mt-1 flex gap-2">
             <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!videoUrl || Boolean(busy)} onClick={() => void checkDetection()}><ScanSearch className="mr-1 inline h-3.5 w-3.5" />Check Frame</button>
+            <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!videoUrl || !screenOcr?.packageAvailable || Boolean(busy)} onClick={() => void readScreenText()}><ScanSearch className="mr-1 inline h-3.5 w-3.5" />Read Text</button>
             <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!pendingCount || Boolean(busy)} onClick={acceptAllBoxes}><Check className="mr-1 inline h-3.5 w-3.5" />Accept All</button>
             <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!boxes.length || Boolean(busy)} onClick={clearFrameReview}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />Clear</button>
           </div>
         </div>
+        {!ocrReady ? <button className="cv-control-button min-h-9 px-3 text-xs" disabled={Boolean(busy)} onClick={() => void installOcr()}>
+          {busy === "install-ocr" ? "Installing OCR..." : "Install OCR"}
+        </button> : null}
       </div>
       <div className="cv-rail-cell">
         <div>
@@ -1143,8 +1354,47 @@ function boxColor(name: string, suggested: boolean) {
   return "border-emerald-300 bg-emerald-400/10";
 }
 
-function toAnnotationBox(box: ReviewBox) {
-  return { classId: box.classId, rect: normalizeReviewRect(box.rect) ?? box.rect };
+function toAnnotationBox(box: ReviewBox): AnnotationBox {
+  return {
+    classId: box.classId,
+    rect: normalizeReviewRect(box.rect) ?? box.rect,
+    heroId: box.heroId,
+    heroName: box.heroName,
+    transcript: box.transcript,
+  };
+}
+
+function isHeroMarkerClass(name: string) {
+  const normalized = name.toLowerCase();
+  return normalized === "ally_hero_marker" || normalized === "enemy_hero_marker";
+}
+
+function isTranscriptClass(name: string) {
+  const normalized = name.toLowerCase();
+  return normalized.includes("respawn") || normalized.includes("counter") || normalized.includes("timer");
+}
+
+function draggedRect(drag: BoxDragState, next: { x: number; y: number }): Rect {
+  const [left, top, width, height] = drag.initial;
+  const deltaX = next.x - drag.origin.x;
+  const deltaY = next.y - drag.origin.y;
+  const minSize = 0.002;
+  if (drag.mode === "move") {
+    const rect = normalizeReviewRect([
+      clamp(left + deltaX, 0, 1 - width),
+      clamp(top + deltaY, 0, 1 - height),
+      width,
+      height,
+    ]);
+    return rect ?? drag.initial;
+  }
+  const rect = normalizeReviewRect([
+    left,
+    top,
+    clamp(width + deltaX, minSize, 1 - left),
+    clamp(height + deltaY, minSize, 1 - top),
+  ]);
+  return rect ?? drag.initial;
 }
 
 function sanitizeReviewBox(box: ReviewBox): ReviewBox | null {
@@ -1170,4 +1420,18 @@ function formatTime(value: number) {
   const seconds = totalSeconds % 60;
   if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+async function cropBlob(source: Blob, rect: Rect) {
+  const bitmap = await createImageBitmap(source);
+  const left = Math.max(0, Math.floor(rect[0] * bitmap.width));
+  const top = Math.max(0, Math.floor(rect[1] * bitmap.height));
+  const width = Math.max(1, Math.min(bitmap.width - left, Math.ceil(rect[2] * bitmap.width)));
+  const height = Math.max(1, Math.min(bitmap.height - top, Math.ceil(rect[3] * bitmap.height)));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")?.drawImage(bitmap, left, top, width, height, 0, 0, width, height);
+  bitmap.close();
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not create OCR crop.")), "image/png"));
 }
