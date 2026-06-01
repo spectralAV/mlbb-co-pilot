@@ -11,6 +11,7 @@ import {
   trainUltralyticsModel,
 } from "../api/client";
 import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
+import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingUnavailable } from "../utils/cvTraining";
 
 type LabelClass = { id: number; name: string; group: string };
 type Rect = NormalizedRect;
@@ -504,8 +505,12 @@ export function CvVideoTool() {
   }
 
   async function train() {
+    if (trainingBlocked) {
+      setMessage(cpuTrainingDisabledMessage);
+      return;
+    }
     setBusy("train");
-    setMessage("Synchronizing saved video frames and training at 960px. This can take several minutes.");
+    setMessage("Synchronizing saved video frames and training at 960px on the configured GPU runtime.");
     try {
       await syncCvAnnotations();
       const result = await trainUltralyticsModel({ epochs: 30, imageSize: 960 });
@@ -699,6 +704,7 @@ export function CvVideoTool() {
   const frameNumber = Math.max(1, Math.round(currentTime * 30));
   const modelLabel = modelReady ? "HeroDetector v3" : model?.packageAvailable ? "No weights" : "YOLOv8n";
   const deviceLabel = model?.device?.name ?? model?.device ?? "Local GPU";
+  const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
   const selectedBox = reviewBoxes.find((box) => box.id === selectedId);
   const selectedName = selectedBox ? boxName(selectedBox) : "";
   const visibleBoxes = reviewBoxes.filter(boxVisible);
@@ -736,7 +742,7 @@ export function CvVideoTool() {
         <button className="cv-ghost-button inline-flex items-center gap-2" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
           <Upload size={16} />Import Video
         </button>
-        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable} onClick={() => void train()}>
+        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train()}>
           <Play size={16} />{busy === "train" ? "Training..." : "Start Training"}
         </button>
         <input
@@ -1087,7 +1093,7 @@ export function CvVideoTool() {
           </div>
         </label>
       </div>
-      <button className="cv-validation-button" disabled={Boolean(busy) || !model?.packageAvailable} onClick={() => void train()}>
+      <button className="cv-validation-button" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train()}>
         <Play size={16} />Run Validation
       </button>
     </section>

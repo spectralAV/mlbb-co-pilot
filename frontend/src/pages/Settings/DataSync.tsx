@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BrainCircuit, CheckCircle2, Database, Image, KeyRound, RefreshCw, SlidersHorizontal, Smartphone } from "lucide-react";
 import { apiPost, getAdbAssetStatus, getDinoIdentityStatus, getDraftHeroModelStatus, getRuntimeStatus, getScreenStateTrainingStatus, getSkinSignatureStatus, getTimerOcrStatus, getUltralyticsStatus, indexDinoReferences, installTimerOcrRuntime, installUltralyticsRuntime, syncAdbAssets, trainDraftHeroModel, trainScreenStateModel, trainUltralyticsModel } from "../../api/client";
+import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../../utils/cvTraining";
 
 type ExtractedTexture = { file: string; name: string; width: number; height: number };
 type AdbAssetStatus = {
@@ -56,6 +57,14 @@ type UltralyticsStatus = {
     warning: string;
   };
   device?: {
+    selected: string;
+    type: string;
+    name: string | null;
+    cudaAvailable: boolean;
+    torchVersion: string | null;
+    warning: string;
+  };
+  trainingDevice?: {
     selected: string;
     type: string;
     name: string | null;
@@ -266,6 +275,10 @@ export function DataSync() {
   }
 
   async function trainYoloModel() {
+    if (cpuTrainingBlocked(ultralytics) || trainingUnavailable(ultralytics)) {
+      setScreenTrainingError(cpuTrainingDisabledMessage);
+      return;
+    }
     setUltralyticsBusy("train");
     setScreenTrainingError("");
     try {
@@ -453,15 +466,16 @@ export function DataSync() {
             <button className="btn" disabled={Boolean(ultralyticsBusy)} onClick={() => void installYoloRuntime()}>
               {ultralyticsBusy === "install" ? "Installing" : "Install YOLO Runtime"}
             </button>
-            <button className="btn" disabled={Boolean(ultralyticsBusy) || !ultralytics?.packageAvailable || !ultralytics.training.labels} onClick={() => void trainYoloModel()}>
+            <button className="btn" disabled={Boolean(ultralyticsBusy) || !ultralytics?.packageAvailable || !ultralytics.training.labels || cpuTrainingBlocked(ultralytics) || trainingUnavailable(ultralytics)} onClick={() => void trainYoloModel()}>
               {ultralyticsBusy === "train" ? "Training" : "Train YOLO Model"}
             </button>
           </div>
         </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Runtime</span><div className="mt-1 text-sm font-semibold">{ultralytics?.managedRuntime ? "Managed" : "Not installed"}</div></div>
           <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Model</span><div className="mt-1 text-sm font-semibold">{ultralytics?.modelAvailable ? "Ready" : "Missing"}</div></div>
-          <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Accelerator</span><div className="mt-1 truncate text-sm font-semibold">{ultralytics?.inferenceBackend?.selected === "directml" ? "DirectML GPU" : ultralytics?.device?.type === "cuda" ? "CUDA GPU" : ultralytics?.device?.type?.toUpperCase() ?? "CPU"}</div><div className="truncate text-xs text-slate-400">{ultralytics?.inferenceBackend?.selected === "directml" ? "AMD / DirectX 12" : ultralytics?.device?.name ?? ultralytics?.device?.selected ?? "-"}</div></div>
+          <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Inference</span><div className="mt-1 truncate text-sm font-semibold">{ultralytics?.inferenceBackend?.selected === "directml" ? "DirectML GPU" : ultralytics?.device?.type === "cuda" ? "CUDA GPU" : ultralytics?.device?.type?.toUpperCase() ?? "CPU"}</div><div className="truncate text-xs text-slate-400">{ultralytics?.inferenceBackend?.selected === "directml" ? "AMD / DirectX 12" : ultralytics?.device?.name ?? ultralytics?.device?.selected ?? "-"}</div></div>
+          <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Training</span><div className="mt-1 truncate text-sm font-semibold">{trainingDeviceLabel(ultralytics)}</div><div className="truncate text-xs text-slate-400">{trainingDeviceDetail(ultralytics)}</div></div>
           <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Train Labels</span><div className="mt-1 text-sm font-semibold">{ultralytics?.training.labels ?? 0}</div></div>
           <div className="rounded-lg bg-white/5 p-3"><span className="text-xs uppercase text-slate-400">Validation Labels</span><div className="mt-1 text-sm font-semibold">{ultralytics?.validation.labels ?? 0}</div></div>
         </div>

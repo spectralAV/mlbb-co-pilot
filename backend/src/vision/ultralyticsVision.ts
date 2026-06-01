@@ -76,6 +76,9 @@ export type UltralyticsStatus = {
   managedRuntime: boolean;
   runtime: "windows" | "wsl";
   python: string;
+  trainingRuntime: "windows" | "wsl";
+  trainingPython: string;
+  trainingDevice: UltralyticsDeviceStatus;
   wslDistro?: string;
   device: UltralyticsDeviceStatus;
   inferenceBackend: {
@@ -345,13 +348,18 @@ function blendNumber(previous: number, current: number, currentWeight: number) {
 
 export async function getUltralyticsStatus(): Promise<UltralyticsStatus> {
   const runner = pythonRunner();
+  const trainingRunner = trainingPythonRunner();
   const managedRuntime = useWslRuntime() ? true : await exists(managedPython);
   const result = await runJson(["status", "--device", ultralyticsDevice()]);
+  const trainingDevice = await getTrainingDeviceStatus(result.device, runner, trainingRunner);
   return {
     ...result,
     managedRuntime,
     runtime: runner.runtime,
     python: runner.python,
+    trainingRuntime: trainingRunner.runtime,
+    trainingPython: trainingRunner.python,
+    trainingDevice,
     ...(runner.runtime === "wsl" ? { wslDistro: wslDistro() } : {}),
   };
 }
@@ -384,6 +392,8 @@ export async function installUltralyticsRuntime() {
 export async function trainUltralyticsModel(options: { epochs?: number; imageSize?: number; baseModel?: string; device?: string; batch?: number; workers?: number; amp?: boolean } = {}) {
   const runner = trainingPythonRunner();
   if (runner.runtime === "windows" && !(await exists(managedPython))) throw new Error("Install the Ultralytics runtime before training.");
+  const status = await runJson(["status", "--device", ultralyticsDevice(options.device)], 20000, runner);
+  assertTrainingAccelerator(status.device);
   const resolvedBaseModel = await resolveTrainingBaseModel(options.baseModel);
   const baseModel = runner.runtime === "wsl" && path.isAbsolute(resolvedBaseModel) ? wslPath(resolvedBaseModel) : resolvedBaseModel;
   const args = [
@@ -400,6 +410,33 @@ export async function trainUltralyticsModel(options: { epochs?: number; imageSiz
   shutdownWorker("Ultralytics model was retrained; reloading weights.");
   lastStatusCheckAt = 0;
   return result;
+}
+
+async function getTrainingDeviceStatus(fallback: UltralyticsDeviceStatus, runner: ReturnType<typeof pythonRunner>, trainingRunner: ReturnType<typeof pythonRunner>) {
+  if (runner.runtime === trainingRunner.runtime && runner.python === trainingRunner.python) return fallback;
+  try {
+    const status = await runJson(["status", "--device", ultralyticsDevice()], 20000, trainingRunner);
+    return status.device as UltralyticsDeviceStatus;
+  } catch (error) {
+    return {
+      ...fallback,
+      selected: "unavailable",
+      type: "unavailable",
+      name: null,
+      warning: `Training runtime unavailable: ${error instanceof Error ? error.message : "status check failed"}`,
+    };
+  }
+}
+
+function assertTrainingAccelerator(device: UltralyticsDeviceStatus) {
+  const type = String(device?.type ?? "").toLowerCase();
+  const selected = String(device?.selected ?? "").toLowerCase();
+  if (type === "cpu" || selected === "cpu") {
+    throw new Error("PyTorch CPU training is disabled. Configure a CUDA or ROCm training runtime before starting Ultralytics training. DirectML is supported for inference only.");
+  }
+  if ((type === "cuda" || type === "rocm") && !device.cudaAvailable) {
+    throw new Error(device.warning || "A GPU training device was requested, but PyTorch cannot see a compatible CUDA/ROCm device.");
+  }
 }
 
 export async function inferUltralyticsFrame(image: Buffer, confidence = 0.55, streamId = "browser-capture") {

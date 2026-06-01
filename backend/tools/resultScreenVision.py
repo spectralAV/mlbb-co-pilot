@@ -94,6 +94,29 @@ def parse_bool(value):
     raise ValueError(f"Expected a boolean value, got: {value}")
 
 
+NO_CPU_TRAINING_MESSAGE = (
+    "PyTorch CPU training is disabled. Configure a CUDA or ROCm training runtime before starting "
+    "Ultralytics training. DirectML is supported for inference only."
+)
+
+
+def resolve_training_device(device: str | None):
+    requested = str(device or "auto").strip().lower()
+    if requested == "cpu":
+        raise RuntimeError(NO_CPU_TRAINING_MESSAGE)
+    if requested and requested != "auto":
+        return device
+    try:
+        import torch
+    except Exception as error:
+        raise RuntimeError(f"{NO_CPU_TRAINING_MESSAGE} PyTorch status failed: {error}") from error
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        return "0"
+    if getattr(getattr(torch, "backends", None), "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    raise RuntimeError(NO_CPU_TRAINING_MESSAGE)
+
+
 def train(project_root: Path, base_model: str, epochs: int, image_size: int, device: str, batch: int | None, workers: int | None, amp: bool | None):
     paths = project_paths(project_root)
     current = status(project_root)
@@ -101,6 +124,7 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
         raise RuntimeError("Run importResultScreenDataset.py before training the result-screen model.")
     if current["training"]["images"] == 0 or current["training"]["labels"] == 0:
         raise RuntimeError("Import labelled result-screen images before training.")
+    selected_device = resolve_training_device(device)
     YOLO = require_ultralytics()
     paths["runs"].mkdir(parents=True, exist_ok=True)
     paths["runtime"].mkdir(parents=True, exist_ok=True)
@@ -123,7 +147,7 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
         "mosaic": 0.0,
         "translate": 0.02,
         "scale": 0.08,
-        "device": device,
+        "device": selected_device,
     }
     if batch is not None:
         options["batch"] = batch
@@ -142,7 +166,7 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
         "baseModel": base_model,
         "epochs": epochs,
         "imageSize": image_size,
-        "device": device,
+        "device": selected_device,
     }
 
 
@@ -189,7 +213,7 @@ def main():
     parser.add_argument("--base-model", default="yolo26n.pt")
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--image-size", type=int, default=960)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default="auto")
     parser.add_argument("--batch", type=int, default=None)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--amp", default=None)

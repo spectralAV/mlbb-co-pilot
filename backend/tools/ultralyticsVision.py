@@ -44,6 +44,11 @@ CLASSES = [
     "post_match_item_slot",
 ]
 
+NO_CPU_TRAINING_MESSAGE = (
+    "PyTorch CPU training is disabled. Configure a CUDA or ROCm training runtime before starting "
+    "Ultralytics training. DirectML is supported for inference only."
+)
+
 
 def project_paths(project_root: Path):
     cv_root = project_root / "data" / "cv"
@@ -238,8 +243,9 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
     current = status(project_root, device)
     if current["training"]["images"] == 0 or current["training"]["labels"] == 0:
         raise RuntimeError("Add labelled images and YOLO annotations before training.")
-    YOLO = require_ultralytics()
     selected_device = current["device"]["selected"]
+    require_training_accelerator(current["device"])
+    YOLO = require_ultralytics()
     paths["runs"].mkdir(parents=True, exist_ok=True)
     paths["runtime"].mkdir(parents=True, exist_ok=True)
     paths["weights"].parent.mkdir(parents=True, exist_ok=True)
@@ -283,6 +289,15 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
         "epochs": epochs,
         "imageSize": image_size,
     }
+
+
+def require_training_accelerator(device_status):
+    selected = str(device_status.get("selected", "")).lower()
+    device_type = str(device_status.get("type", "")).lower()
+    if selected == "cpu" or device_type == "cpu":
+        raise RuntimeError(NO_CPU_TRAINING_MESSAGE)
+    if device_type in ("cuda", "rocm") and not device_status.get("cudaAvailable"):
+        raise RuntimeError(device_status.get("warning") or "PyTorch cannot see a compatible CUDA/ROCm training device.")
 
 
 def infer(project_root: Path, image: Path, confidence: float, image_size: int, device: str | None):

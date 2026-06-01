@@ -20,6 +20,7 @@ import {
 } from "../api/client";
 import { captureCurrentRuntimeFrame, captureSources, useCaptureRuntimeStore } from "../runtime/captureRuntime";
 import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
+import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../utils/cvTraining";
 
 type LabelClass = { id: number; name: string; group: string };
 type HeroOption = { id: number; name: string };
@@ -72,6 +73,7 @@ export function CvLab() {
     const normalized = sanitizeLabelBox(box);
     return normalized ? [normalized] : [];
   }), [boxes]);
+  const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
   const acceptedCount = reviewBoxes.filter((box) => !box.suggested).length;
   const selectedCaptureSource = captureSources.find((item) => item.id === selectedSource) ?? captureSources[0];
   const groupedClasses = useMemo(() => {
@@ -343,11 +345,12 @@ export function CvLab() {
   }
 
   async function train() {
+    if (trainingBlocked) {
+      setMessage(cpuTrainingDisabledMessage);
+      return;
+    }
     setBusy("train");
-    const cpuTraining = model?.device?.type === "cpu";
-    setMessage(cpuTraining
-      ? "Synchronizing labels. Training will run on CPU, so 5170+ frames at 960px for 30 epochs can take hours."
-      : "Synchronizing labels and training at 960px. This can take several minutes.");
+    setMessage("Synchronizing labels and training at 960px on the configured GPU runtime.");
     try {
       await syncCvAnnotations();
       const result = await trainUltralyticsModel({ epochs: 30, imageSize: 960 });
@@ -393,8 +396,8 @@ export function CvLab() {
       />
       <Status
         label="Training"
-        value={model?.device?.type === "cpu" ? "CPU training" : model?.device?.type === "cuda" ? "CUDA training" : model?.device?.type === "rocm" ? "ROCm training" : `${model?.device?.type?.toUpperCase() ?? "CPU"} training`}
-        detail={model?.device?.warning || model?.device?.torchVersion || model?.device?.name || "-"}
+        value={trainingDeviceLabel(model)}
+        detail={trainingDeviceDetail(model)}
       />
       <Status label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} manually labelled frames`} />
       <Status label="Label Scope" value={`${classes.length} classes`} detail="Detection labels and timer ROI targets" />
@@ -502,7 +505,7 @@ export function CvLab() {
         <section className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Cpu className="h-4 w-4 text-cyan-300" />Training</h3>
           <p className="mt-2 text-xs text-slate-400">Ultralytics detection dataset</p>
-          <button className="btn mt-3 flex w-full items-center justify-center gap-2" disabled={Boolean(busy)} onClick={train}><Play size={16} />{busy === "train" ? "Training..." : "Train Ultralytics"}</button>
+          <button className="btn mt-3 flex w-full items-center justify-center gap-2" disabled={Boolean(busy) || trainingBlocked} onClick={train}><Play size={16} />{busy === "train" ? "Training..." : "Train Ultralytics"}</button>
           {!timerOcr?.packageAvailable || !timerOcr?.paddleAvailable || !screenOcr?.packageAvailable || !screenOcr?.paddleAvailable
             ? <button className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/5 text-sm font-semibold text-slate-100" disabled={Boolean(busy)} onClick={() => void installOcr()}>{busy === "install-ocr" ? "Installing OCR..." : "Install PaddleOCR"}</button>
             : null}
