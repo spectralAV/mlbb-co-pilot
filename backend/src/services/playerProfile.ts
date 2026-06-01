@@ -7,6 +7,7 @@ export type HeroPerformance = {
   matches: number;
   wins: number;
   winRate: number;
+  averageGrade?: number;
   bestScore?: number;
   source: "rone" | "manual" | "imported";
   scope?: "current-season" | "overall";
@@ -53,6 +54,12 @@ function percentValue(value: unknown) {
   return parsed <= 1 ? parsed * 100 : Math.min(100, parsed);
 }
 
+function gradeValue(value: unknown) {
+  const parsed = numberValue(value);
+  if (parsed <= 0) return 0;
+  return parsed > 20 ? parsed / 100 : parsed;
+}
+
 function normalizeHeroPerformance(value: unknown): HeroPerformance[] {
   const source = Array.isArray(value) ? value : [];
   const seen = new Set<string>();
@@ -71,6 +78,7 @@ function normalizeHeroPerformance(value: unknown): HeroPerformance[] {
     const wins = matches > 0 ? Math.min(matches, rawWins) : rawWins;
     const fallbackWinRate = matches > 0 ? (wins / matches) * 100 : 0;
     const winRate = percentValue(item?.winRate ?? item?.wr ?? fallbackWinRate);
+    const averageGrade = gradeValue(item?.averageGrade ?? item?.avgGrade ?? item?.grade ?? item?.avg_score ?? item?.avgScore ?? item?.bs);
     const bestScore = numberValue(item?.bestScore ?? item?.bs);
     const sourceValue = item?.source === "manual" || item?.source === "imported" ? item.source : "rone";
 
@@ -79,6 +87,7 @@ function normalizeHeroPerformance(value: unknown): HeroPerformance[] {
       matches,
       wins,
       winRate,
+      ...(averageGrade > 0 ? { averageGrade } : {}),
       ...(bestScore > 0 ? { bestScore } : {}),
       source: sourceValue,
       ...(scope ? { scope } : {}),

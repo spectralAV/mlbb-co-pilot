@@ -535,7 +535,7 @@ export function RoneApi() {
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-black text-white">{score(hero.bs)}</div>
-                  <div className="text-xs text-slate-500">Best</div>
+                  <div className="text-xs text-slate-500">Grade</div>
                 </div>
               </div>) : <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm text-slate-400">{snapshot.frequentHeroes?.error ?? "No frequent heroes returned for this season."}</div>}
             </div>

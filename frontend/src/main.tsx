@@ -2,7 +2,7 @@ import React, { Suspense, lazy } from "react";
 import type { ComponentType } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { Navigate, createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import "./styles.css";
 
@@ -26,6 +26,8 @@ const Settings = lazyNamed(() => import("./pages/Settings"), "Settings");
 const Calibration = lazyNamed(() => import("./pages/Calibration"), "Calibration");
 const SkinGallery = lazyNamed(() => import("./pages/SkinGallery"), "SkinGallery");
 const CvLab = lazyNamed(() => import("./pages/CvLab"), "CvLab");
+const CvStudio = lazyNamed(() => import("./pages/CvStudio"), "CvStudio");
+const CvStudioDataset = lazyNamed(() => import("./pages/CvStudio"), "CvStudioDataset");
 const CvVideoTool = lazyNamed(() => import("./pages/CvVideoTool"), "CvVideoTool");
 const GameAnalysis = lazyNamed(() => import("./pages/GameAnalysis"), "GameAnalysis");
 const GameOverlay = lazyNamed(() => import("./pages/GameOverlay"), "GameOverlay");
@@ -69,8 +71,17 @@ const router = createBrowserRouter([
       { path: "map-trainer", element: <MapTrainer /> },
       { path: "modules", element: <ModuleManager /> },
       { path: "calibration", element: <Calibration /> },
-      { path: "cv-lab", element: <CvLab /> },
-      { path: "cv-video", element: <CvVideoTool /> },
+      {
+        path: "cv-studio",
+        element: <CvStudio />,
+        children: [
+          { index: true, element: <CvStudioDataset /> },
+          { path: "video", element: <CvVideoTool /> },
+          { path: "frame", element: <CvLab /> }
+        ]
+      },
+      { path: "cv-lab", element: <Navigate to="/cv-studio/frame" replace /> },
+      { path: "cv-video", element: <Navigate to="/cv-studio/video" replace /> },
       { path: "performance", element: <PerformanceMonitor /> },
       { path: "settings", element: <Settings /> }
     ]

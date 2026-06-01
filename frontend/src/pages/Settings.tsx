@@ -43,7 +43,7 @@ function DeveloperSettings() {
       <label className="mt-5 flex min-h-16 items-center justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3">
         <span>
           <span className="block font-bold text-white">Show advanced CV and Operations surfaces</span>
-          <span className="mt-1 block text-sm text-slate-400">Reveals CV Video, Performance, Operations, Skins, and CV Lab in the navigation.</span>
+          <span className="mt-1 block text-sm text-slate-400">Reveals CV Studio, Performance, Operations, Skins, and other advanced surfaces in the navigation.</span>
         </span>
         <input
           type="checkbox"

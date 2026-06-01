@@ -122,6 +122,12 @@ function rateValue(value: unknown) {
   return parsed <= 1 ? parsed * 100 : Math.min(100, parsed);
 }
 
+function gradeValue(value: unknown) {
+  const parsed = numberValue(value);
+  if (parsed <= 0) return 0;
+  return parsed > 20 ? parsed / 100 : parsed;
+}
+
 function firstNumber(...values: unknown[]) {
   for (const value of values) {
     const parsed = numberValue(value);
@@ -140,13 +146,28 @@ function frequentHeroPerformance(item: any, scope: HeroPerformance["scope"], sea
   const wins = matches > 0 ? Math.min(matches, rawWins) : rawWins;
   const directWinRate = rateValue(item?.wr ?? data?.wr ?? item?.win_rate ?? data?.win_rate ?? item?.winRate ?? data?.winRate);
   const winRate = directWinRate || (matches > 0 ? (wins / matches) * 100 : 0);
-  const bestScore = firstNumber(item?.bs, data?.bs, item?.best_score, data?.best_score, item?.bestScore, data?.bestScore);
+  const averageGrade = gradeValue(firstNumber(
+    item?.grade,
+    data?.grade,
+    item?.avg_grade,
+    data?.avg_grade,
+    item?.average_grade,
+    data?.average_grade,
+    item?.avgScore,
+    data?.avgScore,
+    item?.averageGrade,
+    data?.averageGrade,
+    item?.bs,
+    data?.bs
+  ));
+  const bestScore = firstNumber(item?.best_score, data?.best_score, item?.bestScore, data?.bestScore);
 
   return {
     hero,
     matches,
     wins,
     winRate,
+    ...(averageGrade > 0 ? { averageGrade } : {}),
     ...(bestScore > 0 ? { bestScore } : {}),
     source: "rone",
     ...(scope ? { scope } : {}),

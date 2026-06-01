@@ -18,6 +18,17 @@ function displayScore(value: number) {
   return score.toFixed(1).replace(/\.0$/, "");
 }
 
+function normalizedGrade(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed > 20 ? parsed / 100 : parsed;
+}
+
+function displayGrade(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
 function heroEntries(heroName: unknown, heroPerformance: HeroPerformance[] = []) {
   const key = normalize(heroName);
   if (!key) return [];
@@ -41,26 +52,43 @@ export function roneHeroSignal(heroName: unknown, heroPerformance: HeroPerforman
   const winRate = clamp(Number(performance.winRate) || 0, 0, 100);
   const sampleConfidence = matches >= 20 ? 1 : matches >= 8 ? 0.65 : 0.35;
   const sampleComfort = matches >= 10 ? Math.min(8, Math.log2(matches) * 1.5) : Math.max(0, matches - 3) * 0.6;
+  const averageGrade = normalizedGrade(performance.averageGrade ?? performance.bestScore);
   const bestScore = Number(performance.bestScore ?? 0);
-  const shownBestScore = bestScore > 20 ? bestScore / 100 : bestScore;
-  const bestScoreAdjustment = shownBestScore > 0 ? clamp((shownBestScore - 7.2) * 2.5, -4, 5) : 0;
-  const profileScore = clamp(55 + (winRate - 50) * sampleConfidence + sampleComfort + bestScoreAdjustment, 0, 100);
+  const bestGrade = normalizedGrade(bestScore);
+  const gradeSignal = averageGrade || bestGrade;
+  const gradeAdjustment = gradeSignal > 0 ? clamp((gradeSignal - 7.2) * 18, -18, 24) : 0;
+  const winRateAdjustment = gradeSignal > 0
+    ? clamp((winRate - 50) * 0.12 * sampleConfidence, -4, 4)
+    : (winRate - 50) * sampleConfidence;
+  const profileScore = clamp(55 + sampleComfort + gradeAdjustment + winRateAdjustment, 0, 100);
   const isOverallFallback = performance.scope === "overall";
   const adjustment = clamp((profileScore - 60) * 0.38 * (isOverallFallback ? 0.72 : 1), -12, 14);
-  const scoreText = displayScore(bestScore);
+  const gradeText = displayGrade(gradeSignal);
+  const bestScoreText = !gradeText ? displayScore(bestScore) : "";
   const label = performance.scope === "current-season" ? "RONE current season" : performance.scope === "overall" ? "RONE overall mechanics" : "RONE profile";
   const overallWinRate = overall ? clamp(Number(overall.winRate) || 0, 0, 100) : 0;
-  const currentBeatsHistory = performance.scope === "current-season" && winRate >= 60 && overall && overallWinRate > 0 && overallWinRate + 8 < winRate;
+  const overallGrade = normalizedGrade(overall?.averageGrade ?? overall?.bestScore);
+  const currentGradeBeatsHistory = performance.scope === "current-season" && gradeSignal > 0 && overallGrade > 0 && gradeSignal >= overallGrade + 0.6;
+  const currentWinRateBeatsHistory = performance.scope === "current-season" && gradeSignal <= 0 && winRate >= 60 && overall && overallWinRate > 0 && overallWinRate + 8 < winRate;
 
   return {
     matches,
     winRate,
+    averageGrade: gradeSignal > 0 ? gradeSignal : undefined,
     bestScore: bestScore > 0 ? bestScore : undefined,
     profileScore,
     adjustment,
-    reason: `${label}: ${matches} matches / ${displayWinRate(winRate)} WR${scoreText ? ` / ${scoreText} best` : ""}`,
-    secondaryReason: currentBeatsHistory ? `Current season form overrides ${displayWinRate(overallWinRate)} overall WR` : "",
-    risk: matches >= 8 && winRate < 47 ? `${label} is only ${displayWinRate(winRate)} WR on this hero` : "",
+    reason: `${label}: ${matches} matches${gradeText ? ` / ${gradeText} grade` : bestScoreText ? ` / ${bestScoreText} score` : ""} / ${displayWinRate(winRate)} WR`,
+    secondaryReason: currentGradeBeatsHistory
+      ? `Current season grade overrides ${displayGrade(overallGrade)} overall grade`
+      : currentWinRateBeatsHistory
+        ? `Current season form overrides ${displayWinRate(overallWinRate)} overall WR`
+        : "",
+    risk: matches >= 8 && gradeSignal > 0 && gradeSignal < 6.8
+      ? `${label} grade is only ${displayGrade(gradeSignal)} on this hero`
+      : matches >= 8 && gradeSignal <= 0 && winRate < 47
+        ? `${label} is only ${displayWinRate(winRate)} WR on this hero`
+        : "",
   };
 }
 

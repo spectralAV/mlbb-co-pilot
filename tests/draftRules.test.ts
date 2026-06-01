@@ -64,8 +64,31 @@ test("hero scoring uses RONE hero performance and rank profile", () => {
   });
 
   assert.equal(strongRone.score > weakRone.score, true);
-  assert.ok(strongRone.reasons.some((reason) => /RONE profile: 34 matches \/ 70\.6% WR/i.test(reason)));
-  assert.ok(weakRone.risks.some((risk) => /RONE profile is only 38\.2% WR/i.test(risk)));
+  assert.ok(strongRone.reasons.some((reason) => /RONE profile: 34 matches \/ 8\.5 grade \/ 70\.6% WR/i.test(reason)));
+  assert.ok(weakRone.risks.some((risk) => /RONE profile grade is only 6\.1/i.test(risk)));
+});
+
+test("hero scoring treats average grade as stronger than raw win rate", () => {
+  const hero = { name: "Aamon", lanes: ["Jungle"], roles: ["Assassin"], semantic_tags: ["burst", "mobility"] };
+  const highGradeLowWinRate = scoreDraftHero(hero, {
+    allies: [],
+    enemies: [],
+    heroPool: [],
+    lane: "jungle",
+    laneDetected: true,
+    heroPerformance: [{ hero: "Aamon", matches: 32, wins: 15, winRate: 46.9, averageGrade: 9.3, source: "rone" }],
+  });
+  const lowGradeHighWinRate = scoreDraftHero(hero, {
+    allies: [],
+    enemies: [],
+    heroPool: [],
+    lane: "jungle",
+    laneDetected: true,
+    heroPerformance: [{ hero: "Aamon", matches: 32, wins: 25, winRate: 78.1, averageGrade: 6.9, source: "rone" }],
+  });
+
+  assert.equal(highGradeLowWinRate.score > lowGradeHighWinRate.score, true);
+  assert.ok(highGradeLowWinRate.reasons.some((reason) => /9\.3 grade \/ 46\.9% WR/i.test(reason)));
 });
 
 test("hero scoring prefers current-season RONE form over weak overall history", () => {
@@ -84,8 +107,8 @@ test("hero scoring prefers current-season RONE form over weak overall history", 
     },
   );
 
-  assert.ok(currentSeasonForm.reasons.some((reason) => /RONE current season: 18 matches \/ 72\.2% WR/i.test(reason)));
-  assert.ok(currentSeasonForm.reasons.some((reason) => /overrides 47\.1% overall WR/i.test(reason)));
+  assert.ok(currentSeasonForm.reasons.some((reason) => /RONE current season: 18 matches \/ 9\.1 grade \/ 72\.2% WR/i.test(reason)));
+  assert.ok(currentSeasonForm.reasons.some((reason) => /overrides 7\.6 overall grade/i.test(reason)));
   assert.equal(currentSeasonForm.risks.some((risk) => /47\.1% WR/i.test(risk)), false);
 });
 
@@ -109,7 +132,7 @@ test("hero scoring falls back to overall RONE mechanics when current season is m
   );
 
   assert.equal(overallOnly.score > noRone.score, true);
-  assert.ok(overallOnly.reasons.some((reason) => /RONE overall mechanics: 95 matches \/ 68\.4% WR/i.test(reason)));
+  assert.ok(overallOnly.reasons.some((reason) => /RONE overall mechanics: 95 matches \/ 9\.2 grade \/ 68\.4% WR/i.test(reason)));
 });
 
 test("jungler recommendations favor utility jungle when team lacks control", () => {
@@ -226,7 +249,7 @@ test("jungler recommendations apply RONE frequent-hero performance", () => {
   });
 
   assert.equal(result[0]?.hero, "Karina");
-  assert.ok(result[0]?.reasons.some((reason) => /RONE profile: 42 matches \/ 73\.8% WR/i.test(reason)));
+  assert.ok(result[0]?.reasons.some((reason) => /RONE profile: 42 matches \/ 8\.7 grade \/ 73\.8% WR/i.test(reason)));
 });
 
 test("draft auxiliary recognition is backed by installed-game atlas references", () => {

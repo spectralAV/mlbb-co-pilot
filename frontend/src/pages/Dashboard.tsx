@@ -55,7 +55,7 @@ export function Dashboard() {
         </div>
         <div className="card p-5">
           <h3 className="font-black text-white">Next Step</h3>
-          <p className="mt-2 text-sm text-slate-400">Sync data, compile semantics, then move into CV Video or Live capture for model feedback.</p>
+          <p className="mt-2 text-sm text-slate-400">Sync data, compile semantics, then move into CV Studio or Live capture for model feedback.</p>
         </div>
       </aside>
     </section>
