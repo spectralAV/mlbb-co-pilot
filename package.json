@@ -27,7 +27,7 @@
     "cv:bootstrap": "powershell -NoProfile -Command \"$p = 'data/cv/.venv/Scripts/python.exe'; if (Test-Path $p) { & $p backend/tools/prepareUltralyticsDataset.py } else { python backend/tools/prepareUltralyticsDataset.py }\"",
     "cv:prepare": "npm run cv:bootstrap",
     "cv:video:extract": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-video.ps1",
-    "cv:train": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/ultralyticsVision.py train --project-root . --device auto --batch 4 --workers 0 --amp false",
+    "cv:train": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-train.ps1",
     "cv:train:windows": "data\\cv\\.venv\\Scripts\\python.exe backend/tools/ultralyticsVision.py train --project-root . --device auto --batch 4 --workers 0 --amp false",
     "cv:train:rocm": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-wsl.ps1 -Action train",
     "cv:wsl:bootstrap": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\cv-wsl.ps1 -Action bootstrap",

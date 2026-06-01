@@ -45,9 +45,11 @@ CLASSES = [
 ]
 
 NO_CPU_TRAINING_MESSAGE = (
-    "PyTorch CPU training is disabled. Configure a CUDA or ROCm training runtime before starting "
-    "Ultralytics training. DirectML is supported for inference only."
+    "PyTorch CPU training is disabled. Configure CUDA, torch-directml, or WSL ROCm before starting "
+    "Ultralytics training."
 )
+
+DIRECTML_ALIASES = ("directml", "dml", "amd", "amd-gpu")
 
 
 def project_paths(project_root: Path):
@@ -75,6 +77,52 @@ def requested_device(device: str | None = None):
     return requested or "auto"
 
 
+def torch_directml_status():
+    info = {
+        "directmlAvailable": False,
+        "directmlVersion": None,
+        "directmlDeviceCount": 0,
+        "directmlDevices": [],
+        "directmlWarning": "",
+    }
+    try:
+        import torch_directml
+    except Exception as error:
+        info["directmlWarning"] = f"torch-directml is unavailable: {error}"
+        return info
+
+    info["directmlVersion"] = getattr(torch_directml, "__version__", None)
+    try:
+        is_available = getattr(torch_directml, "is_available", None)
+        available = bool(is_available() if callable(is_available) else True)
+    except Exception as error:
+        info["directmlWarning"] = f"torch-directml availability check failed: {error}"
+        available = False
+
+    device_count = 1 if available else 0
+    try:
+        count_fn = getattr(torch_directml, "device_count", None)
+        if callable(count_fn):
+            device_count = int(count_fn())
+    except Exception:
+        pass
+
+    devices = []
+    for index in range(max(0, device_count)):
+        try:
+            name_fn = getattr(torch_directml, "device_name", None)
+            devices.append(str(name_fn(index)) if callable(name_fn) else f"DirectML device {index}")
+        except Exception:
+            devices.append(f"DirectML device {index}")
+
+    info["directmlAvailable"] = bool(available and device_count > 0)
+    info["directmlDeviceCount"] = max(0, device_count)
+    info["directmlDevices"] = devices
+    if available and device_count <= 0 and not info["directmlWarning"]:
+        info["directmlWarning"] = "torch-directml is installed, but no DirectML device is visible."
+    return info
+
+
 def torch_device_status(device: str | None = None):
     requested = requested_device(device)
     info = {
@@ -90,6 +138,10 @@ def torch_device_status(device: str | None = None):
         "hipVersion": None,
         "cudaDeviceCount": 0,
         "cudaDevices": [],
+        "directmlAvailable": False,
+        "directmlVersion": None,
+        "directmlDeviceCount": 0,
+        "directmlDevices": [],
         "warning": "",
     }
     try:
@@ -112,6 +164,11 @@ def torch_device_status(device: str | None = None):
         except Exception:
             cuda_devices.append(f"CUDA device {index}")
     info["cudaDevices"] = cuda_devices
+    directml = torch_directml_status()
+    info["directmlAvailable"] = directml["directmlAvailable"]
+    info["directmlVersion"] = directml["directmlVersion"]
+    info["directmlDeviceCount"] = directml["directmlDeviceCount"]
+    info["directmlDevices"] = directml["directmlDevices"]
 
     normalized = requested.lower()
     if normalized in ("", "auto"):
@@ -123,17 +180,29 @@ def torch_device_status(device: str | None = None):
             info["selected"] = "mps"
             info["type"] = "mps"
             info["name"] = "Apple MPS"
+        elif info["directmlAvailable"]:
+            info["selected"] = "directml"
+            info["type"] = "directml"
+            info["name"] = info["directmlDevices"][0] if info["directmlDevices"] else "DirectML GPU"
         elif info["hipVersion"]:
             info["warning"] = "ROCm/HIP is installed, but no compatible GPU device is visible to PyTorch."
+        elif directml["directmlWarning"]:
+            info["warning"] = directml["directmlWarning"]
         return info
 
-    info["selected"] = "0" if normalized == "cuda" else requested
+    info["selected"] = "0" if normalized in ("cuda", "rocm", "hip") else requested
     if normalized == "cpu":
         info["type"] = "cpu"
         info["name"] = "CPU"
     elif normalized == "mps":
         info["type"] = "mps"
         info["name"] = "Apple MPS"
+    elif normalized in DIRECTML_ALIASES:
+        info["selected"] = "directml"
+        info["type"] = "directml"
+        info["name"] = info["directmlDevices"][0] if info["directmlDevices"] else "DirectML GPU"
+        if not info["directmlAvailable"]:
+            info["warning"] = directml["directmlWarning"] or "DirectML was requested, but torch-directml is not available."
     elif normalized in ("rocm", "hip") or normalized == "cuda" or normalized.startswith("cuda") or normalized.replace(",", "").isdigit():
         info["type"] = "rocm" if info["hipAvailable"] or normalized in ("rocm", "hip") else "cuda"
         index_text = normalized.split(":", 1)[1] if normalized.startswith("cuda:") else normalized.split(",", 1)[0]
@@ -149,6 +218,16 @@ def torch_device_status(device: str | None = None):
         info["type"] = normalized
         info["name"] = requested
     return info
+
+
+def training_device_argument(device_status):
+    if str(device_status.get("type", "")).lower() != "directml":
+        return device_status["selected"]
+    try:
+        import torch_directml
+    except Exception as error:
+        raise RuntimeError(f"DirectML training was selected, but torch-directml cannot be loaded: {error}") from error
+    return torch_directml.device()
 
 
 def onnxruntime_status():
@@ -243,8 +322,8 @@ def train(project_root: Path, base_model: str, epochs: int, image_size: int, dev
     current = status(project_root, device)
     if current["training"]["images"] == 0 or current["training"]["labels"] == 0:
         raise RuntimeError("Add labelled images and YOLO annotations before training.")
-    selected_device = current["device"]["selected"]
     require_training_accelerator(current["device"])
+    selected_device = training_device_argument(current["device"])
     YOLO = require_ultralytics()
     paths["runs"].mkdir(parents=True, exist_ok=True)
     paths["runtime"].mkdir(parents=True, exist_ok=True)
@@ -298,6 +377,8 @@ def require_training_accelerator(device_status):
         raise RuntimeError(NO_CPU_TRAINING_MESSAGE)
     if device_type in ("cuda", "rocm") and not device_status.get("cudaAvailable"):
         raise RuntimeError(device_status.get("warning") or "PyTorch cannot see a compatible CUDA/ROCm training device.")
+    if device_type == "directml" and not device_status.get("directmlAvailable"):
+        raise RuntimeError(device_status.get("warning") or "DirectML was requested, but torch-directml is not available.")
 
 
 def infer(project_root: Path, image: Path, confidence: float, image_size: int, device: str | None):

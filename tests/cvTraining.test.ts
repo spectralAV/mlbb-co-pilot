@@ -10,6 +10,7 @@ test("CV training blocks PyTorch CPU devices", () => {
 test("CV training allows visible GPU devices", () => {
   assert.equal(cpuTrainingBlocked({ trainingDevice: { selected: "0", type: "rocm", name: "AMD GPU" } }), false);
   assert.equal(trainingDeviceLabel({ trainingDevice: { selected: "0", type: "rocm", name: "AMD GPU" } }), "ROCm training");
+  assert.equal(trainingDeviceLabel({ trainingDevice: { selected: "directml", type: "directml", name: "DirectML GPU" } }), "DirectML training");
 });
 
 test("CV training reports unavailable training runtimes separately", () => {

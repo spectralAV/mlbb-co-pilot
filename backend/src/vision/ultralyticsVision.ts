@@ -59,6 +59,10 @@ export type UltralyticsDeviceStatus = {
   hipVersion?: string | null;
   cudaDeviceCount: number;
   cudaDevices: string[];
+  directmlAvailable?: boolean;
+  directmlVersion?: string | null;
+  directmlDeviceCount?: number;
+  directmlDevices?: string[];
   warning: string;
 };
 
@@ -432,10 +436,16 @@ function assertTrainingAccelerator(device: UltralyticsDeviceStatus) {
   const type = String(device?.type ?? "").toLowerCase();
   const selected = String(device?.selected ?? "").toLowerCase();
   if (type === "cpu" || selected === "cpu") {
-    throw new Error("PyTorch CPU training is disabled. Configure a CUDA or ROCm training runtime before starting Ultralytics training. DirectML is supported for inference only.");
+    throw new Error("PyTorch CPU training is disabled. Configure CUDA, torch-directml, or WSL ROCm before starting Ultralytics training.");
+  }
+  if (type === "unavailable" || selected === "unavailable") {
+    throw new Error(device.warning || "Training runtime is unavailable.");
   }
   if ((type === "cuda" || type === "rocm") && !device.cudaAvailable) {
     throw new Error(device.warning || "A GPU training device was requested, but PyTorch cannot see a compatible CUDA/ROCm device.");
+  }
+  if (type === "directml" && device.directmlAvailable === false) {
+    throw new Error(device.warning || "DirectML was requested, but torch-directml is not available.");
   }
 }
 
@@ -850,7 +860,7 @@ function useWslRuntime() {
 }
 
 function ultralyticsTrainingRuntime() {
-  return String(process.env.ULTRALYTICS_TRAIN_RUNTIME ?? process.env.ULTRALYTICS_TRAINING_RUNTIME ?? "windows").trim().toLowerCase();
+  return String(process.env.ULTRALYTICS_TRAIN_RUNTIME ?? process.env.ULTRALYTICS_TRAINING_RUNTIME ?? "auto").trim().toLowerCase();
 }
 
 function runtimeFromName(value: string): UltralyticsRuntimeKind {
@@ -860,8 +870,39 @@ function runtimeFromName(value: string): UltralyticsRuntimeKind {
 function trainingPythonRunner() {
   const requested = ultralyticsTrainingRuntime();
   if (runtimeFromName(requested) === "wsl") return pythonRunner("wsl");
-  if (["windows", "directml", "dml", "cpu"].includes(requested)) return pythonRunner("windows");
+  if (["windows", "win", "cuda", "directml", "dml", "amd", "amd-gpu"].includes(requested)) return pythonRunner("windows");
+  if (windowsPyTorchAcceleratorAvailable()) return pythonRunner("windows");
   return wslPythonAvailable() ? pythonRunner("wsl") : pythonRunner("windows");
+}
+
+function windowsPyTorchAcceleratorAvailable() {
+  const python = process.env.ULTRALYTICS_PYTHON || (existsSync(managedPython) ? managedPython : "python");
+  try {
+    const output = execFileSync(python, ["-c", [
+      "import importlib.util, json",
+      "info = {'cuda': False, 'directml': False}",
+      "try:",
+      "    import torch",
+      "    info['cuda'] = bool(torch.cuda.is_available() and torch.cuda.device_count() > 0)",
+      "except Exception:",
+      "    pass",
+      "try:",
+      "    import torch_directml",
+      "    is_available = getattr(torch_directml, 'is_available', None)",
+      "    info['directml'] = bool(is_available() if callable(is_available) else True)",
+      "except Exception:",
+      "    pass",
+      "print(json.dumps(info))",
+    ].join("\n")], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 10000,
+    });
+    const info = JSON.parse(output);
+    return Boolean(info?.cuda || info?.directml);
+  } catch {
+    return false;
+  }
 }
 
 function wslDistro() {

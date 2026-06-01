@@ -95,8 +95,8 @@ def parse_bool(value):
 
 
 NO_CPU_TRAINING_MESSAGE = (
-    "PyTorch CPU training is disabled. Configure a CUDA or ROCm training runtime before starting "
-    "Ultralytics training. DirectML is supported for inference only."
+    "PyTorch CPU training is disabled. Configure CUDA, torch-directml, or WSL ROCm before starting "
+    "Ultralytics training."
 )
 
 

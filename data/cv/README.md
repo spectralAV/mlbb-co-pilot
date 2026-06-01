@@ -42,7 +42,7 @@ npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01
 
 The extractor writes frames to `data/cv/footage/<name>/frames`, plus `manifest.json` and `frames.csv`. It does not add frames to active YOLO training by default because unlabeled gameplay frames should be reviewed and labelled first. To intentionally add extracted frames as background-negative training examples, pass `-DatasetSplit train`; this creates matching empty YOLO label files. Running `cv:prepare` rebuilds the active dataset, so keep source footage exports under `data/cv/footage` and only copy reviewed/intentional frames into `images/train` or `images/val`.
 
-`cv:train` uses the conservative Windows CPU training path. `cv:train:rocm` is available after `npm run cv:wsl:bootstrap`, but it is experimental on Radeon 780M under WSL and uses reduced pressure by default (`imgsz=640`, `batch=2`, `workers=0`, `amp=false`). Live inference remains on the Windows DirectML worker by default because it has lower warm-frame latency for this model.
+`cv:train` is GPU-first: it uses Windows CUDA or torch-directml when available, then falls back to WSL ROCm. CPU PyTorch training is intentionally blocked. `cv:train:rocm` is available after `npm run cv:wsl:bootstrap` when you want to force the WSL path. Live inference remains on the Windows DirectML worker by default because it has lower warm-frame latency for this model.
 
 Training writes the selected model to `data/cv/models/mlbb-detect.pt`. The app uses model detections only when that file exists and detections clear the confidence gate.
 
