@@ -118,7 +118,8 @@ MLBB Co-Pilot includes an experimental CV toolchain for local recognition workfl
 - Ultralytics YOLO detection pipeline for MLBB screen regions.
 - Device-adaptive ROI flow based on normalized coordinates, layout anchors, aspect-ratio profiles, calibration fallback, confidence gates, and manual override.
 - ONNX Runtime DirectML inference path for Windows AMD/DirectX 12 GPUs.
-- PyTorch CUDA or torch-directml path when a Windows GPU runtime is installed.
+- PyTorch CUDA path when a Windows CUDA runtime is installed.
+- torch-directml is installed for Windows DirectML device checks, but YOLO training uses CUDA or WSL ROCm because DirectML lacks required training ops.
 - WSL ROCm path for AMD PyTorch training.
 - CPU PyTorch training is intentionally blocked.
 - OCR sidecar hooks for selected screen text regions.
@@ -136,7 +137,7 @@ Prepare or refresh the local YOLO dataset:
 npm run cv:bootstrap
 ```
 
-Train with the GPU-first path. Windows CUDA/torch-directml is used when available; otherwise the command falls back to WSL ROCm:
+Train with the GPU-first path. Windows CUDA is used when available; otherwise the command falls back to WSL ROCm:
 
 ```powershell
 npm run cv:train

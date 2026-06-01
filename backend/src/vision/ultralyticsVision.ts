@@ -417,10 +417,10 @@ export async function trainUltralyticsModel(options: { epochs?: number; imageSiz
 }
 
 async function getTrainingDeviceStatus(fallback: UltralyticsDeviceStatus, runner: ReturnType<typeof pythonRunner>, trainingRunner: ReturnType<typeof pythonRunner>) {
-  if (runner.runtime === trainingRunner.runtime && runner.python === trainingRunner.python) return fallback;
+  if (runner.runtime === trainingRunner.runtime && runner.python === trainingRunner.python) return trainingReadyDeviceStatus(fallback);
   try {
     const status = await runJson(["status", "--device", ultralyticsDevice()], 20000, trainingRunner);
-    return status.device as UltralyticsDeviceStatus;
+    return trainingReadyDeviceStatus(status.device as UltralyticsDeviceStatus);
   } catch (error) {
     return {
       ...fallback,
@@ -432,11 +432,21 @@ async function getTrainingDeviceStatus(fallback: UltralyticsDeviceStatus, runner
   }
 }
 
+function trainingReadyDeviceStatus(device: UltralyticsDeviceStatus) {
+  if (String(device?.type ?? "").toLowerCase() !== "directml") return device;
+  return {
+    ...device,
+    selected: "unavailable",
+    type: "unavailable",
+    warning: "PyTorch DirectML is installed, but Ultralytics training is not supported on DirectML. Use CUDA or WSL ROCm.",
+  };
+}
+
 function assertTrainingAccelerator(device: UltralyticsDeviceStatus) {
   const type = String(device?.type ?? "").toLowerCase();
   const selected = String(device?.selected ?? "").toLowerCase();
   if (type === "cpu" || selected === "cpu") {
-    throw new Error("PyTorch CPU training is disabled. Configure CUDA, torch-directml, or WSL ROCm before starting Ultralytics training.");
+    throw new Error("PyTorch CPU training is disabled. Configure CUDA or WSL ROCm before starting Ultralytics training.");
   }
   if (type === "unavailable" || selected === "unavailable") {
     throw new Error(device.warning || "Training runtime is unavailable.");
@@ -444,8 +454,8 @@ function assertTrainingAccelerator(device: UltralyticsDeviceStatus) {
   if ((type === "cuda" || type === "rocm") && !device.cudaAvailable) {
     throw new Error(device.warning || "A GPU training device was requested, but PyTorch cannot see a compatible CUDA/ROCm device.");
   }
-  if (type === "directml" && device.directmlAvailable === false) {
-    throw new Error(device.warning || "DirectML was requested, but torch-directml is not available.");
+  if (type === "directml") {
+    throw new Error("PyTorch DirectML is installed, but Ultralytics training is not supported on DirectML. Use CUDA or WSL ROCm.");
   }
 }
 
@@ -871,25 +881,19 @@ function trainingPythonRunner() {
   const requested = ultralyticsTrainingRuntime();
   if (runtimeFromName(requested) === "wsl") return pythonRunner("wsl");
   if (["windows", "win", "cuda", "directml", "dml", "amd", "amd-gpu"].includes(requested)) return pythonRunner("windows");
-  if (windowsPyTorchAcceleratorAvailable()) return pythonRunner("windows");
+  if (windowsCudaTrainingAvailable()) return pythonRunner("windows");
   return wslPythonAvailable() ? pythonRunner("wsl") : pythonRunner("windows");
 }
 
-function windowsPyTorchAcceleratorAvailable() {
+function windowsCudaTrainingAvailable() {
   const python = process.env.ULTRALYTICS_PYTHON || (existsSync(managedPython) ? managedPython : "python");
   try {
     const output = execFileSync(python, ["-c", [
       "import importlib.util, json",
-      "info = {'cuda': False, 'directml': False}",
+      "info = {'cuda': False}",
       "try:",
       "    import torch",
       "    info['cuda'] = bool(torch.cuda.is_available() and torch.cuda.device_count() > 0)",
-      "except Exception:",
-      "    pass",
-      "try:",
-      "    import torch_directml",
-      "    is_available = getattr(torch_directml, 'is_available', None)",
-      "    info['directml'] = bool(is_available() if callable(is_available) else True)",
       "except Exception:",
       "    pass",
       "print(json.dumps(info))",
@@ -899,7 +903,7 @@ function windowsPyTorchAcceleratorAvailable() {
       timeout: 10000,
     });
     const info = JSON.parse(output);
-    return Boolean(info?.cuda || info?.directml);
+    return Boolean(info?.cuda);
   } catch {
     return false;
   }

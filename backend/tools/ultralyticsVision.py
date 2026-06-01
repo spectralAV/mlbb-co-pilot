@@ -45,11 +45,20 @@ CLASSES = [
 ]
 
 NO_CPU_TRAINING_MESSAGE = (
-    "PyTorch CPU training is disabled. Configure CUDA, torch-directml, or WSL ROCm before starting "
+    "PyTorch CPU training is disabled. Configure CUDA or WSL ROCm before starting "
     "Ultralytics training."
+)
+DIRECTML_TRAINING_MESSAGE = (
+    "PyTorch DirectML is installed, but Ultralytics training is not supported on DirectML. "
+    "Use CUDA or WSL ROCm."
 )
 
 DIRECTML_ALIASES = ("directml", "dml", "amd", "amd-gpu")
+
+
+def clean_device_name(value, fallback: str):
+    text = str(value or "").replace("\x00", "").strip()
+    return text or fallback
 
 
 def project_paths(project_root: Path):
@@ -111,7 +120,7 @@ def torch_directml_status():
     for index in range(max(0, device_count)):
         try:
             name_fn = getattr(torch_directml, "device_name", None)
-            devices.append(str(name_fn(index)) if callable(name_fn) else f"DirectML device {index}")
+            devices.append(clean_device_name(name_fn(index), f"DirectML device {index}") if callable(name_fn) else f"DirectML device {index}")
         except Exception:
             devices.append(f"DirectML device {index}")
 
@@ -377,8 +386,8 @@ def require_training_accelerator(device_status):
         raise RuntimeError(NO_CPU_TRAINING_MESSAGE)
     if device_type in ("cuda", "rocm") and not device_status.get("cudaAvailable"):
         raise RuntimeError(device_status.get("warning") or "PyTorch cannot see a compatible CUDA/ROCm training device.")
-    if device_type == "directml" and not device_status.get("directmlAvailable"):
-        raise RuntimeError(device_status.get("warning") or "DirectML was requested, but torch-directml is not available.")
+    if device_type == "directml":
+        raise RuntimeError(DIRECTML_TRAINING_MESSAGE)
 
 
 def infer(project_root: Path, image: Path, confidence: float, image_size: int, device: str | None):

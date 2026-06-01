@@ -95,7 +95,7 @@ def parse_bool(value):
 
 
 NO_CPU_TRAINING_MESSAGE = (
-    "PyTorch CPU training is disabled. Configure CUDA, torch-directml, or WSL ROCm before starting "
+    "PyTorch CPU training is disabled. Configure CUDA or WSL ROCm before starting "
     "Ultralytics training."
 )
 

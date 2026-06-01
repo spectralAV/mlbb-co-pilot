@@ -1,6 +1,8 @@
-# Ultralytics pulls PyTorch. This project refuses CPU training: install a
-# Windows CUDA PyTorch wheel, add torch-directml for Windows DirectML, or use
-# the WSL ROCm runtime via tools/cv-wsl.ps1.
+# Ultralytics pulls PyTorch. This project refuses CPU training: train with a
+# Windows CUDA PyTorch wheel or WSL ROCm via tools/cv-wsl.ps1. torch-directml is
+# pinned for Windows DirectML device visibility, but YOLO training does not
+# target DirectML because required loss ops are unsupported there.
 ultralytics>=8.3,<9
+torch-directml==0.2.5.dev240914
 onnx>=1.16,<2
 onnxruntime-directml>=1.20,<2

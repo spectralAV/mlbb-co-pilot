@@ -16,20 +16,14 @@ if (-not (Test-Path $windowsPython)) {
   $windowsPython = "python"
 }
 
-function Test-WindowsTorchAccelerator {
+function Test-WindowsCudaTraining {
   param([string]$Python)
   $probe = @'
 import json
-info = dict(cuda=False, directml=False)
+info = dict(cuda=False)
 try:
     import torch
     info['cuda'] = bool(torch.cuda.is_available() and torch.cuda.device_count() > 0)
-except Exception:
-    pass
-try:
-    import torch_directml
-    is_available = getattr(torch_directml, 'is_available', None)
-    info['directml'] = bool(is_available() if callable(is_available) else True)
 except Exception:
     pass
 print(json.dumps(info))
@@ -40,7 +34,7 @@ print(json.dumps(info))
       return $false
     }
     $status = $output | ConvertFrom-Json
-    return [bool]($status.cuda -or $status.directml)
+    return [bool]$status.cuda
   } catch {
     return $false
   }
@@ -60,13 +54,16 @@ function Start-WslTraining {
 
 $normalizedDevice = $Device.Trim().ToLowerInvariant()
 if (@("cuda", "directml", "dml", "amd", "amd-gpu") -contains $normalizedDevice -or $normalizedDevice.StartsWith("cuda:")) {
+  if (@("directml", "dml", "amd", "amd-gpu") -contains $normalizedDevice) {
+    throw "PyTorch DirectML is installed, but Ultralytics training is not supported on DirectML. Use CUDA or WSL ROCm."
+  }
   Start-WindowsTraining
 }
 if (@("rocm", "hip", "wsl", "wsl-rocm") -contains $normalizedDevice) {
   Start-WslTraining
 }
 
-if (Test-WindowsTorchAccelerator -Python $windowsPython) {
+if (Test-WindowsCudaTraining -Python $windowsPython) {
   Start-WindowsTraining
 }
 
