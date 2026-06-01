@@ -48,6 +48,7 @@ data/cv/runs/
 data/cv/runtime/
 data/cv/identity/
 data/cv/footage/
+data/cv/annotations/
 data/cv/result-screens/images/train/*
 data/cv/result-screens/images/val/*
 data/cv/result-screens/labels/train/*

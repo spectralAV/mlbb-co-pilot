@@ -10,9 +10,10 @@ import {
   syncCvAnnotations,
   trainUltralyticsModel,
 } from "../api/client";
+import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
 
 type LabelClass = { id: number; name: string; group: string };
-type Rect = [number, number, number, number];
+type Rect = NormalizedRect;
 type ReviewBox = {
   id: string;
   classId: number;
@@ -121,12 +122,16 @@ export function CvVideoTool() {
     for (const item of classes) groups.set(item.group, [...(groups.get(item.group) ?? []), item]);
     return [...groups.entries()];
   }, [classes]);
+  const reviewBoxes = useMemo(() => boxes.flatMap((box) => {
+    const normalized = sanitizeReviewBox(box);
+    return normalized ? [normalized] : [];
+  }), [boxes]);
   const sortedBoxes = useMemo(
-    () => [...boxes].sort((left, right) => Number(left.suggested) - Number(right.suggested) || (right.confidence ?? 0) - (left.confidence ?? 0)),
-    [boxes],
+    () => [...reviewBoxes].sort((left, right) => Number(left.suggested) - Number(right.suggested) || (right.confidence ?? 0) - (left.confidence ?? 0)),
+    [reviewBoxes],
   );
-  const acceptedBoxes = boxes.filter((box) => !box.suggested);
-  const pendingCount = boxes.length - acceptedBoxes.length;
+  const acceptedBoxes = reviewBoxes.filter((box) => !box.suggested);
+  const pendingCount = reviewBoxes.length - acceptedBoxes.length;
   const candidateLabelCount = candidateFrames.reduce((sum, item) => sum + item.boxes.length, 0);
   const modelReady = Boolean(model?.packageAvailable && model?.modelAvailable);
   const sampleCount = samples.length;
@@ -236,13 +241,13 @@ export function CvVideoTool() {
 
   function addManualBox(end: { x: number; y: number }) {
     if (!start) return;
-    const rect: Rect = [
+    const rect = normalizeReviewRect([
       Math.min(start.x, end.x),
       Math.min(start.y, end.y),
       Math.abs(end.x - start.x),
       Math.abs(end.y - start.y),
-    ].map((value) => Number(value.toFixed(6))) as Rect;
-    if (rect[2] > 0.002 && rect[3] > 0.002) {
+    ]);
+    if (rect) {
       const id = `manual-${Date.now()}`;
       setBoxes((current) => [...current, {
         id,
@@ -557,30 +562,38 @@ export function CvVideoTool() {
   function loadCandidateFrame(item: CandidateFrame) {
     seekTo(item.time);
     setSplit(item.split);
-    setBoxes(item.boxes.map((box, index) => ({
-      ...box,
-      id: `${item.id}-${index}`,
-      suggested: true,
-    })));
+    const nextBoxes = item.boxes.flatMap((box, index) => {
+      const normalized = sanitizeReviewBox({
+        ...box,
+        id: `${item.id}-${index}`,
+        suggested: true,
+      });
+      return normalized ? [normalized] : [];
+    });
+    setBoxes(nextBoxes);
     setLastCheckedAt(item.time);
-    setMessage(item.boxes.length
-      ? `Loaded ${item.boxes.length} candidate labels from ${formatTime(item.time)}.`
+    setMessage(nextBoxes.length
+      ? `Loaded ${nextBoxes.length} candidate labels from ${formatTime(item.time)}.`
       : `Loaded empty candidate at ${formatTime(item.time)}.`);
   }
 
   function loadQueuedFrame(item: QueuedFrame) {
     seekTo(item.time);
     setSplit(item.split);
-    setBoxes(item.boxes.map((box, index) => ({
-      id: `${item.id}-${index}`,
-      classId: box.classId,
-      className: classMap.get(box.classId)?.name,
-      rect: box.rect,
-      suggested: false,
-      source: "manual",
-    })));
+    const nextBoxes = item.boxes.flatMap((box, index) => {
+      const normalized = sanitizeReviewBox({
+        id: `${item.id}-${index}`,
+        classId: box.classId,
+        className: classMap.get(box.classId)?.name,
+        rect: box.rect,
+        suggested: false,
+        source: "manual",
+      });
+      return normalized ? [normalized] : [];
+    });
+    setBoxes(nextBoxes);
     setLastCheckedAt(item.time);
-    setMessage(item.negative ? `Loaded hard-negative frame from ${formatTime(item.time)}.` : `Loaded queued labels from ${formatTime(item.time)}.`);
+    setMessage(item.negative ? `Loaded hard-negative frame from ${formatTime(item.time)}.` : `Loaded ${nextBoxes.length} queued labels from ${formatTime(item.time)}.`);
   }
 
   async function captureCurrentFrame() {
@@ -638,16 +651,22 @@ export function CvVideoTool() {
   }
 
   function reviewBoxesFromDetections(detections: any[], idPrefix: string): ReviewBox[] {
-    return detections.map((item: any, index: number): ReviewBox => ({
-      id: `${idPrefix}-${index}`,
-      classId: Number(item.classId),
-      className: String(item.className ?? ""),
-      confidence: Number(item.confidence),
-      rect: item.bbox as Rect,
-      suggested: true,
-      source: "model",
-      trackId: item.trackId,
-    })).filter((item: ReviewBox) => Number.isInteger(item.classId) && Array.isArray(item.rect));
+    return detections.flatMap((item: any, index: number): ReviewBox[] => {
+      const classId = Number(item.classId);
+      const confidence = Number(item.confidence);
+      const rect = normalizeReviewRect(item.bbox);
+      if (!Number.isInteger(classId) || !rect) return [];
+      return [{
+        id: `${idPrefix}-${index}`,
+        classId,
+        className: String(item.className ?? ""),
+        confidence: Number.isFinite(confidence) ? clamp(confidence, 0, 1) : undefined,
+        rect,
+        suggested: true,
+        source: "model",
+        trackId: item.trackId ? String(item.trackId) : undefined,
+      }];
+    });
   }
 
   function sourceLabel(time: number) {
@@ -680,11 +699,11 @@ export function CvVideoTool() {
   const frameNumber = Math.max(1, Math.round(currentTime * 30));
   const modelLabel = modelReady ? "HeroDetector v3" : model?.packageAvailable ? "No weights" : "YOLOv8n";
   const deviceLabel = model?.device?.name ?? model?.device ?? "Local GPU";
-  const selectedBox = boxes.find((box) => box.id === selectedId);
+  const selectedBox = reviewBoxes.find((box) => box.id === selectedId);
   const selectedName = selectedBox ? boxName(selectedBox) : "";
-  const visibleBoxes = boxes.filter(boxVisible);
+  const visibleBoxes = reviewBoxes.filter(boxVisible);
   const hasVideo = Boolean(videoUrl);
-  const hiddenBoxCount = boxes.length - visibleBoxes.length;
+  const hiddenBoxCount = reviewBoxes.length - visibleBoxes.length;
   const reviewScore = clamp(
     Math.round((modelReady ? 30 : 0) + Math.min(25, sampleCount * 2) + Math.min(20, acceptedBoxes.length * 5) + Math.min(15, candidateFrames.length * 3) + Math.min(10, hardNegativeCount * 5)),
     0,
@@ -694,8 +713,8 @@ export function CvVideoTool() {
   const overlayLayers: Array<{ key: OverlayLayerKey; label: string; count: number; color: string }> = [
     { key: "accepted", label: "Accepted labels", count: acceptedBoxes.length, color: "bg-cyan-300" },
     { key: "model", label: "Model candidates", count: pendingCount, color: "bg-amber-300" },
-    { key: "ally", label: "Ally overlay", count: boxes.filter((box) => boxTeam(box) === "ally").length, color: "bg-teal-300" },
-    { key: "enemy", label: "Enemy overlay", count: boxes.filter((box) => boxTeam(box) === "enemy").length, color: "bg-rose-400" },
+    { key: "ally", label: "Ally overlay", count: reviewBoxes.filter((box) => boxTeam(box) === "ally").length, color: "bg-teal-300" },
+    { key: "enemy", label: "Enemy overlay", count: reviewBoxes.filter((box) => boxTeam(box) === "enemy").length, color: "bg-rose-400" },
   ];
   const timelineItems: TimelineItem[] = [
     ...candidateFrames.map((item): TimelineItem => ({ id: `candidate-${item.id}`, type: "candidate", time: item.time, count: item.boxes.length, item })),
@@ -980,7 +999,7 @@ export function CvVideoTool() {
           <div className="cv-layer-stack">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="text-sm font-black">Overlay Tracks</h3>
-              <span className="text-xs text-slate-500">{visibleBoxes.length}/{boxes.length} visible</span>
+              <span className="text-xs text-slate-500">{visibleBoxes.length}/{reviewBoxes.length} visible</span>
             </div>
             <div className="grid gap-2">
               {overlayLayers.map((layer) => <button
@@ -1119,7 +1138,18 @@ function boxColor(name: string, suggested: boolean) {
 }
 
 function toAnnotationBox(box: ReviewBox) {
-  return { classId: box.classId, rect: box.rect };
+  return { classId: box.classId, rect: normalizeReviewRect(box.rect) ?? box.rect };
+}
+
+function sanitizeReviewBox(box: ReviewBox): ReviewBox | null {
+  const rect = normalizeReviewRect(box.rect);
+  if (!rect || !Number.isInteger(box.classId)) return null;
+  const confidence = Number(box.confidence);
+  return {
+    ...box,
+    rect,
+    confidence: Number.isFinite(confidence) ? clamp(confidence, 0, 1) : undefined,
+  };
 }
 
 function clamp(value: number, min: number, max: number) {

@@ -750,14 +750,53 @@ function projectRelative(file: string) {
 }
 
 async function runJson(command: string[], timeout = 20000, runner = pythonRunner()): Promise<any> {
-  const { stdout } = await execFileAsync(runner.file, [...runner.args, runner.script, ...command, "--project-root", runner.projectRoot], {
-    timeout,
-    windowsHide: true,
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  const payload = JSON.parse(stdout.trim());
+  let stdout = "";
+  try {
+    const result = await execFileAsync(runner.file, [...runner.args, runner.script, ...command, "--project-root", runner.projectRoot], {
+      timeout,
+      windowsHide: true,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    stdout = String(result.stdout ?? "");
+  } catch (error) {
+    const failedStdout = String((error as { stdout?: unknown }).stdout ?? "");
+    const failedStderr = String((error as { stderr?: unknown }).stderr ?? "");
+    const failedPayload = parseJsonPayload(failedStdout);
+    if (failedPayload) {
+      if (!failedPayload.ok) throw new Error(failedPayload.error ?? commandFailureMessage(error, failedStderr));
+      return failedPayload.data;
+    }
+    throw new Error(commandFailureMessage(error, failedStderr || failedStdout));
+  }
+  const payload = parseJsonPayload(stdout);
+  if (!payload) throw new Error(`Ultralytics command did not return a JSON result.${lastProcessOutput(stdout)}`);
   if (!payload.ok) throw new Error(payload.error ?? "Ultralytics command failed.");
   return payload.data;
+}
+
+function parseJsonPayload(output: string) {
+  const lines = output.trim().split(/\r?\n/).reverse();
+  for (const line of lines) {
+    const text = line.trim();
+    if (!text.startsWith("{") || !text.endsWith("}")) continue;
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Ignore non-protocol JSON-looking output from third-party tooling.
+    }
+  }
+  return null;
+}
+
+function commandFailureMessage(error: unknown, output: string) {
+  const text = lastProcessOutput(output);
+  if (text) return text.replace(/^ Process output: /, "");
+  return error instanceof Error ? error.message : "Ultralytics command failed.";
+}
+
+function lastProcessOutput(output: string) {
+  const text = output.trim().split(/\r?\n/).filter(Boolean).slice(-8).join("\n");
+  return text ? ` Process output: ${text}` : "";
 }
 
 function ultralyticsDevice(device?: string) {

@@ -19,10 +19,11 @@ import {
   trainUltralyticsModel,
 } from "../api/client";
 import { captureCurrentRuntimeFrame, captureSources, useCaptureRuntimeStore } from "../runtime/captureRuntime";
+import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
 
 type LabelClass = { id: number; name: string; group: string };
 type HeroOption = { id: number; name: string };
-type Rect = [number, number, number, number];
+type Rect = NormalizedRect;
 type LabelBox = { id: string; classId: number; rect: Rect; confidence?: number; suggested?: boolean; heroId?: number; heroName?: string; transcript?: string };
 type AnnotationSample = {
   id: string;
@@ -67,7 +68,11 @@ export function CvLab() {
   }, []);
 
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
-  const acceptedCount = boxes.filter((box) => !box.suggested).length;
+  const reviewBoxes = useMemo(() => boxes.flatMap((box) => {
+    const normalized = sanitizeLabelBox(box);
+    return normalized ? [normalized] : [];
+  }), [boxes]);
+  const acceptedCount = reviewBoxes.filter((box) => !box.suggested).length;
   const selectedCaptureSource = captureSources.find((item) => item.id === selectedSource) ?? captureSources[0];
   const groupedClasses = useMemo(() => {
     const groups = new Map<string, LabelClass[]>();
@@ -150,14 +155,17 @@ export function CvLab() {
       const response = await fetch(apiUrl(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`), { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load labelled image.");
       setSplit(sample.split);
-      await loadBlob(await response.blob(), sample.source, sample.boxes.map((box, index) => ({
-        id: `${sample.id}-${index}`,
-        classId: box.classId,
-        rect: box.rect,
-        heroId: box.heroId,
-        heroName: box.heroName,
-        transcript: box.transcript,
-      })));
+      await loadBlob(await response.blob(), sample.source, sample.boxes.flatMap((box, index) => {
+        const normalized = sanitizeLabelBox({
+          id: `${sample.id}-${index}`,
+          classId: box.classId,
+          rect: box.rect,
+          heroId: box.heroId,
+          heroName: box.heroName,
+          transcript: box.transcript,
+        });
+        return normalized ? [normalized] : [];
+      }));
     } finally {
       setBusy("");
     }
@@ -173,13 +181,13 @@ export function CvLab() {
 
   function addBox(end: { x: number; y: number }) {
     if (!start) return;
-    const rect: Rect = [
+    const rect = normalizeReviewRect([
       Math.min(start.x, end.x),
       Math.min(start.y, end.y),
       Math.abs(end.x - start.x),
       Math.abs(end.y - start.y),
-    ].map((value) => Number(value.toFixed(6))) as Rect;
-    if (rect[2] > 0.002 && rect[3] > 0.002) {
+    ]);
+    if (rect) {
       const id = `drawn-${Date.now()}`;
       setBoxes((current) => [...current, { id, classId: activeClassId, rect }]);
       setSelectedId(id);
@@ -281,13 +289,16 @@ export function CvLab() {
     try {
       const result = await inferUltralyticsFrame(frame, 0.25);
       const detections = result.data?.detections ?? [];
-      const suggestions: LabelBox[] = detections.map((detection: any, index: number) => ({
-        id: `model-${Date.now()}-${index}`,
-        classId: Number(detection.classId),
-        rect: detection.bbox as Rect,
-        confidence: Number(detection.confidence),
-        suggested: true,
-      }));
+      const suggestions: LabelBox[] = detections.flatMap((detection: any, index: number) => {
+        const normalized = sanitizeLabelBox({
+          id: `model-${Date.now()}-${index}`,
+          classId: Number(detection.classId),
+          rect: detection.bbox as Rect,
+          confidence: Number(detection.confidence),
+          suggested: true,
+        });
+        return normalized ? [normalized] : [];
+      });
       setBoxes((current) => [...current.filter((box) => !box.suggested), ...suggestions]);
       setMessage(`${suggestions.length} model suggestions pending review.`);
     } catch (error) {
@@ -308,7 +319,7 @@ export function CvLab() {
       await saveCvAnnotation(frame, {
         split,
         source,
-        boxes: boxes.filter((box) => !box.suggested).map((box) => ({
+        boxes: reviewBoxes.filter((box) => !box.suggested).map((box) => ({
           classId: box.classId,
           rect: box.rect,
           heroId: box.heroId,
@@ -333,7 +344,10 @@ export function CvLab() {
 
   async function train() {
     setBusy("train");
-    setMessage("Synchronizing labels and training at 960px. This can take several minutes.");
+    const cpuTraining = model?.device?.type === "cpu";
+    setMessage(cpuTraining
+      ? "Synchronizing labels. Training will run on CPU, so 5170+ frames at 960px for 30 epochs can take hours."
+      : "Synchronizing labels and training at 960px. This can take several minutes.");
     try {
       await syncCvAnnotations();
       const result = await trainUltralyticsModel({ epochs: 30, imageSize: 960 });
@@ -373,9 +387,14 @@ export function CvLab() {
       <Status label="Capture Source" value={selectedCaptureSource.title} detail={running ? `${sourceMode}${selectedSource === "window" && windowContentCrop.enabled ? " / cropped" : ""}` : "not running"} />
       <Status label="Model" value={model?.modelAvailable ? "Weights loaded" : "No model"} detail={model?.weights?.split(/[\\/]/).pop() ?? "-"} />
       <Status
-        label="Accelerator"
+        label="Inference"
         value={model?.inferenceBackend?.selected === "directml" ? "DirectML GPU" : model?.device?.type === "cuda" ? "CUDA GPU" : model?.device?.type?.toUpperCase() ?? "CPU"}
         detail={model?.inferenceBackend?.selected === "directml" ? "AMD / DirectX 12" : model?.device?.name ?? model?.device?.selected ?? "-"}
+      />
+      <Status
+        label="Training"
+        value={model?.device?.type === "cpu" ? "CPU training" : model?.device?.type === "cuda" ? "CUDA training" : model?.device?.type === "rocm" ? "ROCm training" : `${model?.device?.type?.toUpperCase() ?? "CPU"} training`}
+        detail={model?.device?.warning || model?.device?.torchVersion || model?.device?.name || "-"}
       />
       <Status label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} manually labelled frames`} />
       <Status label="Label Scope" value={`${classes.length} classes`} detail="Detection labels and timer ROI targets" />
@@ -402,7 +421,7 @@ export function CvLab() {
           onPointerUp={(event) => addBox(point(event))}
         >
           {imageUrl ? <img src={imageUrl} alt="" className="absolute inset-0 h-full w-full object-fill" draggable={false} /> : <div className="grid h-full min-h-72 place-items-center text-sm text-slate-400">No frozen frame loaded</div>}
-          {boxes.map((box) => {
+          {reviewBoxes.map((box) => {
             const active = box.id === selectedId;
             const name = classMap.get(box.classId)?.name ?? `class ${box.classId}`;
             return <button
@@ -443,7 +462,7 @@ export function CvLab() {
         <section className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Boxes className="h-4 w-4 text-cyan-300" />Frame Labels</h3>
           <div className="mt-3 max-h-56 space-y-2 overflow-auto">
-            {boxes.length ? boxes.map((box) => {
+            {reviewBoxes.length ? reviewBoxes.map((box) => {
               const boxClassName = classMap.get(box.classId)?.name ?? "";
               return <div key={box.id} className={`rounded-lg border p-2 ${box.suggested ? "border-amber-300/30 bg-amber-400/10" : "border-white/10 bg-white/5"}`}>
               <div className="flex items-center gap-2">
@@ -519,6 +538,17 @@ function isHeroMarkerClass(name: string) {
 
 function isTranscriptClass(name: string) {
   return name.includes("respawn") || name.includes("counter") || name.includes("timer");
+}
+
+function sanitizeLabelBox(box: LabelBox): LabelBox | null {
+  const rect = normalizeReviewRect(box.rect);
+  if (!rect || !Number.isInteger(box.classId)) return null;
+  const confidence = Number(box.confidence);
+  return {
+    ...box,
+    rect,
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
+  };
 }
 
 async function cropBlob(source: Blob, rect: Rect) {
