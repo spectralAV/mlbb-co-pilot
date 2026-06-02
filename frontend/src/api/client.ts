@@ -11,6 +11,7 @@ async function responseError(res: Response, path: string) {
 }
 export async function apiGet<T>(path:string):Promise<T>{ const res=await fetch(apiUrl(path), { cache: "no-store" }); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 export async function apiPost<T>(path:string, body:unknown={}):Promise<T>{ const res=await fetch(apiUrl(path),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
+export async function apiPut<T>(path:string, body:unknown={}):Promise<T>{ const res=await fetch(apiUrl(path),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 export async function apiDelete<T>(path:string):Promise<T>{ const res=await fetch(apiUrl(path),{method:"DELETE"}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 function bearer(token: string) { return token.startsWith("Bearer ") ? token : `Bearer ${token}`; }
 function queryString(params: Record<string, unknown> = {}) {
@@ -127,6 +128,7 @@ export async function inferTimerCrop(crop: Blob, timerType: string) {
   return response.json() as Promise<any>;
 }
 export const getScreenOcrStatus = () => apiGet<any>("/api/vision/models/screen-ocr/status");
+export const getMlbbHudOcrFeedLatest = (params: Record<string, unknown> = {}) => apiGet<any>(`/api/vision/models/screen-ocr/mlbb-feed/latest${queryString(params)}`);
 export const installScreenOcrRuntime = () => apiPost<any>("/api/vision/models/screen-ocr/install");
 export async function inferScreenOcrFrame(frame: Blob, options: unknown = {}) {
   const body = new FormData();
@@ -144,6 +146,7 @@ export async function deleteCvAnnotation(id: string) {
   if (!response.ok) throw await responseError(response, "/api/vision/annotations");
   return response.json() as Promise<any>;
 }
+export const updateCvAnnotation = (id: string, metadata: unknown) => apiPut<any>(`/api/vision/annotations/${encodeURIComponent(id)}`, metadata);
 export async function saveCvAnnotation(frame: Blob, metadata: unknown) {
   const body = new FormData();
   body.append("metadata", JSON.stringify(metadata));

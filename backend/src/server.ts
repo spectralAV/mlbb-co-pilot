@@ -40,10 +40,10 @@ import { getEquipmentRecognitionManifest, getEquipmentRecognitionReference } fro
 import { getUltralyticsStatus, inferUltralyticsFrame, installUltralyticsRuntime, mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects, trainUltralyticsModel } from "./vision/ultralyticsVision.js";
 import { firstNormalizedRegion, getActiveObsRegions } from "./services/obsCoachState.js";
 import { readMlbbAdbHeroHead, readMlbbAdbTexture } from "./services/mlbbAdbAssets.js";
-import { annotationImage, deleteAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset } from "./vision/cvAnnotation.js";
+import { annotationImage, deleteAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset, updateAnnotation } from "./vision/cvAnnotation.js";
 import { getDinoIdentityStatus, indexDinoReferences, matchDinoIdentity } from "./vision/dinoIdentity.js";
 import { getTimerOcrStatus, inferTimerCrop, installTimerOcrRuntime, timerClasses } from "./vision/timerRecognition.js";
-import { getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, normalizeScreenOcrRegions } from "./vision/screenTextRecognition.js";
+import { getMlbbHudOcrFeedStatus, getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, normalizeScreenOcrRegions } from "./vision/screenTextRecognition.js";
 import { getVisionReflectionSummary } from "./vision/visionReflection.js";
 import { addClientPerformanceSample, getPerformanceSnapshot, recordRequestMetric } from "./services/performanceMonitor.js";
 import { ensureObsScrcpyPluginInstalled } from "./services/obsPluginInstaller.js";
@@ -276,6 +276,14 @@ app.delete("/api/vision/annotations/:id", async (req, reply) => {
   const deleted = await deleteAnnotation((req.params as { id: string }).id);
   return deleted ? { success: true } : reply.code(404).send({ success: false, error: "Annotation not found." });
 });
+app.put("/api/vision/annotations/:id", async (req, reply) => {
+  try {
+    const sample = await updateAnnotation((req.params as { id: string }).id, req.body as any);
+    return sample ? { success: true, data: sample } : reply.code(404).send({ success: false, error: "Annotation not found." });
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Annotation update failed." });
+  }
+});
 app.post("/api/vision/annotations/sync", async () => ({ success: true, data: { samples: await syncSavedAnnotationsToDataset() } }));
 app.post("/api/vision/annotations", async (req, reply) => {
   try {
@@ -367,6 +375,10 @@ app.post("/api/vision/models/timer-ocr/infer", async (req, reply) => {
   }
 });
 app.get("/api/vision/models/screen-ocr/status", async () => ({ success: true, data: await getScreenOcrStatus() }));
+app.get("/api/vision/models/screen-ocr/mlbb-feed/latest", async (req) => {
+  const query = req.query as Record<string, unknown>;
+  return { success: true, data: await getMlbbHudOcrFeedStatus({ url: query.url, port: query.port }) };
+});
 app.post("/api/vision/models/screen-ocr/install", async (_req, reply) => {
   try {
     return { success: true, data: await installScreenOcrRuntime() };
@@ -383,10 +395,12 @@ app.post("/api/vision/models/screen-ocr/infer", async (req, reply) => {
       if (part.type === "field" && part.fieldname === "options") options = JSON.parse(String(part.value));
     }
     if (!frame) return reply.code(400).send({ success: false, error: "A frame image is required." });
-    const activeRegions = options?.regions ?? await getActiveObsRegions();
+    const profile = options?.profile;
+    const activeRegions = options?.regions ?? (profile ? undefined : await getActiveObsRegions());
     return { success: true, data: await inferScreenTextFrame(frame, {
-      regions: normalizeScreenOcrRegions(activeRegions),
-      maxRegions: Number(options?.maxRegions ?? 8),
+      regions: activeRegions == null ? undefined : normalizeScreenOcrRegions(activeRegions),
+      profile,
+      maxRegions: Number(options?.maxRegions ?? (profile === "mlbb-hud" ? 12 : 8)),
     }) };
   } catch (error) {
     return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Screen OCR failed" });

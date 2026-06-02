@@ -21,6 +21,32 @@ export const defaultScreenOcrRegions = [
   { key: "result_banner", rect: [0.24, 0.14, 0.52, 0.2] },
 ] as const;
 
+const falseOcrReferenceFrame = { width: 1920, height: 1080 };
+
+const mlbbHudOcrPixelRegions = [
+  { key: "turret1", x: 665, y: 12, w: 34, h: 36 },
+  { key: "lord1", x: 580, y: 12, w: 34, h: 39 },
+  { key: "gold1", x: 743, y: 12, w: 75, h: 38 },
+  { key: "killscore1", x: 848, y: 6, w: 51, h: 43 },
+  { key: "timer", x: 921, y: 7, w: 80, h: 40 },
+  { key: "killscore2", x: 1022, y: 7, w: 49, h: 42 },
+  { key: "gold2", x: 1137, y: 12, w: 68, h: 36 },
+  { key: "turret2", x: 1251, y: 11, w: 32, h: 36 },
+  { key: "lord2", x: 1329, y: 12, w: 40, h: 36 },
+] as const;
+
+export const mlbbHudOcrKeys = mlbbHudOcrPixelRegions.map((region) => region.key);
+
+export const mlbbHudOcrRegions: ScreenOcrRegion[] = mlbbHudOcrPixelRegions.map((region) => ({
+  key: region.key,
+  rect: [
+    roundRect(region.x / falseOcrReferenceFrame.width),
+    roundRect(region.y / falseOcrReferenceFrame.height),
+    roundRect(region.w / falseOcrReferenceFrame.width),
+    roundRect(region.h / falseOcrReferenceFrame.height),
+  ],
+}));
+
 export type ScreenOcrRegion = {
   key: string;
   rect: [number, number, number, number];
@@ -46,6 +72,12 @@ type InferOptions = {
   regions?: unknown;
   maxRegions?: number;
   observedAt?: number;
+  profile?: unknown;
+};
+
+type MlbbHudOcrFeedOptions = {
+  url?: unknown;
+  port?: unknown;
 };
 
 let lastInferenceAt = 0;
@@ -61,7 +93,66 @@ export async function getScreenOcrStatus() {
     ...tool,
     enabledForLiveCapture: isScreenOcrLiveEnabled(),
     throttleMs: ocrIntervalMs,
+    mlbbHudRegions: mlbbHudOcrRegions,
   };
+}
+
+export async function getMlbbHudOcrFeedStatus(options: MlbbHudOcrFeedOptions | string = {}) {
+  const urls = resolveMlbbHudOcrFeedUrls(normalizeMlbbHudOcrFeedOptions(options));
+  const errors: string[] = [];
+  for (const url of urls) {
+    try {
+      return {
+        connected: true,
+        candidates: urls,
+        ...await readMlbbHudOcrFeed(url),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "MLBB HUD OCR feed unavailable.";
+      errors.push(`${url}: ${message}`);
+    }
+  }
+
+  return {
+    connected: false,
+    url: urls[0],
+    candidates: urls,
+    error: errors[0] ?? "MLBB HUD OCR feed unavailable.",
+    observedAt: Date.now(),
+    fields: normalizeMlbbHudOcrFeedPayload({}),
+  };
+}
+
+export async function readMlbbHudOcrFeed(url = resolveMlbbHudOcrFeedUrls()[0]) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
+  try {
+    const response = await fetch(withCacheBuster(url), {
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { "cache-control": "no-cache" },
+    });
+    if (!response.ok) throw new Error(`MLBB HUD OCR feed returned HTTP ${response.status}.`);
+    const raw = await response.json();
+    return {
+      url,
+      observedAt: Date.now(),
+      fields: normalizeMlbbHudOcrFeedPayload(raw),
+      raw,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function resolveMlbbHudOcrFeedUrls(options: MlbbHudOcrFeedOptions = {}) {
+  const candidates = [
+    normalizeMlbbHudOcrFeedUrl(options.url),
+    ...mlbbHudOcrFeedUrlsForPort(options.port),
+    normalizeMlbbHudOcrFeedUrl(process.env.MLBB_HUD_OCR_FEED_URL),
+    ...mlbbHudOcrFeedUrlsForPort(14337),
+  ].filter((url): url is string => Boolean(url));
+  return [...new Set(candidates)];
 }
 
 export async function installScreenOcrRuntime() {
@@ -79,7 +170,7 @@ export async function installScreenOcrRuntime() {
 export async function inferScreenTextFrame(image: Buffer, options: InferOptions = {}) {
   await mkdir(queryRoot, { recursive: true });
   const file = path.join(queryRoot, `${nanoid(10)}.png`);
-  const regions = normalizeScreenOcrRegions(options.regions).slice(0, Math.max(1, Math.min(8, Number(options.maxRegions ?? 8))));
+  const regions = resolveScreenOcrRegions(options);
   await sharp(image).png().toFile(file);
   try {
     const result = await runScreenOcr([
@@ -126,15 +217,27 @@ export function normalizeScreenOcrRegions(value: unknown): ScreenOcrRegion[] {
   return defaultScreenOcrRegions.map((region) => ({ key: region.key, rect: [...region.rect] as ScreenOcrRegion["rect"] }));
 }
 
+export function resolveScreenOcrRegions(options: Pick<InferOptions, "regions" | "maxRegions" | "profile"> = {}): ScreenOcrRegion[] {
+  const profile = String(options.profile ?? "").toLowerCase();
+  const defaultMaxRegions = profile === "mlbb-hud" ? mlbbHudOcrRegions.length : 8;
+  const maxRegions = Math.max(1, Math.min(12, Number(options.maxRegions ?? defaultMaxRegions)));
+  if (options.regions != null) return normalizeScreenOcrRegions(options.regions).slice(0, maxRegions);
+  if (profile === "mlbb-hud") {
+    return mlbbHudOcrRegions.map((region) => ({ key: region.key, rect: [...region.rect] as ScreenOcrRegion["rect"] })).slice(0, maxRegions);
+  }
+  return defaultScreenOcrRegions.map((region) => ({ key: region.key, rect: [...region.rect] as ScreenOcrRegion["rect"] })).slice(0, maxRegions);
+}
+
 export function normalizeScreenTextFacts(value: unknown, observedAt = Date.now()): ScreenTextFact[] {
   if (!Array.isArray(value)) return [];
   return value
     .map((fact: any) => {
       const rect = firstRect(fact?.rect);
       const words = normalizeCandidates(fact?.candidates);
+      const region = normalizeRegionKey(fact?.key ?? fact?.region ?? "screen");
       return {
-        region: normalizeRegionKey(fact?.key ?? fact?.region ?? "screen"),
-        text: normalizeOcrText(fact?.text),
+        region,
+        text: normalizeMlbbHudOcrText(region, normalizeOcrText(fact?.text)),
         confidence: clamp01(fact?.confidence),
         rect,
         words,
@@ -143,7 +246,60 @@ export function normalizeScreenTextFacts(value: unknown, observedAt = Date.now()
       };
     })
     .filter((fact): fact is ScreenTextFact => Boolean(fact.region) && fact.rect !== null)
-    .slice(0, 8);
+    .slice(0, 12);
+}
+
+export function normalizeMlbbHudOcrText(region: unknown, value: unknown) {
+  const key = normalizeRegionKey(region);
+  const raw = normalizeOcrText(value);
+  if (!raw) return "";
+  const substituted = raw
+    .replace(/[oOQD]/g, "0")
+    .replace(/[lI|\]\[!i]/g, "1")
+    .replace(/[Zz]/g, "2")
+    .replace(/A/g, "4")
+    .replace(/[Ss]/g, "5")
+    .replace(/G/g, "6")
+    .replace(/T/g, "7")
+    .replace(/B/g, "8")
+    .replace(/g/g, "9");
+
+  if (key === "gold1" || key === "gold2") {
+    const compact = substituted.toLowerCase().replace(/[^0-9k]/g, "");
+    if (compact.includes("k")) {
+      const nums = compact.split("k")[0].replace(/[^0-9]/g, "");
+      if (nums.length === 3) return `${nums.slice(0, 2)}.${nums.slice(2)}k`;
+      if (nums.length === 2) return `${nums}k`;
+      if (nums.length > 3) return `${nums.slice(0, 2)}.${nums.slice(2, 3)}k`;
+      return nums ? `${nums}k` : "";
+    }
+    const nums = compact.replace(/[^0-9]/g, "");
+    return nums.length >= 4 ? nums.slice(0, 4) : nums;
+  }
+
+  if (key === "timer") {
+    const timer = substituted.replace(/[.;]/g, ":").replace(/[^0-9:]/g, "");
+    if (timer.includes(":")) {
+      const [minutes = "", seconds = ""] = timer.split(":");
+      return `${minutes.slice(-2)}:${seconds.padStart(2, "0").slice(0, 2)}`.replace(/^:/, "");
+    }
+    if (timer.length >= 3) return `${timer.slice(0, -2)}:${timer.slice(-2)}`;
+    return timer;
+  }
+
+  if (/^(turret|lord|killscore)[12]$/.test(key)) {
+    return substituted.replace(/[^0-9]/g, "").slice(0, 3);
+  }
+
+  return raw;
+}
+
+export function normalizeMlbbHudOcrFeedPayload(value: unknown) {
+  const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return Object.fromEntries(mlbbHudOcrKeys.map((key) => [
+    key,
+    normalizeMlbbHudOcrText(key, input[key]),
+  ])) as Record<typeof mlbbHudOcrKeys[number], string>;
 }
 
 function normalizeRegionList(value: unknown) {
@@ -206,6 +362,48 @@ function clamp01(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(1, number));
+}
+
+function roundRect(value: number) {
+  return Number(value.toFixed(6));
+}
+
+function normalizeMlbbHudOcrFeedOptions(options: MlbbHudOcrFeedOptions | string) {
+  return typeof options === "string" ? { url: options } : options;
+}
+
+function mlbbHudOcrFeedUrlsForPort(value: unknown) {
+  const port = normalizeMlbbHudOcrFeedPort(value);
+  if (port === null) return [] as string[];
+  return [
+    `http://127.0.0.1:${port}/MLBB.json`,
+    `http://localhost:${port}/MLBB.json`,
+  ];
+}
+
+function normalizeMlbbHudOcrFeedPort(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const port = Number(text);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+}
+
+function normalizeMlbbHudOcrFeedUrl(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw || /^\d{1,5}$/.test(raw)) return null;
+  const withProtocol = /^[a-z][a-z\d+\-.]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+  try {
+    const url = new URL(withProtocol);
+    if (!url.pathname || url.pathname === "/") url.pathname = "/MLBB.json";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function withCacheBuster(url: string) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}t=${Date.now()}`;
 }
 
 async function runScreenOcr(args: string[], timeout = 30000) {

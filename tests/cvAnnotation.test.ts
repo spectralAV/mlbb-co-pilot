@@ -26,3 +26,20 @@ test("CV annotations retain validated timer transcripts without altering detecto
   assert.equal(boxes[2].transcript, undefined);
   assert.deepEqual(boxes.map((box) => box.className), ["lord_respawn_timer", "enemy_respawn_timer", "score_counter"]);
 });
+
+test("annotation normalization clamps boxes that drift past the image edge", () => {
+  const boxes = normalizeAnnotationBoxes([
+    { classId: 0, rect: [0.95, 0.9, 0.2, 0.2] },
+  ]);
+
+  assert.equal(boxes.length, 1);
+  assert.deepEqual(boxes[0].rect, [0.95, 0.9, 0.05, 0.1]);
+});
+
+test("annotation normalization drops boxes that collapse after clamping", () => {
+  const boxes = normalizeAnnotationBoxes([
+    { classId: 0, rect: [1.2, 0.2, 0.1, 0.1] },
+  ]);
+
+  assert.deepEqual(boxes, []);
+});

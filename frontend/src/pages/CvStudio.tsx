@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Boxes, Database, Film, RefreshCw, ScanSearch, Trash2, Wand2 } from "lucide-react";
+import { Boxes, Database, Film, RefreshCw, ScanSearch, ScanText, Trash2, Wand2 } from "lucide-react";
 import {
   apiUrl,
   deleteCvAnnotation,
@@ -46,10 +46,12 @@ export function CvStudio() {
       </div>
     </header>
 
-    <nav className="cv-inspector-tabs">
+    <nav className="cv-studio-tabs touch-scroll">
       <StudioTab to="/cv-studio" end icon={<Database size={16} />}>Dataset</StudioTab>
-      <StudioTab to="/cv-studio/video" icon={<Film size={16} />}>Video Review</StudioTab>
-      <StudioTab to="/cv-studio/frame" icon={<ScanSearch size={16} />}>Frame Annotator</StudioTab>
+      <StudioTab to="/cv-studio/editor" icon={<Boxes size={16} />}><span className="cv-studio-label-full">Model Editor</span><span className="cv-studio-label-short">Editor</span></StudioTab>
+      <StudioTab to="/cv-studio/ocr" icon={<ScanText size={16} />}><span className="cv-studio-label-full">HUD OCR</span><span className="cv-studio-label-short">OCR</span></StudioTab>
+      <StudioTab to="/cv-studio/video" icon={<Film size={16} />}><span className="cv-studio-label-full">Video Review</span><span className="cv-studio-label-short">Video</span></StudioTab>
+      <StudioTab to="/cv-studio/frame" icon={<ScanSearch size={16} />}><span className="cv-studio-label-full">Frame Annotator</span><span className="cv-studio-label-short">Frame</span></StudioTab>
     </nav>
 
     <Outlet />

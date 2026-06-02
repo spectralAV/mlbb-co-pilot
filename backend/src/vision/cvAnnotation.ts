@@ -58,6 +58,7 @@ type AnnotationMetadata = {
   boxes: AnnotationBox[];
   imageName: string;
   createdAt: string;
+  updatedAt?: string;
 };
 
 const projectRoot = path.resolve(process.cwd(), "..");
@@ -126,6 +127,70 @@ export async function saveAnnotation(
   return metadata;
 }
 
+export async function updateAnnotation(
+  id: string,
+  input: { split?: unknown; source?: unknown; boxes?: unknown; allowEmpty?: unknown },
+) {
+  const safeId = path.basename(id);
+  const samples = await listAnnotations();
+  const current = samples.find((entry) => entry.id === safeId);
+  if (!current) return null;
+
+  const split: AnnotationSplit = input.split === "val" ? "val" : "train";
+  const boxes = normalizeAnnotationBoxes(input.boxes);
+  if (!boxes.length && input.allowEmpty !== true) throw new Error("Keep at least one annotation box or save as an empty negative frame.");
+
+  const canonicalImage = path.join(annotationRoot, "images", current.split, current.imageName);
+  if (!(await exists(canonicalImage))) throw new Error("Annotation image is missing.");
+
+  const nextSource = String(input.source ?? current.source).trim() || current.source;
+  const metadata: AnnotationMetadata = {
+    ...current,
+    split,
+    source: nextSource.slice(0, 180),
+    boxes,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const nextImage = path.join(annotationRoot, "images", split, current.imageName);
+  const nextLabel = path.join(annotationRoot, "labels", split, `${current.id}.txt`);
+  const nextMetadata = path.join(annotationRoot, "metadata", split, `${current.id}.json`);
+  const previousLabel = path.join(annotationRoot, "labels", current.split, `${current.id}.txt`);
+  const previousMetadata = path.join(annotationRoot, "metadata", current.split, `${current.id}.json`);
+  const activeImage = path.join(cvRoot, "images", split, current.imageName);
+  const activeLabel = path.join(cvRoot, "labels", split, `${current.id}.txt`);
+  const previousActiveImage = path.join(cvRoot, "images", current.split, current.imageName);
+  const previousActiveLabel = path.join(cvRoot, "labels", current.split, `${current.id}.txt`);
+  const labels = boxes.length ? boxes.map(toYoloLine).join("\n") + "\n" : "";
+
+  await Promise.all([
+    mkdir(path.dirname(nextImage), { recursive: true }),
+    mkdir(path.dirname(nextLabel), { recursive: true }),
+    mkdir(path.dirname(nextMetadata), { recursive: true }),
+    mkdir(path.dirname(activeImage), { recursive: true }),
+    mkdir(path.dirname(activeLabel), { recursive: true }),
+  ]);
+  if (current.split !== split) {
+    await copyFile(canonicalImage, nextImage);
+  }
+  await Promise.all([
+    writeFile(nextLabel, labels, "ascii"),
+    writeFile(nextMetadata, JSON.stringify(metadata, null, 2) + "\n", "utf8"),
+    copyFile(current.split === split ? canonicalImage : nextImage, activeImage),
+    writeFile(activeLabel, labels, "ascii"),
+  ]);
+  if (current.split !== split) {
+    await Promise.all([
+      rm(canonicalImage, { force: true }),
+      rm(previousLabel, { force: true }),
+      rm(previousMetadata, { force: true }),
+      rm(previousActiveImage, { force: true }),
+      rm(previousActiveLabel, { force: true }),
+    ]);
+  }
+  return metadata;
+}
+
 export async function syncSavedAnnotationsToDataset() {
   const samples = await listAnnotations();
   for (const sample of samples) {
@@ -169,10 +234,10 @@ export function normalizeAnnotationBoxes(value: unknown): AnnotationBox[] {
     const classId = Number(box?.classId);
     const rect = Array.isArray(box?.rect) ? box.rect.map(Number) : [];
     if (!Number.isInteger(classId) || !ultralyticsClasses[classId] || rect.length !== 4) return [];
-    if (!rect.every((entry: number) => Number.isFinite(entry) && entry >= 0 && entry <= 1)) return [];
-    if (rect[2] < 0.001 || rect[3] < 0.001 || rect[0] + rect[2] > 1.000001 || rect[1] + rect[3] > 1.000001) return [];
+    const normalizedRect = normalizeAnnotationRect(rect);
+    if (!normalizedRect) return [];
     const className = ultralyticsClasses[classId];
-    const annotation: AnnotationBox = { classId, className, rect: rect as [number, number, number, number] };
+    const annotation: AnnotationBox = { classId, className, rect: normalizedRect };
     if (isHeroMarkerClass(className)) {
       const heroId = Number(box?.heroId);
       const heroName = String(box?.heroName ?? "").trim();
@@ -187,6 +252,28 @@ export function normalizeAnnotationBoxes(value: unknown): AnnotationBox[] {
     }
     return [annotation];
   });
+}
+
+function normalizeAnnotationRect(rect: number[]): [number, number, number, number] | null {
+  const [rawLeft, rawTop, rawWidth, rawHeight] = rect;
+  if (![rawLeft, rawTop, rawWidth, rawHeight].every(Number.isFinite)) return null;
+  if (rawWidth <= 0 || rawHeight <= 0) return null;
+  const left = clamp01(rawLeft);
+  const top = clamp01(rawTop);
+  const right = clamp01(rawLeft + rawWidth);
+  const bottom = clamp01(rawTop + rawHeight);
+  const width = right - left;
+  const height = bottom - top;
+  if (width < 0.001 || height < 0.001) return null;
+  return [left, top, width, height].map(roundRectValue) as [number, number, number, number];
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundRectValue(value: number) {
+  return Number(value.toFixed(6));
 }
 
 function toYoloLine(box: AnnotationBox) {

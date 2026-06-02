@@ -36,7 +36,7 @@ type AnnotationSample = {
   height: number;
 };
 
-export function CvLab() {
+export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const imageUrlRef = useRef("");
@@ -371,18 +371,26 @@ export function CvLab() {
     Math.abs(start.y - cursor.y),
   ] : null;
 
-  return <div className="space-y-4">
-    <header className="flex flex-wrap items-end justify-between gap-3">
+  const actions = <>
+    <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy)} onClick={captureSelectedFrame}><Camera size={16} />Capture Source</button>
+    <button className="min-h-11 rounded-lg border border-white/10 bg-white/5 px-4 font-semibold hover:bg-white/10" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 inline h-4 w-4" />Import Frame</button>
+    <input ref={fileRef} className="hidden" type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFrame(file); }} />
+  </>;
+
+  return <div className={embedded ? "cv-tool-embedded space-y-4" : "space-y-4"}>
+    {embedded ? <section className="cv-tool-toolbar">
+      <div className="min-w-0">
+        <h3>Frame Annotator</h3>
+        <p>Capture or import one frame, correct labels, and save manual training samples.</p>
+      </div>
+      <div className="cv-tool-actions">{actions}</div>
+    </section> : <header className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h2 className="text-3xl font-black">CV Lab</h2>
         <p className="text-slate-400">Active-source annotation dataset</p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy)} onClick={captureSelectedFrame}><Camera size={16} />Capture Source</button>
-        <button className="min-h-11 rounded-lg border border-white/10 bg-white/5 px-4 font-semibold hover:bg-white/10" onClick={() => fileRef.current?.click()}><FileUp className="mr-2 inline h-4 w-4" />Import Frame</button>
-        <input ref={fileRef} className="hidden" type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFrame(file); }} />
-      </div>
-    </header>
+      <div className="flex flex-wrap gap-2">{actions}</div>
+    </header>}
 
     <div className="rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">{message}</div>
 

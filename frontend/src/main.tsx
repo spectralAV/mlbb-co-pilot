@@ -9,7 +9,7 @@ import "./styles.css";
 function lazyNamed(loader: () => Promise<any>, exportName: string) {
   return lazy(async () => {
     const module = await loader();
-    return { default: module[exportName] as ComponentType };
+    return { default: module[exportName] as ComponentType<any> };
   });
 }
 
@@ -28,6 +28,8 @@ const SkinGallery = lazyNamed(() => import("./pages/SkinGallery"), "SkinGallery"
 const CvLab = lazyNamed(() => import("./pages/CvLab"), "CvLab");
 const CvStudio = lazyNamed(() => import("./pages/CvStudio"), "CvStudio");
 const CvStudioDataset = lazyNamed(() => import("./pages/CvStudio"), "CvStudioDataset");
+const CvModelEditor = lazyNamed(() => import("./pages/CvModelEditor"), "CvModelEditor");
+const CvOcrStudio = lazyNamed(() => import("./pages/CvOcrStudio"), "CvOcrStudio");
 const CvVideoTool = lazyNamed(() => import("./pages/CvVideoTool"), "CvVideoTool");
 const GameAnalysis = lazyNamed(() => import("./pages/GameAnalysis"), "GameAnalysis");
 const GameOverlay = lazyNamed(() => import("./pages/GameOverlay"), "GameOverlay");
@@ -76,8 +78,10 @@ const router = createBrowserRouter([
         element: <CvStudio />,
         children: [
           { index: true, element: <CvStudioDataset /> },
-          { path: "video", element: <CvVideoTool /> },
-          { path: "frame", element: <CvLab /> }
+          { path: "editor", element: <CvModelEditor /> },
+          { path: "ocr", element: <CvOcrStudio /> },
+          { path: "video", element: <CvVideoTool embedded /> },
+          { path: "frame", element: <CvLab embedded /> }
         ]
       },
       { path: "cv-lab", element: <Navigate to="/cv-studio/frame" replace /> },

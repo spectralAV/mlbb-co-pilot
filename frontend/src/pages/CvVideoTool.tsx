@@ -84,7 +84,7 @@ const defaultVisibleLayers: Record<OverlayLayerKey, boolean> = {
   enemy: true,
 };
 
-export function CvVideoTool() {
+export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
@@ -895,8 +895,34 @@ export function CvVideoTool() {
     ...frameQueue.map((item): TimelineItem => ({ id: `queue-${item.id}`, type: "queue", time: item.time, count: item.boxes.length, item })),
   ].sort((left, right) => left.time - right.time).slice(0, 16);
 
-  return <div className="cv-page">
-    <header className="cv-hero">
+  const actions = <>
+    <button className="cv-ghost-button inline-flex items-center gap-2" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
+      <Upload size={16} />Import Video
+    </button>
+    <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("correction")}>
+      <Play size={16} />{busy === "quick-train" ? "Fine-tuning..." : "Quick Fine-Tune"}
+    </button>
+    <input
+      ref={fileRef}
+      className="hidden"
+      type="file"
+      accept="video/*"
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) importVideo(file);
+        event.currentTarget.value = "";
+      }}
+    />
+  </>;
+
+  return <div className={embedded ? "cv-tool-embedded" : "cv-page"}>
+    {embedded ? <section className="cv-tool-toolbar">
+      <div className="min-w-0">
+        <h3>Video Review</h3>
+        <p>Import gameplay footage, inspect detections, and queue corrected labels.</p>
+      </div>
+      <div className="cv-tool-actions">{actions}</div>
+    </section> : <header className="cv-hero">
       <div className="min-w-0">
         <div className="mb-5 flex items-center gap-3 text-xs font-bold uppercase text-slate-500">
           <span>Tactical operations</span>
@@ -907,25 +933,9 @@ export function CvVideoTool() {
         <p className="mt-4 max-w-2xl text-base text-slate-400">Import, review, train and validate your computer vision models.</p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <button className="cv-ghost-button inline-flex items-center gap-2" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
-          <Upload size={16} />Import Video
-        </button>
-        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("correction")}>
-          <Play size={16} />{busy === "quick-train" ? "Fine-tuning..." : "Quick Fine-Tune"}
-        </button>
-        <input
-          ref={fileRef}
-          className="hidden"
-          type="file"
-          accept="video/*"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) importVideo(file);
-            event.currentTarget.value = "";
-          }}
-        />
+        {actions}
       </div>
-    </header>
+    </header>}
 
     {message !== "Import a gameplay video to check detections frame by frame." ? <div className="cv-status-strip">{message}</div> : null}
 
