@@ -40,7 +40,7 @@ import { getEquipmentRecognitionManifest, getEquipmentRecognitionReference } fro
 import { getUltralyticsStatus, inferUltralyticsFrame, installUltralyticsRuntime, mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects, trainUltralyticsModel } from "./vision/ultralyticsVision.js";
 import { firstNormalizedRegion, getActiveObsRegions } from "./services/obsCoachState.js";
 import { readMlbbAdbHeroHead, readMlbbAdbTexture } from "./services/mlbbAdbAssets.js";
-import { annotationImage, deleteAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset, updateAnnotation } from "./vision/cvAnnotation.js";
+import { annotationImage, deleteAnnotation, getAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset, updateAnnotation } from "./vision/cvAnnotation.js";
 import { getDinoIdentityStatus, indexDinoReferences, matchDinoIdentity } from "./vision/dinoIdentity.js";
 import { getTimerOcrStatus, inferTimerCrop, installTimerOcrRuntime, timerClasses } from "./vision/timerRecognition.js";
 import { getMlbbHudOcrFeedStatus, getScreenOcrStatus, inferScreenTextFrame, installScreenOcrRuntime, normalizeScreenOcrRegions } from "./vision/screenTextRecognition.js";
@@ -271,6 +271,10 @@ app.get("/api/vision/annotations/:id/image", async (req, reply) => {
   const file = await annotationImage((req.params as { id: string }).id);
   if (!file) return reply.code(404).send({ success: false, error: "Annotation image not found." });
   return reply.header("cache-control", "no-store").type("image/jpeg").send(await readFile(file));
+});
+app.get("/api/vision/annotations/:id", async (req, reply) => {
+  const sample = await getAnnotation((req.params as { id: string }).id);
+  return sample ? { success: true, data: sample } : reply.code(404).send({ success: false, error: "Annotation not found." });
 });
 app.delete("/api/vision/annotations/:id", async (req, reply) => {
   const deleted = await deleteAnnotation((req.params as { id: string }).id);

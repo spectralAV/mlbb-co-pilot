@@ -1,8 +1,10 @@
 import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Boxes, Check, Database, ImagePlus, Play, RefreshCw, Save, ScanSearch, Search, Trash2, Wand2 } from "lucide-react";
 import {
   apiUrl,
   deleteCvAnnotation,
+  getCvAnnotation,
   getCvAnnotationClasses,
   getCvAnnotations,
   getHeroRecognitionManifest,
@@ -29,6 +31,7 @@ type AnnotationSample = {
   boxes: AnnotationBox[];
   createdAt: string;
   updatedAt?: string;
+  origin?: "manual" | "active";
 };
 type EditorBox = AnnotationBox & {
   id: string;
@@ -44,6 +47,8 @@ export function CvModelEditor() {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const imageUrlRef = useRef("");
+  const routeOpenAttemptRef = useRef("");
+  const [searchParams, setSearchParams] = useSearchParams();
   const [classes, setClasses] = useState<LabelClass[]>([]);
   const [heroes, setHeroes] = useState<HeroOption[]>([]);
   const [samples, setSamples] = useState<AnnotationSample[]>([]);
@@ -66,12 +71,31 @@ export function CvModelEditor() {
   const [message, setMessage] = useState("Model editor is ready.");
   const [busy, setBusy] = useState("");
 
+  const routeSampleId = searchParams.get("sample") ?? "";
+
   useEffect(() => {
-    void refresh();
+    void refresh({
+      includeHeroes: !routeSampleId,
+      includeModel: !routeSampleId,
+      includeSamples: !routeSampleId,
+    });
     return () => {
       if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!routeSampleId || routeSampleId === selectedSampleId || busy === "open") return;
+    const sample = samples.find((item) => item.id === routeSampleId);
+    if (sample) {
+      routeOpenAttemptRef.current = "";
+      void openSample(sample, false);
+      return;
+    }
+    if (routeOpenAttemptRef.current === routeSampleId) return;
+    routeOpenAttemptRef.current = routeSampleId;
+    void openSampleById(routeSampleId);
+  }, [busy, routeSampleId, samples, selectedSampleId]);
 
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
   const groupedClasses = useMemo(() => {
@@ -79,7 +103,6 @@ export function CvModelEditor() {
     for (const item of classes) groups.set(item.group, [...(groups.get(item.group) ?? []), item]);
     return [...groups.entries()];
   }, [classes]);
-  const selectedSample = useMemo(() => samples.find((sample) => sample.id === selectedSampleId) ?? null, [samples, selectedSampleId]);
   const normalizedBoxes = useMemo(() => boxes.flatMap((box) => {
     const normalized = sanitizeEditorBox(box);
     return normalized ? [normalized] : [];
@@ -97,6 +120,7 @@ export function CvModelEditor() {
       return true;
     });
   }, [classFilter, query, samples]);
+  const visibleSamples = useMemo(() => filteredSamples.slice(0, 320), [filteredSamples]);
   const classBalance = useMemo(() => {
     const rows = new Map<number, { label: string; train: number; val: number }>();
     for (const item of classes) rows.set(item.id, { label: item.name, train: 0, val: 0 });
@@ -119,29 +143,32 @@ export function CvModelEditor() {
     Math.abs(start.y - cursor.y),
   ] : null;
 
-  async function refresh() {
+  async function refresh(options: { includeHeroes?: boolean; includeModel?: boolean; includeSamples?: boolean } = {}) {
+    const includeHeroes = options.includeHeroes ?? true;
+    const includeModel = options.includeModel ?? true;
+    const includeSamples = options.includeSamples ?? true;
     const classTask = getCvAnnotationClasses().then((result) => {
       const nextClasses = result.data ?? [];
       setClasses(nextClasses);
       setActiveClassId((current) => nextClasses.some((item: LabelClass) => item.id === current) ? current : nextClasses[0]?.id ?? 0);
       return true;
     }).catch(() => false);
-    const sampleTask = getCvAnnotations().then((result) => {
+    const sampleTask = includeSamples ? getCvAnnotations().then((result) => {
       const nextSamples = result.data ?? [];
       setSamples(nextSamples);
       return true;
-    }).catch(() => false);
-    void getUltralyticsStatus().then((result) => {
+    }).catch(() => false) : Promise.resolve(true);
+    if (includeModel) void getUltralyticsStatus().then((result) => {
       setModel(result.data ?? result);
     }).catch(() => undefined);
-    const heroTask = getHeroRecognitionManifest().then((result) => {
+    const heroTask = includeHeroes ? getHeroRecognitionManifest().then((result) => {
       const nextHeroes = (result.data?.heroes ?? [])
         .map((hero: any) => ({ id: Number(hero.id), name: String(hero.name ?? "").trim() }))
         .filter((hero: HeroOption) => Number.isInteger(hero.id) && Boolean(hero.name))
         .sort((left: HeroOption, right: HeroOption) => left.name.localeCompare(right.name));
       setHeroes(nextHeroes);
       return true;
-    }).catch(() => false);
+    }).catch(() => false) : Promise.resolve(true);
     const results = await Promise.all([classTask, sampleTask, heroTask]);
     if (results.every((result) => !result)) {
       setMessage("CV model editor status is unavailable.");
@@ -149,6 +176,24 @@ export function CvModelEditor() {
   }
 
   async function openSample(sample: AnnotationSample, announce = true) {
+    await loadSample(sample, announce);
+  }
+
+  async function openSampleById(id: string) {
+    setBusy("open");
+    try {
+      const result = await getCvAnnotation(id);
+      const sample = result.data as AnnotationSample | undefined;
+      if (!sample) throw new Error("Annotation not found.");
+      await loadSample(sample, false);
+      void refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not open sample.");
+      setBusy("");
+    }
+  }
+
+  async function loadSample(sample: AnnotationSample, announce = true) {
     setBusy("open");
     try {
       const response = await fetch(apiUrl(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`), { cache: "no-store" });
@@ -172,6 +217,7 @@ export function CvModelEditor() {
   }
 
   async function importFrame(file: File) {
+    setSearchParams({});
     await loadImage(file, {
       source: file.name,
       split: "train",
@@ -339,14 +385,16 @@ export function CvModelEditor() {
     };
     setBusy("save");
     try {
-      if (selectedSample) {
-        const result = await updateCvAnnotation(selectedSample.id, payload);
+      if (selectedSampleId) {
+        const result = await updateCvAnnotation(selectedSampleId, payload);
         await refresh();
-        setMessage(`Updated ${result.data?.id ?? selectedSample.id} with ${payload.boxes.length} accepted labels.`);
+        setMessage(`Updated ${result.data?.id ?? selectedSampleId} with ${payload.boxes.length} accepted labels.`);
       } else {
         const result = await saveCvAnnotation(imageBlob, payload);
         await refresh();
-        setSelectedSampleId(result.data?.id ?? "");
+        const nextId = result.data?.id ?? "";
+        setSelectedSampleId(nextId);
+        if (nextId) setSearchParams({ sample: nextId });
         setMessage(`Saved new dataset frame with ${payload.boxes.length} accepted labels.`);
       }
       setBoxes((current) => current.filter((box) => !box.suggested));
@@ -358,10 +406,11 @@ export function CvModelEditor() {
   }
 
   async function deleteSelectedSample() {
-    if (!selectedSample) return;
+    if (!selectedSampleId) return;
     setBusy("delete");
     try {
-      await deleteCvAnnotation(selectedSample.id);
+      await deleteCvAnnotation(selectedSampleId);
+      setSearchParams({});
       setSelectedSampleId("");
       setImageBlob(null);
       setImageUrl("");
@@ -412,8 +461,8 @@ export function CvModelEditor() {
     <div className="cv-status-strip">{message}</div>
 
     <section className="cv-metrics-grid">
-      <Metric label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} saved frames`} />
-      <Metric label="Selected" value={selectedSample ? selectedSample.split.toUpperCase() : imageBlob ? "New Frame" : "None"} detail={source || "-"} />
+      <Metric label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} editable frames`} />
+      <Metric label="Selected" value={selectedSampleId ? split.toUpperCase() : imageBlob ? "New Frame" : "None"} detail={source || "-"} />
       <Metric label="Labels" value={`${acceptedCount} accepted`} detail={`${pendingCount} pending / ${normalizedBoxes.length} visible boxes`} />
       <Metric label="Training" value={trainingDeviceLabel(model)} detail={trainingDeviceDetail(model)} />
       <Metric label="Inference" value={model?.inferenceBackend?.selected === "directml" ? "DirectML GPU" : model?.device?.type?.toUpperCase() ?? "Unknown"} detail={model?.onnxModelAvailable ? "ONNX export available" : "YOLO runtime"} />
@@ -437,17 +486,20 @@ export function CvModelEditor() {
           </select>
         </div>
         <div className="touch-scroll max-h-[620px] space-y-2 overflow-auto p-3">
-          {filteredSamples.length ? filteredSamples.map((sample) => <button
+          {filteredSamples.length > visibleSamples.length ? <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-3 text-xs font-semibold text-cyan-50">
+            Showing {visibleSamples.length} of {filteredSamples.length} matches. Search or filter by class to narrow the active dataset.
+          </div> : null}
+          {visibleSamples.length ? visibleSamples.map((sample) => <button
             key={sample.id}
             className={`cv-editor-frame-row ${sample.id === selectedSampleId ? "cv-editor-frame-row-active" : ""}`}
-            onClick={() => void openSample(sample)}
+            onClick={() => setSearchParams({ sample: sample.id })}
           >
             <span className="block overflow-hidden rounded bg-black" style={{ aspectRatio: `${sample.width || 16} / ${sample.height || 9}` }}>
               <img src={apiUrl(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`)} alt="" className="h-full w-full object-cover" loading="lazy" />
             </span>
             <span className="min-w-0 text-left">
               <span className="block truncate text-xs font-bold text-white">{sample.source}</span>
-              <span className="mt-1 block text-[11px] uppercase text-slate-500">{sample.split} / {sample.boxes.length} labels</span>
+              <span className="mt-1 block text-[11px] uppercase text-slate-500">{sample.split} / {sample.origin ?? "manual"} / {sample.boxes.length} labels</span>
             </span>
           </button>) : <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">No dataset frames match the current filters.</div>}
         </div>
@@ -547,7 +599,7 @@ export function CvModelEditor() {
           </label>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button className="btn min-h-10 justify-center" disabled={!imageBlob || Boolean(busy)} onClick={() => void saveCurrent()}><Save size={15} />Save</button>
-            <button className="cv-control-button cv-control-danger min-h-10 justify-center" disabled={!selectedSample || Boolean(busy)} onClick={() => void deleteSelectedSample()}><Trash2 size={15} />Delete Frame</button>
+            <button className="cv-control-button cv-control-danger min-h-10 justify-center" disabled={!selectedSampleId || Boolean(busy)} onClick={() => void deleteSelectedSample()}><Trash2 size={15} />Delete Frame</button>
           </div>
         </section>
 

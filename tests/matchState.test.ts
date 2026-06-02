@@ -57,6 +57,78 @@ test("match state accepts detector-owned pick portraits and rejects pick facts f
   assert.deepEqual(getMatchState().draft?.allyPicks.map((slot) => slot.heroName), ["Portrait Pick"]);
 });
 
+test("draft slot stabilizer waits for repeated medium-confidence agreement", () => {
+  resetMatchState();
+  updateMatchDraft({
+    state: {
+      phase: "pick",
+      allyPicks: [{ heroId: 31, heroName: "Noisy Pick", slot: 1, confidence: 0.72, source: "draft-pick-portrait" }],
+    },
+  });
+  assert.deepEqual(getMatchState().draft?.allyPicks, []);
+  assert.equal(getMatchState().confidence.draftTrusted, false);
+
+  updateMatchDraft({
+    state: {
+      phase: "pick",
+      allyPicks: [{ heroId: 31, heroName: "Noisy Pick", slot: 1, confidence: 0.74, source: "draft-pick-portrait" }],
+    },
+    analysis: { bestPick: { hero: "Noisy Counter", score: 77 } },
+  });
+  assert.deepEqual(getMatchState().draft?.allyPicks.map((slot) => slot.heroName), ["Noisy Pick"]);
+  assert.equal((getMatchState().draft?.analysis as any).bestPick.hero, "Noisy Counter");
+});
+
+test("draft slot stabilizer preserves stable medium-confidence picks through one noisy contradiction", () => {
+  resetMatchState();
+  for (const confidence of [0.72, 0.74]) {
+    updateMatchDraft({
+      state: {
+        phase: "pick",
+        allyPicks: [{ heroId: 31, heroName: "Stable Pick", slot: 1, confidence, source: "draft-pick-portrait" }],
+      },
+    });
+  }
+  assert.deepEqual(getMatchState().draft?.allyPicks.map((slot) => slot.heroName), ["Stable Pick"]);
+
+  updateMatchDraft({
+    state: {
+      phase: "pick",
+      allyPicks: [{ heroId: 32, heroName: "Noisy Contradiction", slot: 1, confidence: 0.73, source: "draft-pick-portrait" }],
+    },
+  });
+  assert.deepEqual(getMatchState().draft?.allyPicks.map((slot) => slot.heroName), ["Stable Pick"]);
+});
+
+test("draft slot stabilizer locks high-confidence picks until repeated contradiction", () => {
+  resetMatchState();
+  updateMatchDraft({
+    state: {
+      phase: "pick",
+      enemyPicks: [{ heroId: 41, heroName: "Locked Pick", slot: 2, confidence: 0.92, source: "draft-pick-portrait" }],
+    },
+  });
+  assert.deepEqual(getMatchState().draft?.enemyPicks.map((slot) => slot.heroName), ["Locked Pick"]);
+
+  for (let index = 0; index < 2; index += 1) {
+    updateMatchDraft({
+      state: {
+        phase: "pick",
+        enemyPicks: [{ heroId: 42, heroName: "Contradicting Pick", slot: 2, confidence: 0.91, source: "draft-pick-portrait" }],
+      },
+    });
+    assert.deepEqual(getMatchState().draft?.enemyPicks.map((slot) => slot.heroName), ["Locked Pick"]);
+  }
+
+  updateMatchDraft({
+    state: {
+      phase: "pick",
+      enemyPicks: [{ heroId: 42, heroName: "Contradicting Pick", slot: 2, confidence: 0.93, source: "draft-pick-portrait" }],
+    },
+  });
+  assert.deepEqual(getMatchState().draft?.enemyPicks.map((slot) => slot.heroName), ["Contradicting Pick"]);
+});
+
 test("match state does not trust low-confidence vision reasoning", () => {
   resetMatchState();
   updateMatchVision(

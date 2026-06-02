@@ -17,6 +17,7 @@ import {
   saveCvAnnotation,
   syncCvAnnotations,
   trainUltralyticsModel,
+  updateCvAnnotation,
 } from "../api/client";
 import { captureCurrentRuntimeFrame, captureSources, useCaptureRuntimeStore } from "../runtime/captureRuntime";
 import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
@@ -34,6 +35,7 @@ type AnnotationSample = {
   createdAt: string;
   width: number;
   height: number;
+  origin?: "manual" | "active";
 };
 
 export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
@@ -47,6 +49,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
   const [timerOcr, setTimerOcr] = useState<any>(null);
   const [screenOcr, setScreenOcr] = useState<any>(null);
   const [frame, setFrame] = useState<Blob | null>(null);
+  const [selectedSampleId, setSelectedSampleId] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageSize, setImageSize] = useState({ width: 20, height: 9 });
   const [source, setSource] = useState("obs-native-frame");
@@ -75,6 +78,8 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
   }), [boxes]);
   const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
   const acceptedCount = reviewBoxes.filter((box) => !box.suggested).length;
+  const selectedSample = useMemo(() => samples.find((sample) => sample.id === selectedSampleId) ?? null, [samples, selectedSampleId]);
+  const visibleSamples = useMemo(() => samples.slice(0, 320), [samples]);
   const selectedCaptureSource = captureSources.find((item) => item.id === selectedSource) ?? captureSources[0];
   const groupedClasses = useMemo(() => {
     const groups = new Map<string, LabelClass[]>();
@@ -108,7 +113,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
     }
   }
 
-  async function loadBlob(blob: Blob, label: string, existingBoxes: LabelBox[] = []) {
+  async function loadBlob(blob: Blob, label: string, existingBoxes: LabelBox[] = [], existingSampleId = "") {
     const bitmap = await createImageBitmap(blob);
     const width = bitmap.width;
     const height = bitmap.height;
@@ -119,6 +124,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
     imageUrlRef.current = nextUrl;
     setImageUrl(nextUrl);
     setFrame(blob);
+    setSelectedSampleId(existingSampleId);
     setSource(label);
     setBoxes(existingBoxes);
     setSelectedId("");
@@ -167,7 +173,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
           transcript: box.transcript,
         });
         return normalized ? [normalized] : [];
-      }));
+      }), sample.id);
     } finally {
       setBusy("");
     }
@@ -318,7 +324,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
     if (!frame || acceptedCount === 0) return;
     setBusy("save");
     try {
-      await saveCvAnnotation(frame, {
+      const payload = {
         split,
         source,
         boxes: reviewBoxes.filter((box) => !box.suggested).map((box) => ({
@@ -328,9 +334,15 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
           heroName: box.heroName,
           transcript: box.transcript,
         })),
-      });
+      };
+      if (selectedSample) {
+        await updateCvAnnotation(selectedSample.id, payload);
+        setMessage(`Updated ${selectedSample.source} with ${acceptedCount} labelled objects.`);
+      } else {
+        await saveCvAnnotation(frame, payload);
+        setMessage(`Saved ${acceptedCount} labelled objects to the ${split} dataset.`);
+      }
       await refresh();
-      setMessage(`Saved ${acceptedCount} labelled objects to the ${split} dataset.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Saving failed.");
     } finally {
@@ -340,6 +352,12 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
 
   async function removeSample(id: string) {
     await deleteCvAnnotation(id);
+    if (selectedSampleId === id) {
+      setSelectedSampleId("");
+      setFrame(null);
+      setImageUrl("");
+      setBoxes([]);
+    }
     await refresh();
     setMessage("Annotation sample removed from the active and source datasets.");
   }
@@ -407,7 +425,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
         value={trainingDeviceLabel(model)}
         detail={trainingDeviceDetail(model)}
       />
-      <Status label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} manually labelled frames`} />
+      <Status label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${samples.length} editable frames`} />
       <Status label="Label Scope" value={`${classes.length} classes`} detail="Detection labels and timer ROI targets" />
       <Status label="Timer OCR" value={timerOcr?.packageAvailable && timerOcr?.paddleAvailable ? "Ready" : "Not installed"} detail={`${timerOcr?.transcribedTimerBoxes ?? 0} transcribed timer boxes`} />
       <Status label="Screen OCR" value={screenOcr?.packageAvailable && screenOcr?.paddleAvailable ? "Ready" : "Not installed"} detail={screenOcr?.enabledForLiveCapture ? "live gate enabled" : "manual test only"} />
@@ -506,7 +524,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
               <option value="train">Training</option>
               <option value="val">Validation</option>
             </select>
-            <button className="btn" onClick={saveCurrent} disabled={!frame || acceptedCount === 0 || Boolean(busy)}>Save</button>
+            <button className="btn" onClick={saveCurrent} disabled={!frame || acceptedCount === 0 || Boolean(busy)}>{selectedSample ? "Update" : "Save"}</button>
           </div>
         </section>
 
@@ -521,17 +539,20 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
 
         <section className="card p-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold">Saved Frames</h3>
-            <button title="Refresh" onClick={refresh} className="rounded p-2 text-slate-300 hover:bg-white/10"><RefreshCw size={16} /></button>
-          </div>
+          <h3 className="font-bold">Dataset Frames</h3>
+          <button title="Refresh" onClick={refresh} className="rounded p-2 text-slate-300 hover:bg-white/10"><RefreshCw size={16} /></button>
+        </div>
           <div className="mt-3 max-h-56 space-y-2 overflow-auto">
-            {samples.length ? samples.map((sample) => <div key={sample.id} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 p-2">
+            {samples.length > visibleSamples.length ? <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-2 text-[11px] font-semibold text-cyan-50">
+              Showing {visibleSamples.length} of {samples.length} frames. Use Model Editor for search and class filtering.
+            </div> : null}
+            {visibleSamples.length ? visibleSamples.map((sample) => <div key={sample.id} className={`flex items-center gap-2 rounded-lg border p-2 ${sample.id === selectedSampleId ? "border-cyan-300/40 bg-cyan-400/10" : "border-white/10 bg-white/5"}`}>
               <button className="min-w-0 flex-1 text-left" onClick={() => void openSample(sample)}>
                 <div className="truncate text-xs font-semibold">{sample.source}</div>
-                <div className="text-[11px] text-slate-400">{sample.split} / {sample.boxes.length} boxes</div>
+                <div className="text-[11px] text-slate-400">{sample.split} / {sample.origin ?? "manual"} / {sample.boxes.length} boxes</div>
               </button>
               <button title="Delete sample" className="rounded p-2 text-rose-200 hover:bg-white/10" onClick={() => void removeSample(sample.id)}><Trash2 size={15} /></button>
-            </div>) : <p className="text-sm text-slate-400">No hand-labelled frames saved yet.</p>}
+            </div>) : <p className="text-sm text-slate-400">No dataset frames are available yet.</p>}
           </div>
         </section>
       </aside>

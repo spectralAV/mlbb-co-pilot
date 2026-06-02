@@ -140,6 +140,7 @@ export async function inferScreenOcrFrame(frame: Blob, options: unknown = {}) {
 }
 export const getCvAnnotationClasses = () => apiGet<any>("/api/vision/annotations/classes");
 export const getCvAnnotations = () => apiGet<any>("/api/vision/annotations");
+export const getCvAnnotation = (id: string) => apiGet<any>(`/api/vision/annotations/${encodeURIComponent(id)}`);
 export const syncCvAnnotations = () => apiPost<any>("/api/vision/annotations/sync");
 export async function deleteCvAnnotation(id: string) {
   const response = await fetch(apiUrl(`/api/vision/annotations/${encodeURIComponent(id)}`), { method: "DELETE" });

@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, readdir, rm, writeFile, copyFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, writeFile, copyFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
@@ -59,6 +59,7 @@ type AnnotationMetadata = {
   imageName: string;
   createdAt: string;
   updatedAt?: string;
+  origin?: "manual" | "active";
 };
 
 const projectRoot = path.resolve(process.cwd(), "..");
@@ -70,6 +71,19 @@ export function getAnnotationClasses() {
 }
 
 export async function listAnnotations() {
+  const manual = await listManualAnnotations();
+  const active = await listActiveDatasetAnnotations(manual);
+  return [...manual, ...active].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function getAnnotation(id: string) {
+  const safeId = path.basename(id);
+  const manual = (await listManualAnnotations()).find((entry) => entry.id === safeId);
+  if (manual) return manual;
+  return activeDatasetAnnotationFromId(safeId);
+}
+
+async function listManualAnnotations() {
   const annotations: AnnotationMetadata[] = [];
   for (const split of ["train", "val"] as const) {
     const directory = path.join(annotationRoot, "metadata", split);
@@ -77,10 +91,24 @@ export async function listAnnotations() {
     for (const name of await readdir(directory)) {
       if (!name.endsWith(".json")) continue;
       const metadata = JSON.parse(await readFile(path.join(directory, name), "utf8")) as AnnotationMetadata;
-      annotations.push(metadata);
+      annotations.push({ ...metadata, origin: "manual" });
     }
   }
   return annotations.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+async function listActiveDatasetAnnotations(manual: AnnotationMetadata[] = []) {
+  const manualImages = new Set(manual.map((sample) => `${sample.split}:${sample.imageName}`));
+  const samples: AnnotationMetadata[] = [];
+  for (const split of ["train", "val"] as const) {
+    const directory = path.join(cvRoot, "images", split);
+    if (!(await exists(directory))) continue;
+    const imageNames = (await readdir(directory))
+      .filter((imageName) => isDatasetImage(imageName) && !manualImages.has(`${split}:${imageName}`));
+    const splitSamples = await mapWithConcurrency(imageNames, 48, (imageName) => activeDatasetAnnotation(split, imageName));
+    samples.push(...splitSamples.flatMap((sample) => sample ? [sample] : []));
+  }
+  return samples;
 }
 
 export async function saveAnnotation(
@@ -132,9 +160,9 @@ export async function updateAnnotation(
   input: { split?: unknown; source?: unknown; boxes?: unknown; allowEmpty?: unknown },
 ) {
   const safeId = path.basename(id);
-  const samples = await listAnnotations();
+  const samples = await listManualAnnotations();
   const current = samples.find((entry) => entry.id === safeId);
-  if (!current) return null;
+  if (!current) return updateActiveDatasetAnnotation(safeId, input);
 
   const split: AnnotationSplit = input.split === "val" ? "val" : "train";
   const boxes = normalizeAnnotationBoxes(input.boxes);
@@ -192,7 +220,7 @@ export async function updateAnnotation(
 }
 
 export async function syncSavedAnnotationsToDataset() {
-  const samples = await listAnnotations();
+  const samples = await listManualAnnotations();
   for (const sample of samples) {
     const image = path.join(annotationRoot, "images", sample.split, sample.imageName);
     const label = path.join(annotationRoot, "labels", sample.split, `${sample.id}.txt`);
@@ -207,25 +235,156 @@ export async function syncSavedAnnotationsToDataset() {
 
 export async function deleteAnnotation(id: string) {
   const safeId = path.basename(id);
-  const samples = await listAnnotations();
+  const samples = await listManualAnnotations();
   const sample = samples.find((entry) => entry.id === safeId);
-  if (!sample) return false;
+  if (sample) {
+    await Promise.all([
+      rm(path.join(annotationRoot, "images", sample.split, sample.imageName), { force: true }),
+      rm(path.join(annotationRoot, "labels", sample.split, `${sample.id}.txt`), { force: true }),
+      rm(path.join(annotationRoot, "metadata", sample.split, `${sample.id}.json`), { force: true }),
+      rm(path.join(cvRoot, "images", sample.split, sample.imageName), { force: true }),
+      rm(path.join(cvRoot, "labels", sample.split, `${sample.id}.txt`), { force: true }),
+    ]);
+    return true;
+  }
+  const active = await activeDatasetAnnotationFromId(safeId);
+  if (!active) return false;
   await Promise.all([
-    rm(path.join(annotationRoot, "images", sample.split, sample.imageName), { force: true }),
-    rm(path.join(annotationRoot, "labels", sample.split, `${sample.id}.txt`), { force: true }),
-    rm(path.join(annotationRoot, "metadata", sample.split, `${sample.id}.json`), { force: true }),
-    rm(path.join(cvRoot, "images", sample.split, sample.imageName), { force: true }),
-    rm(path.join(cvRoot, "labels", sample.split, `${sample.id}.txt`), { force: true }),
+    rm(path.join(cvRoot, "images", active.split, active.imageName), { force: true }),
+    rm(path.join(cvRoot, "labels", active.split, `${imageStem(active.imageName)}.txt`), { force: true }),
   ]);
   return true;
 }
 
 export async function annotationImage(id: string) {
   const safeId = path.basename(id);
-  const sample = (await listAnnotations()).find((entry) => entry.id === safeId);
-  if (!sample) return null;
-  const image = path.join(annotationRoot, "images", sample.split, sample.imageName);
-  return (await exists(image)) ? image : null;
+  const sample = (await listManualAnnotations()).find((entry) => entry.id === safeId);
+  if (sample) {
+    const image = path.join(annotationRoot, "images", sample.split, sample.imageName);
+    if (await exists(image)) return image;
+  }
+  const active = await activeDatasetAnnotationFromId(safeId);
+  if (!active) return null;
+  const activeImage = path.join(cvRoot, "images", active.split, active.imageName);
+  return (await exists(activeImage)) ? activeImage : null;
+}
+
+async function updateActiveDatasetAnnotation(
+  id: string,
+  input: { split?: unknown; boxes?: unknown; allowEmpty?: unknown },
+) {
+  const current = await activeDatasetAnnotationFromId(id);
+  if (!current) return null;
+  const split: AnnotationSplit = input.split === "val" ? "val" : "train";
+  const boxes = normalizeAnnotationBoxes(input.boxes);
+  if (!boxes.length && input.allowEmpty !== true) throw new Error("Keep at least one annotation box or save as an empty negative frame.");
+
+  const stem = imageStem(current.imageName);
+  const currentImage = path.join(cvRoot, "images", current.split, current.imageName);
+  const currentLabel = path.join(cvRoot, "labels", current.split, `${stem}.txt`);
+  const nextImage = path.join(cvRoot, "images", split, current.imageName);
+  const nextLabel = path.join(cvRoot, "labels", split, `${stem}.txt`);
+  const labels = boxes.length ? boxes.map(toYoloLine).join("\n") + "\n" : "";
+
+  await Promise.all([
+    mkdir(path.dirname(nextImage), { recursive: true }),
+    mkdir(path.dirname(nextLabel), { recursive: true }),
+  ]);
+  if (current.split !== split) await copyFile(currentImage, nextImage);
+  await writeFile(nextLabel, labels, "ascii");
+  if (current.split !== split) {
+    await Promise.all([
+      rm(currentImage, { force: true }),
+      rm(currentLabel, { force: true }),
+    ]);
+  }
+  return {
+    ...current,
+    id: activeDatasetId(split, current.imageName),
+    split,
+    boxes,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function activeDatasetAnnotationFromId(id: string) {
+  const match = /^dataset-(train|val)-(.+)$/.exec(id);
+  if (!match) return null;
+  const split = match[1] as AnnotationSplit;
+  const stem = match[2];
+  const imageName = await findActiveDatasetImage(split, stem);
+  return imageName ? activeDatasetAnnotation(split, imageName) : null;
+}
+
+async function activeDatasetAnnotation(split: AnnotationSplit, imageName: string): Promise<AnnotationMetadata | null> {
+  const image = path.join(cvRoot, "images", split, imageName);
+  if (!(await exists(image))) return null;
+  const imageInfo = await stat(image);
+  const label = path.join(cvRoot, "labels", split, `${imageStem(imageName)}.txt`);
+  return {
+    id: activeDatasetId(split, imageName),
+    split,
+    source: imageName,
+    width: 0,
+    height: 0,
+    boxes: await readYoloLabelFile(label),
+    imageName,
+    createdAt: imageInfo.mtime.toISOString(),
+    origin: "active",
+  };
+}
+
+async function findActiveDatasetImage(split: AnnotationSplit, stem: string) {
+  const directory = path.join(cvRoot, "images", split);
+  if (!(await exists(directory))) return null;
+  const names = await readdir(directory);
+  return names.find((name) => imageStem(name) === stem && isDatasetImage(name)) ?? null;
+}
+
+async function readYoloLabelFile(file: string) {
+  if (!(await exists(file))) return [] as AnnotationBox[];
+  const text = await readFile(file, "utf8");
+  return text.split(/\r?\n/).flatMap((line) => {
+    const [rawClassId, rawCenterX, rawCenterY, rawWidth, rawHeight] = line.trim().split(/\s+/);
+    const classId = Number(rawClassId);
+    const centerX = Number(rawCenterX);
+    const centerY = Number(rawCenterY);
+    const width = Number(rawWidth);
+    const height = Number(rawHeight);
+    if (!Number.isInteger(classId) || !ultralyticsClasses[classId]) return [];
+    const rect = normalizeAnnotationRect([centerX - width / 2, centerY - height / 2, width, height]);
+    return rect ? [{ classId, className: ultralyticsClasses[classId], rect }] : [];
+  });
+}
+
+function activeDatasetId(split: AnnotationSplit, imageName: string) {
+  return `dataset-${split}-${imageStem(imageName)}`;
+}
+
+function imageStem(imageName: string) {
+  return path.basename(imageName, path.extname(imageName));
+}
+
+function isDatasetImage(imageName: string) {
+  return [".bmp", ".jpeg", ".jpg", ".png", ".webp"].includes(path.extname(imageName).toLowerCase());
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T) => Promise<R>,
+) {
+  const results: R[] = new Array(items.length);
+  let index = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (index < items.length) {
+      const current = index;
+      index += 1;
+      results[current] = await mapper(items[current]);
+    }
+  }));
+  return results;
 }
 
 export function normalizeAnnotationBoxes(value: unknown): AnnotationBox[] {

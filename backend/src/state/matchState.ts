@@ -1,4 +1,5 @@
 import { eventBus } from "../event-bus/eventBus.js";
+import { resetDraftSlotStabilizer, stabilizeDraftSlotGroup } from "./draftStabilizer.js";
 
 export const DETECTED_FACT_CONFIDENCE = 0.55;
 
@@ -92,6 +93,7 @@ export function getMatchState() {
 }
 
 export function resetMatchState() {
+  resetDraftSlotStabilizer();
   latest = initialState();
   return latest;
 }
@@ -152,6 +154,12 @@ function acceptedSlots(slots: unknown, expectedSource: "draft-ban-icon" | "draft
     );
 }
 
+function acceptedSubmittedSlotFacts(submitted: unknown, accepted: DetectedSlot[]) {
+  if (!Array.isArray(submitted)) return [];
+  const submittedKeys = new Set(submitted.map(submittedSlotKey).filter(Boolean));
+  return accepted.filter((slot) => submittedKeys.has(submittedSlotKey(slot)));
+}
+
 function acceptedContext<T>(
   fact: any,
   source: string,
@@ -202,13 +210,25 @@ function acceptedAllyLanes(lanes: unknown): DetectedAllyLane[] {
     );
 }
 
+function submittedSlotKey(slot: any) {
+  if (!slot || typeof slot !== "object") return "";
+  if (Number.isFinite(Number(slot.heroId))) return `id:${Number(slot.heroId)}`;
+  const name = typeof slot.heroName === "string" ? slot.heroName : "";
+  return name ? `name:${name.toLowerCase()}` : "";
+}
+
 export function updateMatchDraft(recognition: any) {
   const source = recognition?.state ?? {};
+  if (String(source.phase ?? "") === "ban" && latest.draft?.phase !== "ban") resetDraftSlotStabilizer();
   const preserve = source.provisional === true && latest.confidence.draftTrusted ? latest.draft : null;
-  const detectedAllyPicks = acceptedSlots(source.allyPicks, "draft-pick-portrait");
-  const detectedEnemyPicks = acceptedSlots(source.enemyPicks, "draft-pick-portrait");
-  const detectedAllyBans = acceptedSlots(source.allyBans, "draft-ban-icon");
-  const detectedEnemyBans = acceptedSlots(source.enemyBans, "draft-ban-icon");
+  const rawAllyPicks = acceptedSlots(source.allyPicks, "draft-pick-portrait");
+  const rawEnemyPicks = acceptedSlots(source.enemyPicks, "draft-pick-portrait");
+  const rawAllyBans = acceptedSlots(source.allyBans, "draft-ban-icon");
+  const rawEnemyBans = acceptedSlots(source.enemyBans, "draft-ban-icon");
+  const detectedAllyPicks = stabilizeDraftSlotGroup("allyPicks", rawAllyPicks);
+  const detectedEnemyPicks = stabilizeDraftSlotGroup("enemyPicks", rawEnemyPicks);
+  const detectedAllyBans = stabilizeDraftSlotGroup("allyBans", rawAllyBans);
+  const detectedEnemyBans = stabilizeDraftSlotGroup("enemyBans", rawEnemyBans);
   const detectedAllySpells = acceptedSpells(source.allySpells);
   const detectedAllyLanes = acceptedAllyLanes(source.allyLanes);
   const detectedSelectedLane = acceptedContext(source.selectedLane, "draft-lane-icon", (value) => {
@@ -253,10 +273,10 @@ export function updateMatchDraft(recognition: any) {
   const submittedSpells = Array.isArray(source.allySpells) ? source.allySpells.filter((fact: any) => fact?.spell) : [];
   const submittedLanes = Array.isArray(source.allyLanes) ? source.allyLanes.filter((fact: any) => fact?.lane) : [];
   const acceptedSubmittedSlots = [
-    ...detectedAllyPicks,
-    ...detectedEnemyPicks,
-    ...detectedAllyBans,
-    ...detectedEnemyBans,
+    ...acceptedSubmittedSlotFacts(source.allyPicks, detectedAllyPicks),
+    ...acceptedSubmittedSlotFacts(source.enemyPicks, detectedEnemyPicks),
+    ...acceptedSubmittedSlotFacts(source.allyBans, detectedAllyBans),
+    ...acceptedSubmittedSlotFacts(source.enemyBans, detectedEnemyBans),
   ];
   const acceptedSubmittedContext = [detectedSelectedLane, detectedSelfSlot, detectedFirstPickSide].filter(Boolean);
   const submittedFactCount = submittedSlots.length + submittedLanes.length + submittedSpells.length + submittedContext.length;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Boxes, Database, Film, RefreshCw, ScanSearch, ScanText, Trash2, Wand2 } from "lucide-react";
+import { Boxes, Database, Film, Pencil, RefreshCw, ScanSearch, ScanText, Trash2, Wand2 } from "lucide-react";
 import {
   apiUrl,
   deleteCvAnnotation,
@@ -22,6 +22,7 @@ type AnnotationSample = {
   height: number;
   boxes: AnnotationBox[];
   createdAt: string;
+  origin?: "manual" | "active";
 };
 
 type ClassStat = {
@@ -104,6 +105,7 @@ export function CvStudioDataset() {
       return sample.source.toLowerCase().includes(needle) || sample.id.toLowerCase().includes(needle);
     });
   }, [query, samples, split]);
+  const visibleSamples = useMemo(() => filteredSamples.slice(0, 320), [filteredSamples]);
 
   const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
 
@@ -181,7 +183,7 @@ export function CvStudioDataset() {
     </section>
 
     <section className="cv-metrics-grid">
-      <StudioMetric label="Active Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${sampleStats.trainFrames + sampleStats.valFrames} saved manual frames`} />
+      <StudioMetric label="Active Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${sampleStats.trainFrames + sampleStats.valFrames} editable frames`} />
       <StudioMetric label="Saved Labels" value={String(sampleStats.boxes)} detail={`${sampleStats.trainFrames} train frames / ${sampleStats.valFrames} val frames`} />
       <StudioMetric label="Training" value={trainingDeviceLabel(model)} detail={trainingDeviceDetail(model)} />
       <StudioMetric label="Inference" value={model?.inferenceBackend?.selected === "directml" ? "DirectML ONNX" : model?.device?.type?.toUpperCase() ?? "Unknown"} detail={model?.onnxModelAvailable ? "ONNX export available" : "ONNX export missing"} />
@@ -194,7 +196,7 @@ export function CvStudioDataset() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4">
           <div>
             <h3 className="flex items-center gap-2 text-lg font-black"><Database className="h-5 w-5 text-cyan-300" />Dataset Editor</h3>
-            <p className="mt-1 text-sm text-slate-400">Saved annotation frames that can be synced, filtered, inspected, or deleted.</p>
+            <p className="mt-1 text-sm text-slate-400">Active train/val frames plus manual corrections that can be filtered, inspected, edited, or deleted.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button className="cv-control-button" disabled={Boolean(busy)} onClick={() => void refresh()}><RefreshCw size={15} />Refresh</button>
@@ -212,17 +214,21 @@ export function CvStudioDataset() {
         </div>
         <div className="touch-scroll max-h-[560px] overflow-auto p-4">
           <div className="grid gap-3">
-            {filteredSamples.length ? filteredSamples.map((sample) => <article key={sample.id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 md:grid-cols-[120px_1fr_auto]">
+            {filteredSamples.length > visibleSamples.length ? <div className="rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-3 text-xs font-semibold text-cyan-50">
+              Showing {visibleSamples.length} of {filteredSamples.length} matches. Search by source/id or filter split to narrow the active dataset.
+            </div> : null}
+            {visibleSamples.length ? visibleSamples.map((sample) => <article key={sample.id} className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-3 md:grid-cols-[120px_1fr_auto]">
               <a className="block overflow-hidden rounded bg-black" href={apiUrl(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`)} target="_blank" rel="noreferrer" style={{ aspectRatio: `${sample.width || 16} / ${sample.height || 9}` }}>
                 <img src={apiUrl(`/api/vision/annotations/${encodeURIComponent(sample.id)}/image`)} alt="" className="h-full w-full object-cover" loading="lazy" />
               </a>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">{sample.split}</span>
+                  <span className="rounded border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-black uppercase text-slate-300">{sample.origin ?? "manual"}</span>
                   <span className="text-xs text-slate-500">{formatDate(sample.createdAt)}</span>
                 </div>
                 <div className="mt-2 truncate text-sm font-bold text-white">{sample.source}</div>
-                <div className="mt-1 text-xs text-slate-400">{sample.width}x{sample.height} / {sample.boxes.length} labels</div>
+                <div className="mt-1 text-xs text-slate-400">{sample.width && sample.height ? `${sample.width}x${sample.height}` : "image"} / {sample.boxes.length} labels</div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {sample.boxes.slice(0, 8).map((box, index) => <span key={`${sample.id}-${index}`} className="rounded bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-300">
                     {(classMap.get(box.classId)?.name ?? `class ${box.classId}`).replace(/_/g, " ")}
@@ -230,10 +236,15 @@ export function CvStudioDataset() {
                   {sample.boxes.length > 8 ? <span className="rounded bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-500">+{sample.boxes.length - 8}</span> : null}
                 </div>
               </div>
-              <button title="Delete sample" className="self-start rounded p-2 text-rose-200 hover:bg-white/10 disabled:opacity-50" disabled={Boolean(busy)} onClick={() => void removeSample(sample.id)}>
-                <Trash2 size={16} />
-              </button>
-            </article>) : <div className="rounded-lg border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-400">No saved annotation frames match the current filter.</div>}
+              <div className="flex flex-wrap gap-2 self-start md:flex-col">
+                <NavLink className="cv-control-button min-h-9 justify-center" to={`/cv-studio/editor?sample=${encodeURIComponent(sample.id)}`}>
+                  <Pencil size={15} />Edit
+                </NavLink>
+                <button title="Delete sample" className="rounded p-2 text-rose-200 hover:bg-white/10 disabled:opacity-50" disabled={Boolean(busy)} onClick={() => void removeSample(sample.id)}>
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </article>) : <div className="rounded-lg border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-400">No dataset frames match the current filter.</div>}
           </div>
         </div>
       </div>
@@ -241,7 +252,7 @@ export function CvStudioDataset() {
       <aside className="cv-inspector-panel">
         <div className="border-b border-white/10 p-4">
           <h3 className="flex items-center gap-2 text-lg font-black"><Boxes className="h-5 w-5 text-cyan-300" />Class Balance</h3>
-          <p className="mt-1 text-sm text-slate-400">Manual saved labels only. Active imported data is larger and handled by the full dataset builder.</p>
+          <p className="mt-1 text-sm text-slate-400">Class counts include active train/val data and manual correction frames.</p>
         </div>
         <div className="touch-scroll max-h-[720px] overflow-auto p-4">
           <div className="space-y-2">
