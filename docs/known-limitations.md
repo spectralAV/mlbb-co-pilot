@@ -15,6 +15,7 @@ MLBB Co-Pilot is currently a public alpha. The project is useful for local testi
 - CV accuracy depends on screen resolution, UI language, device aspect ratio, graphics settings, dataset coverage, and calibration quality.
 - CV should adapt to device differences through normalized ROIs, dynamic UI anchors, aspect-ratio profiles, calibration fallback, confidence gates, and manual override. Separate production models per device or screen size are out of scope.
 - DirectML is the preferred Windows AMD inference path today. WSL ROCm training is experimental and can stress the Windows display driver on some hardware.
+- GitHub CI validates TypeScript build and Node tests on Linux only; it does not run CV training or DirectML/ROCm inference. GPU workflows are validated locally on Windows (see `data/cv/README.md`, section Reference Dev Hardware And CI Scope).
 - OCR is optional and should be treated as a sidecar helper, not the source of truth for match-state decisions.
 
 ## Data And Licensing

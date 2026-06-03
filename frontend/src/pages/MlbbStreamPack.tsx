@@ -315,6 +315,7 @@ function currentDraft(matchState: any) {
 function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverlayState {
   const current = currentMatch(matchState);
   const live = currentReasoning(current);
+  const advisory = current?.advisory?.status === "ready" ? current.advisory : null;
   const draft = currentDraft(current);
   const topPick = draft?.analysis?.bestPick;
   const ally = positionedPicks(draft?.allyPicks);
@@ -348,7 +349,9 @@ function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverla
     objectiveTimer: Number.isFinite(Number(live?.observation?.objectiveSpawnsInSec)) ? `${live.observation.objectiveSpawnsInSec}s` : "--:--",
     lowerTitle: "Detected state",
     lowerSubtitle: live?.callout || (draft ? "Confirmed draft facts" : "Waiting for reliable frame"),
-    ticker: live ? [live.callout, live.recommendedAction].filter(Boolean) : [],
+    ticker: live
+      ? [live.callout, live.recommendedAction, advisory?.recommendations?.[1]?.action].filter(Boolean)
+      : [],
     buildPath: live?.itemAdjustment ? [live.itemAdjustment] : [],
     mapTitle: String(live?.observation?.objectiveName ?? "Detected map state"),
     mapSubtitle: live?.reason || "Waiting for reliable tactical signal.",
@@ -358,7 +361,7 @@ function getDisplayState(state: LocalOverlayState, matchState: any): LocalOverla
     textKicker: "Detected reasoning",
     textTitle: live?.callout || "No reliable live callout",
     textBody: live?.reason || "Waiting for detected evidence.",
-    textFooter: live?.recommendedAction || "CV confidence gate active",
+    textFooter: advisory?.reasoning?.slice(0, 120) || live?.recommendedAction || "CV confidence gate active",
     counterTitle: Number.isFinite(missingCount) ? "Enemies missing" : "Detected count",
     counterValue: Number.isFinite(missingCount) ? String(missingCount) : "-",
     counterLabel: live?.callout || "No confirmed warning",

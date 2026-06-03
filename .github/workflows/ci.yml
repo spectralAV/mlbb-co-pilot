@@ -10,6 +10,9 @@ permissions:
   contents: read
 
 jobs:
+  # Portable gate only: TypeScript build + Node tests. No GPU, DirectML, or WSL ROCm.
+  # CV training and Windows AMD inference are validated on a local Windows dev machine
+  # (DirectML for live infer; WSL ROCm for Ultralytics training). See data/cv/README.md.
   build-test:
     name: Build and test
     runs-on: ubuntu-latest

@@ -4,6 +4,30 @@ This dataset is for local Ultralytics object detection. It locates visual facts;
 
 Production CV is device-adaptive, not device-specific. The model should learn stable MLBB UI surfaces, while runtime support for different phones, emulators, capture cards, and aspect ratios comes from normalized ROIs, dynamic UI anchors, aspect-ratio layout profiles, calibration fallback, confidence gates, and manual override. See `../../docs/cv-device-adaptation.md`.
 
+## Reference Dev Hardware And CI Scope
+
+GitHub Actions CI (`ubuntu-latest`) runs `npm run build` and `npm test` only. It does not install the managed CV runtime, train YOLO weights, or exercise DirectML or WSL ROCm. That is intentional: GPU paths are machine-specific and too heavy for a shared Linux runner.
+
+The primary maintainer reference setup is a Windows AMD laptop:
+
+| Role | Runtime |
+| --- | --- |
+| App dev, capture, live inference | Windows — ONNX Runtime **DirectML** on the iGPU |
+| Ultralytics YOLO training | **WSL ROCm** (`npm run cv:wsl:bootstrap`, then `cv:train:rocm` or `cv:wsl:train`) |
+| Not used for CV today | Ryzen AI / XDNA NPU |
+
+Example class: AMD Ryzen 7 PRO 7840HS with Radeon 780M (RDNA 3), 32 GB shared memory (e.g. Lenovo ThinkPad Z16 Gen 2). WSL defaults in `tools/cv-wsl.ps1` target this stack (`Ubuntu-24.04`, `HSA_OVERRIDE_GFX_VERSION=11.0.2` unless overridden).
+
+Quick checks on that machine:
+
+```powershell
+npm test
+npm run cv:status
+npm run cv:wsl:status
+```
+
+Training must not use DirectML (unsupported loss ops). Use WSL ROCm instead; keep live inference on the Windows DirectML worker.
+
 ## Initial Labels
 
 `minimap_panel`, `draft_screen`, `equipment_scoreboard`, `attributes_scoreboard`, `ally_pick_slot`, `enemy_pick_slot`, `ally_ban_slot`, `enemy_ban_slot`, `lane_marker`, `battle_spell_marker`, `ally_hero_marker`, `enemy_hero_marker`, `turtle`, `lord`, `ally_turret`, `enemy_turret`.

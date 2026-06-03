@@ -4,11 +4,14 @@ import { Boxes, Database, Film, Pencil, RefreshCw, ScanSearch, ScanText, Trash2,
 import {
   apiUrl,
   deleteCvAnnotation,
+  exportUltralyticsOnnx,
   getCvAnnotationClasses,
   getCvAnnotations,
   getUltralyticsStatus,
+  getUltralyticsTrainingStatus,
+  startUltralyticsTraining,
+  stopUltralyticsTraining,
   syncCvAnnotations,
-  trainUltralyticsModel,
 } from "../api/client";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../utils/cvTraining";
 
@@ -67,10 +70,26 @@ export function CvStudioDataset() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("Dataset editor is ready.");
   const [busy, setBusy] = useState("");
+  const [trainingJob, setTrainingJob] = useState<any>(null);
+
+  const trainingActive = Boolean(
+    trainingJob &&
+      !["idle", "completed", "failed", "killed"].includes(String(trainingJob.state ?? "")),
+  );
+  const trainingBusy = trainingActive || busy === "quick-train" || busy === "full-train";
 
   useEffect(() => {
     void refresh();
+    void refreshTrainingJob();
   }, []);
+
+  useEffect(() => {
+    if (!trainingActive) return;
+    const timer = window.setInterval(() => {
+      void refreshTrainingJob();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [trainingActive, trainingJob?.id, trainingJob?.state]);
 
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
   const sampleStats = useMemo(() => {
@@ -123,6 +142,35 @@ export function CvStudioDataset() {
     }
   }
 
+  async function refreshTrainingJob() {
+    try {
+      const response = await getUltralyticsTrainingStatus();
+      const job = response.data ?? response;
+      setTrainingJob(job);
+      if (job.state === "completed") {
+        setBusy("");
+        setMessage("Training completed. Export ONNX when ready for DirectML inference.");
+        await refresh();
+      } else if (job.state === "failed" || job.state === "killed") {
+        setBusy("");
+        setMessage(job.error ?? `Training ${job.state}.`);
+      } else if (job.state === "stuck") {
+        setBusy("");
+        setMessage(job.stuckReason ?? "Training is stuck with artifacts present. Stop the process to release the GPU.");
+      } else if (trainingJobIsActive(job.state)) {
+        const minutes = Math.floor(Number(job.elapsedMs ?? 0) / 60000);
+        const seconds = Math.floor((Number(job.elapsedMs ?? 0) % 60000) / 1000);
+        setMessage(`Training ${job.state} (${minutes}:${String(seconds).padStart(2, "0")}) · PID ${job.pid ?? "-"} · scope ${job.trainingScope ?? "-"}`);
+      }
+    } catch {
+      // ignore polling errors
+    }
+  }
+
+  function trainingJobIsActive(state: string) {
+    return ["starting", "training", "validating", "exporting", "mirroring", "cleanup"].includes(state);
+  }
+
   async function syncDataset() {
     setBusy("sync");
     try {
@@ -141,19 +189,53 @@ export function CvStudioDataset() {
       setMessage(cpuTrainingDisabledMessage);
       return;
     }
+    if (trainingBusy) {
+      setMessage("A training job is already running.");
+      return;
+    }
     const quick = scope === "correction";
     setBusy(quick ? "quick-train" : "full-train");
-    setMessage(quick ? "Quick fine-tune is training recent manual corrections." : "Full training is rebuilding from the active dataset.");
+    setMessage(quick ? "Starting quick fine-tune for recent manual corrections." : "Starting full training from the active dataset.");
     try {
       await syncCvAnnotations();
-      const result = await trainUltralyticsModel(quick
+      const response = await startUltralyticsTraining(quick
         ? { trainingScope: "correction", epochs: 8, imageSize: 640, batch: 4, recentLimit: 32, repeatManual: 8 }
         : { trainingScope: "full", epochs: 30, imageSize: 960, batch: 4 });
-      setModel(result.data ?? result);
-      await refresh();
-      setMessage(quick ? "Quick fine-tune complete." : "Full training complete.");
+      setTrainingJob(response.data ?? response);
+      await refreshTrainingJob();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Training failed.");
+      setMessage(error instanceof Error ? error.message : "Training failed to start.");
+      setBusy("");
+    }
+  }
+
+  async function stopTraining() {
+    setBusy("stop-train");
+    try {
+      const response = await stopUltralyticsTraining();
+      setTrainingJob(response.data ?? response);
+      setMessage("Training stop requested. GPU workers should exit shortly.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not stop training.");
+    } finally {
+      setBusy("");
+      await refreshTrainingJob();
+    }
+  }
+
+  async function exportOnnx() {
+    if (trainingBusy) {
+      setMessage("Wait for training to finish before exporting ONNX.");
+      return;
+    }
+    setBusy("export-onnx");
+    try {
+      const response = await exportUltralyticsOnnx();
+      setModel(response.data ?? response);
+      await refresh();
+      setMessage("ONNX export complete for DirectML inference.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ONNX export failed.");
     } finally {
       setBusy("");
     }
@@ -176,11 +258,37 @@ export function CvStudioDataset() {
     <section className="flex flex-wrap items-center justify-between gap-3">
       <div className="cv-status-strip min-w-[280px] flex-1">{message}</div>
       <div className="flex flex-wrap items-center gap-2">
-        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("correction")}>
+        <button className="btn inline-flex items-center gap-2" disabled={trainingBusy || !model?.packageAvailable || trainingBlocked} onClick={() => void train("correction")}>
           <Wand2 size={16} />{busy === "quick-train" ? "Fine-tuning..." : "Quick Fine-Tune"}
+        </button>
+        {trainingActive || trainingJob?.state === "stuck" ? (
+          <button className="btn inline-flex items-center gap-2 border-rose-400/30 bg-rose-500/15 text-rose-100" disabled={Boolean(busy)} onClick={() => void stopTraining()}>
+            Stop Training
+          </button>
+        ) : null}
+        <button className="btn inline-flex items-center gap-2" disabled={trainingBusy || !model?.modelAvailable} onClick={() => void exportOnnx()}>
+          {busy === "export-onnx" ? "Exporting ONNX..." : "Export ONNX"}
         </button>
       </div>
     </section>
+
+    {trainingJob && trainingJob.state !== "idle" ? (
+      <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <div><span className="text-slate-500">State</span><div className="font-bold text-white">{trainingJob.state}</div></div>
+          <div><span className="text-slate-500">PID</span><div className="font-bold text-white">{trainingJob.pid ?? "-"}</div></div>
+          <div><span className="text-slate-500">Elapsed</span><div className="font-bold text-white">{formatElapsed(trainingJob.elapsedMs)}</div></div>
+          <div><span className="text-slate-500">Scope</span><div className="font-bold text-white">{trainingJob.trainingScope ?? "-"}</div></div>
+          <div className="md:col-span-2"><span className="text-slate-500">Runtime</span><div className="font-bold text-white">{trainingJob.runtime ?? "-"} · {trainingJob.trainingPython?.split("/").pop() ?? "-"}</div></div>
+          <div className="md:col-span-2"><span className="text-slate-500">Artifacts</span><div className="truncate font-bold text-white">{trainingJob.artifactPaths?.weights ?? "-"}</div></div>
+          <div className="md:col-span-2"><span className="text-slate-500">Staged workspace</span><div className="truncate font-bold text-white">{trainingJob.stagedWorkspace ?? "none"}</div></div>
+          <div className="md:col-span-2"><span className="text-slate-500">Run path</span><div className="truncate font-bold text-white">{trainingJob.runPath ?? "-"}</div></div>
+          {trainingJob.wsl?.linuxPids?.length ? (
+            <div className="md:col-span-2 xl:col-span-4"><span className="text-slate-500">WSL PIDs</span><div className="font-bold text-white">{trainingJob.wsl.linuxPids.join(", ")}</div></div>
+          ) : null}
+        </div>
+      </section>
+    ) : null}
 
     <section className="cv-metrics-grid">
       <StudioMetric label="Active Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${sampleStats.trainFrames + sampleStats.valFrames} editable frames`} />
@@ -201,7 +309,7 @@ export function CvStudioDataset() {
           <div className="flex flex-wrap gap-2">
             <button className="cv-control-button" disabled={Boolean(busy)} onClick={() => void refresh()}><RefreshCw size={15} />Refresh</button>
             <button className="cv-control-button" disabled={Boolean(busy)} onClick={() => void syncDataset()}><Database size={15} />Sync</button>
-            <button className="cv-control-button" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("full")}>Full Train</button>
+            <button className="cv-control-button" disabled={trainingBusy || !model?.packageAvailable || trainingBlocked} onClick={() => void train("full")}>Full Train</button>
           </div>
         </div>
         <div className="grid gap-3 border-b border-white/10 p-4 md:grid-cols-[160px_1fr]">
@@ -298,6 +406,13 @@ function StudioMetric({ label, value, detail }: { label: string; value: string; 
       <div className="metric-card-detail">{detail}</div>
     </div>
   </div>;
+}
+
+function formatElapsed(value: number | undefined) {
+  const ms = Number(value ?? 0);
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatDate(value: string) {

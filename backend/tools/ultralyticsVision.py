@@ -61,6 +61,18 @@ def clean_device_name(value, fallback: str):
     return text or fallback
 
 
+def write_training_phase(status_file: str | None, state: str, **extra):
+    if not status_file:
+        return
+    payload = {
+        "pythonState": state,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        **extra,
+    }
+    Path(status_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(status_file).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def project_paths(project_root: Path):
     cv_root = project_root / "data" / "cv"
     return {
@@ -474,6 +486,34 @@ def mirror_staged_run(run_save_dir: Path, paths, run_name: str, staging):
     shutil.copytree(run_save_dir, target)
 
 
+def attach_training_callbacks(model, status_file: str | None):
+    def on_fit_epoch_end(trainer):
+        write_training_phase(status_file, "validating", epoch=int(getattr(trainer, "epoch", 0)))
+
+    def on_train_epoch_end(trainer):
+        write_training_phase(status_file, "training", epoch=int(getattr(trainer, "epoch", 0)))
+
+    model.add_callback("on_train_epoch_end", on_train_epoch_end)
+    model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
+
+
+def export_onnx(project_root: Path, device: str | None):
+    paths = project_paths(project_root)
+    if not paths["weights"].exists():
+        raise RuntimeError("Train or copy weights to data/cv/models/mlbb-detect.pt before exporting ONNX.")
+    write_training_phase(None, "exporting")
+    YOLO = require_ultralytics()
+    model = YOLO(str(paths["weights"]))
+    selected_device = torch_device_status(device)["selected"]
+    export_path = model.export(format="onnx", imgsz=960, device=selected_device)
+    exported = Path(str(export_path))
+    if exported.exists() and exported.resolve() != paths["onnx"].resolve():
+        if paths["onnx"].exists():
+            paths["onnx"].unlink()
+        shutil.copy2(exported, paths["onnx"])
+    return {**status(project_root, device), "exportedAt": datetime.now(timezone.utc).isoformat(), "onnxModel": str(paths["onnx"])}
+
+
 def train(
     project_root: Path,
     base_model: str,
@@ -486,8 +526,11 @@ def train(
     training_scope: str,
     recent_limit: int,
     repeat_manual: int,
+    job_id: str | None = None,
+    status_file: str | None = None,
 ):
     paths = project_paths(project_root)
+    write_training_phase(status_file, "starting", jobId=job_id)
     current = status(project_root, device)
     quick_dataset = None
     if training_scope == "correction":
@@ -511,7 +554,17 @@ def train(
         )
         run_name = "mlbb-detection"
     staged = stage_training_workspace(project_root, paths, dataset, base_model, run_name, training_scope, quick_dataset)
+    staging = staged.get("staging")
+    write_training_phase(
+        status_file,
+        "starting",
+        jobId=job_id,
+        stagedWorkspace=(staging or {}).get("workspace") if staging else None,
+        runPath=str(paths["runs"] / run_name),
+    )
     model = YOLO(staged["baseModel"])
+    attach_training_callbacks(model, status_file)
+    write_training_phase(status_file, "training", jobId=job_id, runPath=str(staged["project"] / run_name))
     train_options = {
         "data": str(staged["dataset"]),
         "epochs": epochs,
@@ -540,16 +593,18 @@ def train(
             "plots": False,
         })
     run = model.train(**train_options)
+    write_training_phase(status_file, "mirroring", jobId=job_id, runPath=str(run.save_dir))
     best = Path(run.save_dir) / "weights" / "best.pt"
     last = Path(run.save_dir) / "weights" / "last.pt"
     selected_weights = best if best.exists() else last
     if not selected_weights.exists():
         raise RuntimeError("Ultralytics training finished without a saved model.")
+    write_training_phase(status_file, "cleanup", jobId=job_id)
     shutil.copy2(selected_weights, paths["weights"])
     mirror_staged_run(Path(run.save_dir), paths, run_name, staged["staging"])
     if paths["onnx"].exists():
         paths["onnx"].unlink()
-    return {
+    result = {
         **status(project_root, device),
         "trainedAt": datetime.now(timezone.utc).isoformat(),
         "baseModel": base_model,
@@ -558,7 +613,10 @@ def train(
         "trainingScope": training_scope,
         "quickDataset": quick_dataset,
         "trainingStorage": staged["staging"],
+        "jobId": job_id,
     }
+    write_training_phase(status_file, "cleanup", jobId=job_id, result=result, runPath=str(paths["runs"] / run_name))
+    return result
 
 
 def require_training_accelerator(device_status):
@@ -618,7 +676,7 @@ def infer(project_root: Path, image: Path, confidence: float, image_size: int, d
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["status", "train", "infer"])
+    parser.add_argument("command", choices=["status", "train", "infer", "export-onnx"])
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--image")
     parser.add_argument("--confidence", type=float, default=0.55)
@@ -632,6 +690,8 @@ def main():
     parser.add_argument("--training-scope", choices=["full", "correction"], default="full")
     parser.add_argument("--recent-limit", type=int, default=32)
     parser.add_argument("--repeat-manual", type=int, default=8)
+    parser.add_argument("--job-id", default=None)
+    parser.add_argument("--status-file", default=None)
     args = parser.parse_args()
     root = Path(args.project_root).resolve()
     try:
@@ -650,7 +710,11 @@ def main():
                 args.training_scope,
                 args.recent_limit,
                 args.repeat_manual,
+                args.job_id,
+                args.status_file,
             )
+        elif args.command == "export-onnx":
+            result = export_onnx(root, args.device)
         else:
             if not args.image:
                 raise RuntimeError("--image is required for inference.")

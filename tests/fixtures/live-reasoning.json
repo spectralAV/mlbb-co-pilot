@@ -108,7 +108,8 @@
       "confidence": 0.79,
       "signals": {
         "lanePressure": { "gold": "losing" },
-        "missingEnemies": ["enemy roam"]
+        "missingEnemies": ["enemy jungler"],
+        "missingEnemyCount": 2
       }
     },
     "expectedRule": "gold_lane_collapse",

@@ -32,12 +32,19 @@ import { compileSkinPortraitSignatures, fetchSkinPortrait, getSkinPortraitManife
 import { getLatestLiveVision, getLatestLiveVisionObservation, ingestLiveVisionFrame, parseLiveVisionFrameInput } from "./vision/liveVisionState.js";
 import { getScreenStateModel, getScreenStateTrainingStatus, trainScreenStateModel } from "./vision/screenStateTraining.js";
 import { getDraftHeroModel, getDraftHeroModelStatus, trainDraftHeroModel } from "./vision/draftHeroModelTraining.js";
+import { getLatestAdvisoryCoach } from "./engines/advisoryCoachLane.js";
 import { getLatestLiveReasoning, ingestLiveReasoning, listCoachReasoningScenarios } from "./engines/liveReasoningEngine.js";
 import { getMatchState } from "./state/matchState.js";
 import { getPlayerProfile, savePlayerProfile } from "./services/playerProfile.js";
 import { getBattleSpellRecognitionManifest, getBattleSpellRecognitionReference } from "./vision/battleSpellRecognition.js";
 import { getEquipmentRecognitionManifest, getEquipmentRecognitionReference } from "./vision/equipmentRecognition.js";
 import { getUltralyticsStatus, inferUltralyticsFrame, installUltralyticsRuntime, mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects, trainUltralyticsModel } from "./vision/ultralyticsVision.js";
+import {
+  exportUltralyticsOnnx,
+  getUltralyticsTrainingStatus,
+  startUltralyticsTrainingJob,
+  stopUltralyticsTrainingJob,
+} from "./vision/ultralyticsTrainingJob.js";
 import { firstNormalizedRegion, getActiveObsRegions } from "./services/obsCoachState.js";
 import { readMlbbAdbHeroHead, readMlbbAdbTexture } from "./services/mlbbAdbAssets.js";
 import { annotationImage, deleteAnnotation, getAnnotation, getAnnotationClasses, listAnnotations, saveAnnotation, syncSavedAnnotationsToDataset, updateAnnotation } from "./vision/cvAnnotation.js";
@@ -310,6 +317,28 @@ app.post("/api/vision/models/ultralytics/install", async (_req, reply) => {
     return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Ultralytics installation failed" });
   }
 });
+app.get("/api/vision/models/ultralytics/training/status", async () => ({ success: true, data: getUltralyticsTrainingStatus() }));
+app.post("/api/vision/models/ultralytics/training/start", async (req, reply) => {
+  try {
+    return { success: true, data: await startUltralyticsTrainingJob(req.body as any) };
+  } catch (error) {
+    return reply.code(409).send({ success: false, error: error instanceof Error ? error.message : "Could not start training" });
+  }
+});
+app.post("/api/vision/models/ultralytics/training/stop", async (req, reply) => {
+  try {
+    return { success: true, data: await stopUltralyticsTrainingJob() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Could not stop training" });
+  }
+});
+app.post("/api/vision/models/ultralytics/training/export-onnx", async (_req, reply) => {
+  try {
+    return { success: true, data: await exportUltralyticsOnnx() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "ONNX export failed" });
+  }
+});
 app.post("/api/vision/models/ultralytics/train", async (req, reply) => {
   try {
     return { success: true, data: await trainUltralyticsModel(req.body as any) };
@@ -413,6 +442,7 @@ app.post("/api/vision/models/screen-ocr/infer", async (req, reply) => {
 app.get("/api/reasoning/live/latest", async () => ({ success:true, data:getLatestLiveReasoning() }));
 app.post("/api/reasoning/live/evaluate", async (req) => ({ success:true, data:ingestLiveReasoning(req.body as any) }));
 app.get("/api/reasoning/live/scenarios", async () => ({ success:true, data:listCoachReasoningScenarios() }));
+app.get("/api/reasoning/advisory/latest", async () => ({ success:true, data:getLatestAdvisoryCoach() }));
 app.get("/api/match/state", async () => ({ success:true, data:getMatchState() }));
 
 app.get("/api/map/runtime", async () => ({ success:true, manifest:getMapRuntimeManifest(), zones:getZones(), projection:getMinimapProjection() }));

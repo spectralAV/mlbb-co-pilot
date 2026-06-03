@@ -59,6 +59,7 @@ export type MatchState = {
   } | null;
   vision: any | null;
   reasoning: any | null;
+  advisory: any | null;
   draft: DraftState | null;
   confidence: {
     minimum: number;
@@ -75,6 +76,7 @@ function initialState(): MatchState {
     lifecycle: null,
     vision: null,
     reasoning: null,
+    advisory: null,
     draft: null,
     confidence: {
       minimum: DETECTED_FACT_CONFIDENCE,
@@ -102,6 +104,15 @@ function emit(next: MatchState) {
   latest = next;
   eventBus.emit("match_state_updated", next);
   return next;
+}
+
+export function updateMatchAdvisory(advisory: any) {
+  return emit({
+    ...latest,
+    revision: latest.revision + 1,
+    advisory,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export function updateMatchVision(vision: any, reasoning: any) {

@@ -1,4 +1,5 @@
 import { eventBus } from "../event-bus/eventBus.js";
+import { scheduleAdvisoryFromReasoning } from "./advisoryCoachLane.js";
 import { DETECTED_FACT_CONFIDENCE } from "../state/matchState.js";
 
 export type ReasoningScene = "main" | "map" | "text" | "counter" | "picks";
@@ -230,13 +231,15 @@ type ScenarioRule = {
   evaluate: (ctx: ReasoningContext) => ScenarioMatch | null;
 };
 
-export const LIVE_REASONING_MODEL_VERSION = "coach-scenario-v1";
+export const LIVE_REASONING_MODEL_VERSION = "coach-scenario-v2";
 
 let latest: LiveReasoningOutput | null = null;
 
 export function ingestLiveReasoning(input: LiveReasoningInput) {
+  const previous = latest;
   latest = evaluateLiveReasoning(input);
   eventBus.emit("reasoning_updated", latest);
+  scheduleAdvisoryFromReasoning(input, latest, previous);
   return latest;
 }
 
@@ -564,6 +567,50 @@ const scenarioRules: ScenarioRule[] = [
     },
   },
   {
+    id: "lord_late_priority",
+    category: "objective",
+    tags: ["lord", "late", "macro"],
+    description: "Late game: treat Lord timers as primary win condition when no base emergency exists.",
+    evaluate: (ctx) => {
+      if (ctx.phase !== "late" || ctx.baseUnderAttack || ctx.enemyLordPush) return null;
+      const lordSoon = ctx.objectiveSoon && String(ctx.objectiveName ?? "").toLowerCase().includes("lord");
+      const lordActive = ctx.objectiveActive && (ctx.visibleObjectives.includes("lord") || String(ctx.objectiveName ?? "").toLowerCase().includes("lord"));
+      if (!lordSoon && !lordActive) return null;
+      return scenario(ctx, {
+        ruleId: "lord_late_priority",
+        category: "objective",
+        scene: "map",
+        priority: "high",
+        callout: "Late Lord: group and setup.",
+        reason: "Late phase Lord pressure decides structure and enhanced minions.",
+        recommendedAction: "Group mid, secure vision, and commit only with numbers or power spike.",
+        tags: ["lord", "late"],
+      });
+    },
+  },
+  {
+    id: "turtle_early_setup",
+    category: "objective",
+    tags: ["turtle", "early", "setup"],
+    description: "First Turtle window in early game needs mid prio and river vision.",
+    evaluate: (ctx) => {
+      if (ctx.phase !== "early" || !ctx.objectiveSoon) return null;
+      const turtle = String(ctx.objectiveName ?? "").toLowerCase().includes("turtle") || ctx.visibleObjectives.includes("turtle");
+      if (!turtle) return null;
+      if (ctx.objectiveSpawnsInSec !== undefined && ctx.objectiveSpawnsInSec > 90) return null;
+      return scenario(ctx, {
+        ruleId: "turtle_early_setup",
+        category: "objective",
+        scene: "map",
+        priority: "medium",
+        callout: "First Turtle: prep now.",
+        reason: "Early Turtle timing rewards mid wave control and jungle Retribution readiness.",
+        recommendedAction: "Clear mid, ward river, and path jungle to spawn with lane prio.",
+        tags: ["turtle", "early"],
+      });
+    },
+  },
+  {
     id: "objective_setup",
     category: "objective",
     tags: ["objective", "setup", "river"],
@@ -602,6 +649,42 @@ const scenarioRules: ScenarioRule[] = [
         recommendedAction: "Send the safest wave-clear hero, then regroup after the wave is fixed.",
         tags: ["split-push", "defense"],
       });
+    },
+  },
+  {
+    id: "roam_gank_setup",
+    category: "lane",
+    tags: ["roam", "gank", "missing"],
+    description: "Roam role or missing enemy roam with losing side lane — set up gank or cover.",
+    evaluate: (ctx) => {
+      if (ctx.screen !== "live_hud") return null;
+      const losingSide = ctx.lanePressure.gold === "losing" || ctx.lanePressure.exp === "losing";
+      if (!losingSide) return null;
+      if (ctx.role === "roam" && ctx.goldState !== "behind") {
+        return scenario(ctx, {
+          ruleId: "roam_gank_setup",
+          category: "lane",
+          scene: "map",
+          priority: "medium",
+          callout: "Roam: set up lane gank.",
+          reason: "A side lane is losing and you are on roam with acceptable gold state.",
+          recommendedAction: "Crash the losing lane wave and engage with ally cooldowns.",
+          tags: ["roam", "gank"],
+        });
+      }
+      if (missingKeyEnemy(ctx, ["roam"]) && (ctx.missingEnemyCount ?? 0) >= 1) {
+        return scenario(ctx, {
+          ruleId: "roam_gank_setup",
+          category: "lane",
+          scene: "map",
+          priority: "high",
+          callout: "Enemy roam missing: punish lane.",
+          reason: "Enemy roam is not confirmed while a side lane is losing.",
+          recommendedAction: "Play aggressive on the losing lane or invade enemy jungle with vision.",
+          tags: ["roam", "missing", "gank"],
+        });
+      }
+      return null;
     },
   },
   {
@@ -817,6 +900,112 @@ const scenarioRules: ScenarioRule[] = [
         reason: "Build information is visible but no urgent counter-rule fired.",
         recommendedAction: ctx.screen === "item_shop" ? "Complete the next item component and leave shop." : "Wait for validated item counters.",
         tags: ["items", ctx.screen],
+      });
+    },
+  },
+  {
+    id: "ultimate_ready_engage",
+    category: "fight",
+    tags: ["ultimate", "engage", "power-spike"],
+    description: "Ultimate online with favorable fight or pick window.",
+    evaluate: (ctx) => {
+      if (!ctx.ultimateReady || ctx.screen !== "live_hud") return null;
+      if (ctx.deadAllies > ctx.deadEnemies || ctx.lowHealth) return null;
+      if (ctx.deadEnemies < 1 && (ctx.missingEnemyCount ?? 0) >= 3) return null;
+      return scenario(ctx, {
+        ruleId: "ultimate_ready_engage",
+        category: "fight",
+        scene: "main",
+        priority: "medium",
+        callout: "Ult ready: play for pick.",
+        reason: "Ultimate is available while the map is not in a numbers-down state.",
+        recommendedAction: "Force a skirmish on a wave crash or invade with one camp of vision.",
+        tags: ["ultimate", "engage"],
+        evidence: ctx.deadEnemies > 0 ? [`deadEnemies=${ctx.deadEnemies}`] : [],
+      });
+    },
+  },
+  {
+    id: "mid_rotation_winning",
+    category: "lane",
+    tags: ["mid", "rotation", "winning"],
+    description: "Winning mid with missing enemies enables roam or river control.",
+    evaluate: (ctx) => {
+      if (ctx.lanePressure.mid !== "winning" || (ctx.missingEnemyCount ?? 0) < 2) return null;
+      if (ctx.objectiveSoon || ctx.baseUnderAttack) return null;
+      return scenario(ctx, {
+        ruleId: "mid_rotation_winning",
+        category: "lane",
+        scene: "map",
+        priority: "medium",
+        callout: "Mid won: rotate with prio.",
+        reason: "Mid lane has priority while multiple enemies are unconfirmed.",
+        recommendedAction: "Roam to side lane with wave crash or secure river vision.",
+        tags: ["mid", "rotation"],
+      });
+    },
+  },
+  {
+    id: "buff_contest_window",
+    category: "tempo",
+    tags: ["buff", "ahead", "jungle"],
+    description: "Ahead with buff threat signal — contest or steal with vision.",
+    evaluate: (ctx) => {
+      if (!ctx.buffThreat || ctx.goldState !== "ahead" || ctx.riverVision === false) return null;
+      return scenario(ctx, {
+        ruleId: "buff_contest_window",
+        category: "tempo",
+        scene: "map",
+        priority: "medium",
+        callout: `Contest ${ctx.buffThreat} with lead.`,
+        reason: "Team is ahead and a buff window was detected.",
+        recommendedAction: "Enter with lane prio, take one buff, and leave before collapse.",
+        tags: ["buff", "ahead"],
+        evidence: [`buff=${ctx.buffThreat}`],
+      });
+    },
+  },
+  {
+    id: "wave_crash_objective",
+    category: "objective",
+    tags: ["wave", "crash", "setup"],
+    description: "Objective soon but wave must be crashed first.",
+    evaluate: (ctx) => {
+      if (!ctx.objectiveSoon || ctx.screen !== "live_hud") return null;
+      const needsCrash = ctx.waveState === "push" || ctx.waveState === "large" || ctx.waveState === "slow";
+      const midNotReady = ctx.lanePressure.mid !== "winning" && ctx.lanePressure.mid !== "unknown";
+      if (!needsCrash && !midNotReady) return null;
+      return scenario(ctx, {
+        ruleId: "wave_crash_objective",
+        category: "objective",
+        scene: "map",
+        priority: "medium",
+        callout: "Crash wave before objective.",
+        reason: "Objective timer is close but lane wave state is not ready for river.",
+        recommendedAction: "Fast-clear mid or side wave, then move to pit with vision.",
+        tags: ["wave", "objective"],
+        evidence: ctx.waveState ? [`wave=${ctx.waveState}`] : ["midPriority=low"],
+      });
+    },
+  },
+  {
+    id: "defensive_warding_behind",
+    category: "map",
+    tags: ["behind", "vision", "defense"],
+    description: "Behind in mid/late without river vision — ward defensively before contests.",
+    evaluate: (ctx) => {
+      if (ctx.goldState !== "behind" || ctx.riverVision !== false) return null;
+      if (ctx.phase === "early" || ctx.phase === "unknown") return null;
+      if (ctx.objectiveActive) return null;
+      return scenario(ctx, {
+        ruleId: "defensive_warding_behind",
+        category: "map",
+        scene: "counter",
+        priority: "medium",
+        callout: "Behind: ward defensively.",
+        reason: "Team is behind and lacks river vision in mid or late phase.",
+        recommendedAction: "Place defensive wards on jungle entrances; avoid blind river fights.",
+        tags: ["behind", "vision"],
       });
     },
   },

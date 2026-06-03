@@ -12,7 +12,8 @@ import { recognizeTimerDetections, type TimerFact } from "./timerRecognition.js"
 import { recordVisionReflection } from "./visionReflection.js";
 
 const execFileAsync = promisify(execFile);
-const projectRoot = path.resolve(process.cwd(), "..");
+export const ultralyticsProjectRoot = path.resolve(process.cwd(), "..");
+const projectRoot = ultralyticsProjectRoot;
 const cvRoot = path.join(projectRoot, "data", "cv");
 const managedPython = path.join(cvRoot, ".venv", "Scripts", "python.exe");
 const script = path.join(projectRoot, "backend", "tools", "ultralyticsVision.py");
@@ -145,6 +146,9 @@ let workerWeightsMtimeMs: number | null = null;
 let workerStdout = "";
 let workerSequence = 0;
 let cachedWslHome: string | null = null;
+let cachedTrainingRunnerKind: UltralyticsRuntimeKind | null = null;
+let cachedWindowsCuda: boolean | null = null;
+let cachedWslPythonAvailable: boolean | null = null;
 const workerRequests = new Map<number, WorkerRequest>();
 let pendingObsFrame: { frame: VisionFrameInput; source: string; receivedAt: number } | null = null;
 let obsProcessing = false;
@@ -351,6 +355,7 @@ function blendNumber(previous: number, current: number, currentWeight: number) {
 }
 
 export async function getUltralyticsStatus(): Promise<UltralyticsStatus> {
+  await warmTrainingRuntimeDetection();
   const runner = pythonRunner();
   const trainingRunner = trainingPythonRunner();
   const managedRuntime = useWslRuntime() ? true : await exists(managedPython);
@@ -405,31 +410,9 @@ export async function trainUltralyticsModel(options: {
   recentLimit?: number;
   repeatManual?: number;
 } = {}) {
-  const runner = trainingPythonRunner();
-  if (runner.runtime === "windows" && !(await exists(managedPython))) throw new Error("Install the Ultralytics runtime before training.");
-  const status = await runJson(["status", "--device", ultralyticsDevice(options.device)], 20000, runner);
-  assertTrainingAccelerator(status.device);
-  const resolvedBaseModel = await resolveTrainingBaseModel(options.baseModel);
-  const baseModel = runner.runtime === "wsl" && path.isAbsolute(resolvedBaseModel) ? wslPath(resolvedBaseModel) : resolvedBaseModel;
-  const trainingScope = options.trainingScope === "correction" ? "correction" : "full";
-  const defaultWorkers = runner.runtime === "wsl" ? 2 : 0;
-  const args = [
-    "train",
-    "--base-model", baseModel,
-    "--epochs", String(Math.max(1, Number(options.epochs ?? 60))),
-    "--image-size", String(Math.max(320, Number(options.imageSize ?? 960))),
-    "--batch", String(Math.max(1, Number(options.batch ?? 4))),
-    "--workers", String(Math.max(0, Number(options.workers ?? defaultWorkers))),
-    "--amp", String(Boolean(options.amp ?? false)),
-    "--device", ultralyticsDevice(options.device),
-    "--training-scope", trainingScope,
-    "--recent-limit", String(Math.max(1, Number(options.recentLimit ?? 32))),
-    "--repeat-manual", String(Math.max(1, Number(options.repeatManual ?? 8))),
-  ];
-  const result = await runJson(args, 24 * 60 * 60 * 1000, runner);
-  shutdownWorker("Ultralytics model was retrained; reloading weights.");
-  lastStatusCheckAt = 0;
-  return result;
+  const { startUltralyticsTrainingJob, waitForUltralyticsTrainingJob } = await import("./ultralyticsTrainingJob.js");
+  const started = await startUltralyticsTrainingJob(options);
+  return waitForUltralyticsTrainingJob(started.id);
 }
 
 async function getTrainingDeviceStatus(fallback: UltralyticsDeviceStatus, runner: ReturnType<typeof pythonRunner>, trainingRunner: ReturnType<typeof pythonRunner>) {
@@ -458,7 +441,7 @@ function trainingReadyDeviceStatus(device: UltralyticsDeviceStatus) {
   };
 }
 
-function assertTrainingAccelerator(device: UltralyticsDeviceStatus) {
+export function assertTrainingAccelerator(device: UltralyticsDeviceStatus) {
   const type = String(device?.type ?? "").toLowerCase();
   const selected = String(device?.selected ?? "").toLowerCase();
   if (type === "cpu" || selected === "cpu") {
@@ -792,7 +775,7 @@ async function reloadWorkerIfWeightsChanged() {
   workerWeightsMtimeMs = currentWeightsMtimeMs;
 }
 
-function shutdownWorker(reason: string) {
+export function shutdownWorker(reason: string) {
   const activeWorker = worker;
   worker = null;
   workerStdout = "";
@@ -807,7 +790,7 @@ function shutdownWorker(reason: string) {
   nativeObsStatus.active = false;
 }
 
-async function resolveTrainingBaseModel(baseModel: string | undefined) {
+export async function resolveTrainingBaseModel(baseModel: string | undefined) {
   const requested = String(baseModel ?? "").trim();
   if (!requested) {
     return (await exists(weights)) ? projectRelative(weights) : "yolo26n.pt";
@@ -822,7 +805,7 @@ function projectRelative(file: string) {
   return path.relative(projectRoot, file).replace(/\\/g, "/");
 }
 
-async function runJson(command: string[], timeout = 20000, runner = pythonRunner()): Promise<any> {
+export async function runJson(command: string[], timeout = 20000, runner = pythonRunner()): Promise<any> {
   let stdout = "";
   try {
     const result = await execFileAsync(runner.file, [...runner.args, runner.script, ...command, "--project-root", runner.projectRoot], {
@@ -893,43 +876,88 @@ function runtimeFromName(value: string): UltralyticsRuntimeKind {
   return ["wsl", "wsl-rocm", "rocm-wsl", "rocm"].includes(value) ? "wsl" : "windows";
 }
 
-function trainingPythonRunner() {
+const TORCH_CUDA_PROBE = [
+  "import importlib.util, json",
+  "info = {'cuda': False}",
+  "try:",
+  "    import torch",
+  "    info['cuda'] = bool(torch.cuda.is_available() and torch.cuda.device_count() > 0)",
+  "except Exception:",
+  "    pass",
+  "print(json.dumps(info))",
+].join("\n");
+
+export function trainingPythonRunner() {
   const requested = ultralyticsTrainingRuntime();
   if (runtimeFromName(requested) === "wsl") return pythonRunner("wsl");
   if (["windows", "win", "cuda", "directml", "dml", "amd", "amd-gpu"].includes(requested)) return pythonRunner("windows");
-  if (windowsCudaTrainingAvailable()) return pythonRunner("windows");
-  return wslPythonAvailable() ? pythonRunner("wsl") : pythonRunner("windows");
+  if (cachedTrainingRunnerKind) return pythonRunner(cachedTrainingRunnerKind);
+  if (windowsCudaTrainingAvailable()) {
+    cachedTrainingRunnerKind = "windows";
+    return pythonRunner("windows");
+  }
+  cachedTrainingRunnerKind = wslPythonAvailable() ? "wsl" : "windows";
+  return pythonRunner(cachedTrainingRunnerKind);
+}
+
+// Resolves the training runtime kind and warms HOME using async subprocesses so the
+// hot status path never blocks the event loop on synchronous execFileSync probes.
+export async function warmTrainingRuntimeDetection(): Promise<void> {
+  await wslHomeAsync();
+  if (cachedTrainingRunnerKind) return;
+  const requested = ultralyticsTrainingRuntime();
+  if (runtimeFromName(requested) === "wsl") {
+    cachedTrainingRunnerKind = "wsl";
+    return;
+  }
+  if (["windows", "win", "cuda", "directml", "dml", "amd", "amd-gpu"].includes(requested)) {
+    cachedTrainingRunnerKind = "windows";
+    return;
+  }
+  if (await windowsCudaTrainingAvailableAsync()) {
+    cachedTrainingRunnerKind = "windows";
+    return;
+  }
+  cachedTrainingRunnerKind = (await wslPythonAvailableAsync()) ? "wsl" : "windows";
 }
 
 function windowsCudaTrainingAvailable() {
+  if (cachedWindowsCuda !== null) return cachedWindowsCuda;
   const python = process.env.ULTRALYTICS_PYTHON || (existsSync(managedPython) ? managedPython : "python");
   try {
-    const output = execFileSync(python, ["-c", [
-      "import importlib.util, json",
-      "info = {'cuda': False}",
-      "try:",
-      "    import torch",
-      "    info['cuda'] = bool(torch.cuda.is_available() and torch.cuda.device_count() > 0)",
-      "except Exception:",
-      "    pass",
-      "print(json.dumps(info))",
-    ].join("\n")], {
+    const output = execFileSync(python, ["-c", TORCH_CUDA_PROBE], {
       encoding: "utf8",
       windowsHide: true,
       timeout: 10000,
     });
-    const info = JSON.parse(output);
-    return Boolean(info?.cuda);
+    cachedWindowsCuda = Boolean(JSON.parse(output)?.cuda);
   } catch {
-    return false;
+    cachedWindowsCuda = false;
   }
+  return cachedWindowsCuda;
 }
 
-function wslDistro() {
+async function windowsCudaTrainingAvailableAsync() {
+  if (cachedWindowsCuda !== null) return cachedWindowsCuda;
+  const python = process.env.ULTRALYTICS_PYTHON || (existsSync(managedPython) ? managedPython : "python");
+  try {
+    const { stdout } = await execFileAsync(python, ["-c", TORCH_CUDA_PROBE], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 10000,
+    });
+    cachedWindowsCuda = Boolean(JSON.parse(String(stdout))?.cuda);
+  } catch {
+    cachedWindowsCuda = false;
+  }
+  return cachedWindowsCuda;
+}
+
+export function wslDistro() {
   return String(process.env.ULTRALYTICS_WSL_DISTRO ?? "Ubuntu-24.04").trim() || "Ubuntu-24.04";
 }
 
-function wslPython() {
+export function wslPython() {
   const configured = String(process.env.ULTRALYTICS_WSL_PYTHON ?? "").trim();
   if (configured) return configured;
   const home = wslHome();
@@ -950,7 +978,22 @@ function wslHome() {
   return cachedWslHome;
 }
 
-function wslPath(file: string) {
+async function wslHomeAsync(): Promise<string> {
+  if (cachedWslHome) return cachedWslHome;
+  try {
+    const { stdout } = await execFileAsync("wsl.exe", ["-d", wslDistro(), "--", "bash", "-lc", "printf %s \"$HOME\""], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 10000,
+    });
+    cachedWslHome = String(stdout).trim();
+  } catch {
+    cachedWslHome = "";
+  }
+  return cachedWslHome ?? "";
+}
+
+export function wslPath(file: string) {
   const resolved = path.resolve(file);
   const parsed = path.parse(resolved);
   const drive = parsed.root.slice(0, 1).toLowerCase();
@@ -963,17 +1006,42 @@ function shellQuote(value: string) {
 }
 
 function wslPythonAvailable() {
+  if (cachedWslPythonAvailable !== null) return cachedWslPythonAvailable;
   const python = wslPython();
-  if (!python) return false;
+  if (!python) {
+    cachedWslPythonAvailable = false;
+    return false;
+  }
   try {
     execFileSync("wsl.exe", ["-d", wslDistro(), "--", "bash", "-lc", `test -x ${shellQuote(python)}`], {
       windowsHide: true,
       timeout: 10000,
     });
-    return true;
+    cachedWslPythonAvailable = true;
   } catch {
+    cachedWslPythonAvailable = false;
+  }
+  return cachedWslPythonAvailable;
+}
+
+async function wslPythonAvailableAsync() {
+  if (cachedWslPythonAvailable !== null) return cachedWslPythonAvailable;
+  await wslHomeAsync();
+  const python = wslPython();
+  if (!python) {
+    cachedWslPythonAvailable = false;
     return false;
   }
+  try {
+    await execFileAsync("wsl.exe", ["-d", wslDistro(), "--", "bash", "-lc", `test -x ${shellQuote(python)}`], {
+      windowsHide: true,
+      timeout: 10000,
+    });
+    cachedWslPythonAvailable = true;
+  } catch {
+    cachedWslPythonAvailable = false;
+  }
+  return cachedWslPythonAvailable;
 }
 
 function wslEnvArgs(extra: Record<string, string> = {}) {

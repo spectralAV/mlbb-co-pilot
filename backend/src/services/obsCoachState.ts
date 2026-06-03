@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getLatestAdvisoryCoach } from "../engines/advisoryCoachLane.js";
+import { getLatestLiveReasoning } from "../engines/liveReasoningEngine.js";
 import { analyzeDraft } from "../engines/draftEngine.js";
+import { ADVISORY_COACH_CONFIG } from "../engines/advisoryCoach.js";
 
 const ROOT = path.resolve(process.cwd(), "..");
 const OBS_DIR = path.resolve(ROOT, "data", "obs");
@@ -110,12 +113,30 @@ export async function getObsCoachState() {
     map_callouts: mapState.callouts,
     draft
   };
+  const reasoning = getLatestLiveReasoning();
+  const advisory = getLatestAdvisoryCoach();
+  const instant_callout = reasoning ? {
+    callout: reasoning.callout,
+    ruleId: reasoning.ruleId,
+    priority: reasoning.priority,
+    recommendedAction: reasoning.recommendedAction,
+    modelVersion: reasoning.modelVersion,
+    updatedAt: reasoning.updatedAt,
+  } : null;
+
   return {
     ok: true,
     state,
     recommendation,
     map_state: mapState,
     overlay: buildOverlaySummary(draft, mapState),
+    instant_callout,
+    advisory_lane: advisory,
+    advisory_config: {
+      enabled: ADVISORY_COACH_CONFIG.enabled,
+      provider: ADVISORY_COACH_CONFIG.provider,
+      sidecarSeam: "Set ADVISORY_COACH_PROVIDER=llm-sidecar and ADVISORY_SIDECAR_URL for NPU/LLM sidecar (Vitis AI / OpenVINO / QNN).",
+    },
     obs_realtime_enabled: obsRealtime,
     reader_status: { ok: false, mode: "prepared", message: "OBS capture adapter is not connected yet." }
   };

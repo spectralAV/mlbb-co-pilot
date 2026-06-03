@@ -92,6 +92,9 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
   const videoUrlRef = useRef("");
   const queuePreviewUrlsRef = useRef<string[]>([]);
   const candidatePreviewUrlsRef = useRef<string[]>([]);
+  const frameBoxesRef = useRef<Map<number, ReviewBox[]>>(new Map());
+  const boxesRef = useRef<ReviewBox[]>([]);
+  const currentFrameRef = useRef<number | null>(null);
   const [classes, setClasses] = useState<LabelClass[]>([]);
   const [heroes, setHeroes] = useState<HeroOption[]>([]);
   const [samples, setSamples] = useState<AnnotationSample[]>([]);
@@ -133,6 +136,14 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
       for (const url of candidatePreviewUrlsRef.current) URL.revokeObjectURL(url);
     };
   }, []);
+
+  useEffect(() => {
+    boxesRef.current = boxes;
+  }, [boxes]);
+
+  useEffect(() => {
+    currentFrameRef.current = frameKeyForTime(currentTime);
+  }, [currentTime]);
 
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
   const groupedClasses = useMemo(() => {
@@ -195,6 +206,8 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
     clearCandidates();
     const nextUrl = URL.createObjectURL(file);
     videoUrlRef.current = nextUrl;
+    frameBoxesRef.current.clear();
+    currentFrameRef.current = null;
     setVideoUrl(nextUrl);
     setVideoName(file.name);
     setCurrentTime(0);
@@ -236,9 +249,31 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
     const video = videoRef.current;
     if (!video) return;
     const nextTime = clamp(time, 0, duration || 0);
+    commitFrameBoxes(currentFrameRef.current, boxesRef.current);
     video.currentTime = nextTime;
     setCurrentTime(nextTime);
-    clearFrameReview();
+    restoreFrameBoxes(nextTime);
+  }
+
+  function commitFrameBoxes(frameKey: number | null, list: ReviewBox[]) {
+    if (frameKey == null) return;
+    if (list.length) frameBoxesRef.current.set(frameKey, list);
+    else frameBoxesRef.current.delete(frameKey);
+  }
+
+  function restoreFrameBoxes(time: number) {
+    const stored = frameBoxesRef.current.get(frameKeyForTime(time));
+    setSelectedId("");
+    setStart(null);
+    setCursor(null);
+    setBoxDrag(null);
+    if (stored && stored.length) {
+      setBoxes(stored);
+      setLastCheckedAt(time);
+    } else {
+      setBoxes([]);
+      setLastCheckedAt(null);
+    }
   }
 
   function stepBy(seconds: number) {
@@ -262,6 +297,11 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
     setCursor(null);
     setBoxDrag(null);
     setLastCheckedAt(null);
+  }
+
+  function clearCurrentFrameLabels() {
+    commitFrameBoxes(currentFrameRef.current, []);
+    clearFrameReview();
   }
 
   function point(event: PointerEvent<HTMLElement>) {
@@ -867,7 +907,7 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
     setVisibleLayers((current) => ({ ...current, [key]: !current[key] }));
   }
 
-  const frameNumber = Math.max(1, Math.round(currentTime * 30));
+  const frameNumber = frameKeyForTime(currentTime);
   const modelLabel = modelReady ? "HeroDetector v3" : model?.packageAvailable ? "No weights" : "YOLOv8n";
   const deviceLabel = model?.device?.name ?? model?.device ?? "Local GPU";
   const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
@@ -1298,7 +1338,7 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
             <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!videoUrl || Boolean(busy)} onClick={() => void checkDetection()}><ScanSearch className="mr-1 inline h-3.5 w-3.5" />Check Frame</button>
             <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!videoUrl || !screenOcr?.packageAvailable || Boolean(busy)} onClick={() => void readScreenText()}><ScanSearch className="mr-1 inline h-3.5 w-3.5" />Read Text</button>
             <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!pendingCount || Boolean(busy)} onClick={acceptAllBoxes}><Check className="mr-1 inline h-3.5 w-3.5" />Accept All</button>
-            <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!boxes.length || Boolean(busy)} onClick={clearFrameReview}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />Clear</button>
+            <button className="cv-ghost-button min-h-9 px-3 text-xs" disabled={!boxes.length || Boolean(busy)} onClick={clearCurrentFrameLabels}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />Clear</button>
           </div>
         </div>
         {!ocrReady ? <button className="cv-control-button min-h-9 px-3 text-xs" disabled={Boolean(busy)} onClick={() => void installOcr()}>
@@ -1427,6 +1467,10 @@ function sanitizeReviewBox(box: ReviewBox): ReviewBox | null {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function frameKeyForTime(time: number) {
+  return Math.max(1, Math.round((Number.isFinite(time) ? time : 0) * 30));
 }
 
 function formatTime(value: number) {

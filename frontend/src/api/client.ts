@@ -107,6 +107,10 @@ export const trainDraftHeroModel = () => apiPost<any>("/api/vision/models/draft-
 export const getUltralyticsStatus = () => apiGet<any>("/api/vision/models/ultralytics/status");
 export const installUltralyticsRuntime = () => apiPost<any>("/api/vision/models/ultralytics/install");
 export const trainUltralyticsModel = (options: unknown = {}) => apiPost<any>("/api/vision/models/ultralytics/train", options);
+export const getUltralyticsTrainingStatus = () => apiGet<any>("/api/vision/models/ultralytics/training/status");
+export const startUltralyticsTraining = (options: unknown = {}) => apiPost<any>("/api/vision/models/ultralytics/training/start", options);
+export const stopUltralyticsTraining = () => apiPost<any>("/api/vision/models/ultralytics/training/stop");
+export const exportUltralyticsOnnx = () => apiPost<any>("/api/vision/models/ultralytics/training/export-onnx");
 export const getDinoIdentityStatus = () => apiGet<any>("/api/vision/models/dino/status");
 export const indexDinoReferences = () => apiPost<any>("/api/vision/models/dino/index");
 export async function matchDinoIdentity(crop: Blob, options: unknown = {}) {
@@ -167,6 +171,7 @@ export async function inferUltralyticsFrame(frame: Blob, confidence = 0.55) {
 export const getLatestLiveReasoning = () => apiGet<any>("/api/reasoning/live/latest");
 export const evaluateLiveReasoning = (state: unknown) => apiPost<any>("/api/reasoning/live/evaluate", state);
 export const getLiveReasoningScenarios = () => apiGet<any>("/api/reasoning/live/scenarios");
+export const getLatestAdvisoryCoach = () => apiGet<any>("/api/reasoning/advisory/latest");
 export const getMatchState = () => apiGet<any>("/api/match/state");
 export const getPlayerProfile = () => apiGet<any>("/api/profile");
 export const savePlayerProfile = (profile: unknown) => apiPost<any>("/api/profile", profile);

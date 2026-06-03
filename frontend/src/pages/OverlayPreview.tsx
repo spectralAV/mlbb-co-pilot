@@ -3,7 +3,7 @@ import { Eye, EyeOff, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { getCoachState } from "../api/client";
 import { EditableGrid, type EditableGridItem } from "../components/EditableGrid";
 
-type OverlaySection = "bans" | "map" | "picks" | "best" | "insights" | "build" | "tips" | "alert";
+type OverlaySection = "bans" | "map" | "picks" | "best" | "insights" | "build" | "tips" | "advisory" | "alert";
 
 type OverlaySettings = {
   scale: number;
@@ -25,6 +25,7 @@ const defaultOverlaySettings: OverlaySettings = {
     insights: true,
     build: true,
     tips: true,
+    advisory: true,
     alert: true
   }
 };
@@ -100,6 +101,8 @@ export function OverlayPreview() {
 
   const rec = data?.recommendation ?? {};
   const map = data?.map_state ?? {};
+  const instant = data?.instant_callout ?? null;
+  const advisory = data?.advisory_lane ?? null;
   const top = rec.top_picks ?? [];
   const best = top[0];
   const visible = settings.visible;
@@ -194,14 +197,37 @@ export function OverlayPreview() {
     },
     {
       id: "alert",
-      title: "Team Callout Alert",
+      title: "Instant Callout",
       x: 9,
       y: 6,
       w: 3,
       h: 4,
       minW: 2,
       minH: 3,
-      content: <OverlayCard title="Team Callout Alert" tone="text-red-300"><p className="text-[clamp(14px,1.4vw,20px)] font-black text-red-300">{(map.missing_enemy_count ?? 5) >= 3 ? "Possible Gank / Collapse" : "Map Stable"}</p><p className="mt-2 line-clamp-4 text-slate-200">{map.callouts?.[0] ?? "Waiting for minimap reader."}</p></OverlayCard>
+      content: <OverlayCard title="Instant Callout (System 1)" tone="text-cyan-300">
+        <p className="text-[10px] font-bold uppercase text-slate-400">{instant?.ruleId ?? "no-rule"} · {instant?.priority ?? "—"}</p>
+        <p className="text-[clamp(14px,1.4vw,20px)] font-black text-cyan-200">{instant?.callout ?? map.callouts?.[0] ?? "Waiting for live reasoning."}</p>
+        <p className="mt-2 line-clamp-3 text-slate-200">{instant?.recommendedAction ?? "Fast lane: deterministic rules."}</p>
+      </OverlayCard>
+    },
+    {
+      id: "advisory",
+      title: "Advisory Coach",
+      x: 9,
+      y: 9,
+      w: 3,
+      h: 3,
+      minW: 2,
+      minH: 2,
+      content: <OverlayCard title="Advisory (System 2)" tone="text-violet-300">
+        <p className="text-[10px] font-bold uppercase text-slate-400">{advisory?.advisorId ?? "stub"} · {advisory?.status ?? "pending"}</p>
+        <p className="mt-1 line-clamp-3 text-slate-100">{advisory?.reasoning || "Throttled advisory reasoning appears after meaningful state changes."}</p>
+        <ul className="mt-2 list-disc space-y-1 pl-4 text-slate-200">
+          {(advisory?.recommendations ?? []).slice(0, 3).map((slot: any) => (
+            <li key={slot.id} className="line-clamp-2"><span className="font-bold text-violet-200">{slot.title}:</span> {slot.action}</li>
+          ))}
+        </ul>
+      </OverlayCard>
     }
   ].filter((item) => visible[item.id as OverlaySection]);
 
