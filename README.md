@@ -207,10 +207,13 @@ npm run cv:wsl:train
 | --- | --- |
 | [Install Guide](docs/installing-mlbb-copilot.md) | Clean setup flow for source, desktop, CV, and local URLs |
 | [Roadmap To 1.0.0](docs/roadmap-1.0.md) | Release path from `0.5.x` through stable `1.0.0` |
+| [Next Version Roadmap](docs/roadmap-next-version.md) | Near-term `v0.5.x` milestones (training hardening, coach sidecar) |
+| [Improvement Map](docs/improvement-map.md) | Prioritized findings from architecture and code review |
 | [Known Limitations](docs/known-limitations.md) | Current alpha limitations and supported-platform notes |
+| [MLBB Match Logic](docs/mlbb-match-logic.md) | Macro/tempo rules reference for coach scenario v2 |
 | [Support Guide](docs/support.md) | What to include when opening issues |
 | [Release Checklist](docs/release-checklist.md) | Pre-release and release validation steps |
-| [Coach Reasoning Model](docs/coach-reasoning-model.md) | Notes on tactical reasoning and coaching flow |
+| [Coach Reasoning Model](docs/coach-reasoning-model.md) | Dual-lane coach (System 1 deterministic + System 2 advisory) |
 | [CV Device Adaptation](docs/cv-device-adaptation.md) | Contract for normalized ROI adaptation instead of device-specific models |
 | [CV Dataset Notes](data/cv/README.md) | Local dataset and CV runtime guidance |
 
