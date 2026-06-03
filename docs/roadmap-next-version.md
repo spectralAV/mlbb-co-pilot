@@ -94,7 +94,6 @@ flowchart TD
 
 - Per-device production YOLO models (see `docs/cv-device-adaptation.md`).
 - GPU training in GitHub Actions.
-- Gameplay automation or memory injection.
 - Moving CV inference to NPU (user direction: NPU for coach advisory only).
 
 ---
