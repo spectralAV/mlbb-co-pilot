@@ -21,7 +21,11 @@ Run quality checks before opening a pull request:
 ```powershell
 npm run build
 npm test
+npm run e2e:install
+npm run e2e
 ```
+
+Browser smoke tests (Playwright) start the dev backend and frontend automatically. To reuse servers you already have running, set `PLAYWRIGHT_SKIP_WEBSERVER=1` before `npm run e2e`.
 
 For desktop packaging checks:
 

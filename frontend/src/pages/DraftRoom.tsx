@@ -113,10 +113,24 @@ export function DraftRoom() {
     refetchInterval: effectiveRealtime ? 1500 : false
   });
 
+  function clearRecognizedDraft(reason: string) {
+    appliedRecognitionRef.current = "";
+    draft.clear();
+    setLatestRecognition(null);
+    setRealtimeAnalysis(null);
+    setRealtimeStatus(reason);
+  }
+
   useEffect(() => {
     if (!effectiveRealtime) return;
     const payload = latest.data?.data;
-    if (payload) applyRecognition(payload);
+    if (!payload?.state) {
+      if (appliedRecognitionRef.current || latestRecognition) {
+        clearRecognizedDraft("Draft state cleared for a new session");
+      }
+      return;
+    }
+    applyRecognition(payload);
   }, [latest.data, effectiveRealtime]);
 
   useEffect(() => {
@@ -126,6 +140,7 @@ export function DraftRoom() {
     socket.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data);
+        if (event.type === "draft_cleared") clearRecognizedDraft("Draft state cleared for a new session");
         if (event.type === "draft_recognized") applyRecognition(event.payload);
         if (event.type === "draft_updated") setRealtimeAnalysis(event.payload);
       } catch {}

@@ -154,6 +154,10 @@ export function queueDraftBanIconRecognition(
   vision: LiveVisionFrame,
   source: SourceMode,
 ) {
+  if (vision.screen === "lobby" || vision.screen === "scoreboard" || vision.screen === "item_shop") {
+    if (source !== "recording") accumulatedRecognition = emptyRecognition();
+    return;
+  }
   if (vision.screen !== "draft" || vision.confidence < 0.55) {
     if (source !== "recording") accumulatedRecognition = emptyRecognition();
     return;

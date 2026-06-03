@@ -35,7 +35,7 @@ Review baseline: `main` at `59b8849` (2026-06-03). Scope: managed Ultralytics tr
 | --- | --- | --- |
 | Debug ingest / Cursor agent `fetch` to local debug port | **Not found on `main` @59b8849** in `ultralyticsTrainingJob.ts` or `backend/src`. Treat as release gate: grep for `7242`, `debug-session`, `#region agent` before tagging | N/A on current main; user scope flagged prior WIP |
 | CvVideoTool shows hardcoded mAP `0.892` when model “ready” | Misleading dataset quality signal during review | `frontend/src/pages/CvVideoTool.tsx` (~MetricCard mAP) |
-| Playwright listed in root `devDependencies`, no `e2e` script or workflow | No UI regression gate for CvStudio training panel or overlay advisory section | `package.json` |
+| Playwright smoke covers core routes only (no capture/GPU/CV train lifecycle) | Draft live-capture flows still need fixture video or mocked APIs | `e2e/`, `playwright.config.ts`, `.github/workflows/ci.yml` |
 | Legacy `/api/vision/models/ultralytics/train` still public alongside job routes | Confuses API consumers; should deprecate or alias with clear job id in response | `backend/src/server.ts` |
 | `trainUltralyticsModel` wait loop blocks one Fastify worker thread | Long train blocks other long requests on single-process dev server | `ultralyticsVision.ts` (`waitForUltralyticsTrainingJob`) |
 | Dataset/class coverage not surfaced in CV Studio | Operators cannot see which YOLO classes lack train/val examples before train | `frontend/src/pages/CvStudio.tsx` (class stats partial; no gap report API) |

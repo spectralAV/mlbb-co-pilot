@@ -53,6 +53,12 @@ type RecognizedDraft = {
 
 let latestDraftRecognition: any = null;
 
+export function resetDraftRecognition() {
+  if (!latestDraftRecognition) return;
+  latestDraftRecognition = null;
+  eventBus.emit("draft_cleared");
+}
+
 export async function ingestDraftRecognition(input: RecognizedDraft) {
   const normalized = {
     phase: input.phase ?? "pick",

@@ -106,3 +106,8 @@ data/overlay-media/*
 repo-patches/
 .codex-tools/
 samples/
+
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

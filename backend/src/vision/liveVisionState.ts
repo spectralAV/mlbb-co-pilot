@@ -1,6 +1,7 @@
 import { eventBus } from "../event-bus/eventBus.js";
 import { ingestLiveReasoning } from "../engines/liveReasoningEngine.js";
-import { DETECTED_FACT_CONFIDENCE, getMatchState, updateMatchVision } from "../state/matchState.js";
+import { DETECTED_FACT_CONFIDENCE, getMatchState, resetMatchState, updateMatchVision } from "../state/matchState.js";
+import { resetDraftRecognition } from "./draftRecognition.js";
 import { updateMinimapMonitor, type MinimapMonitorSnapshot } from "./minimapMonitor.js";
 import type { ScreenTextFact } from "./screenTextRecognition.js";
 import { timerClasses, type TimerFact } from "./timerRecognition.js";
@@ -222,8 +223,22 @@ export function parseLiveVisionFrameInput(payload: unknown): VisionFrameInput {
   };
 }
 
+function resetMatchLifecycleState(_reason: string, _fromScreen: string, _toScreen: string) {
+  resetDraftRecognition();
+  resetMatchState();
+}
+
+const postMatchScreens: readonly VisionScreenState[] = ["scoreboard", "item_shop", "death_replay", "live_hud", "draft", "loading"];
+const newDraftSessionScreens: readonly VisionScreenState[] = ["scoreboard", "item_shop", "death_replay", "lobby", "unknown"];
+
 export function ingestLiveVisionFrame(input: VisionFrameInput) {
   const screen = normalizeScreen(input.screen);
+  const prevScreen = latest?.screen ?? "unknown";
+  if (screen === "lobby" && prevScreen !== "lobby" && postMatchScreens.includes(prevScreen as VisionScreenState)) {
+    resetMatchLifecycleState("returned_to_lobby", prevScreen, screen);
+  } else if (screen === "draft" && prevScreen !== "draft" && newDraftSessionScreens.includes(prevScreen as VisionScreenState)) {
+    resetMatchLifecycleState("new_draft_session", prevScreen, screen);
+  }
   const detectedEnemyEquipment = normalizeEquipmentFacts(input.signals?.enemyEquipment, "enemy");
   const detectedAllyEquipment = normalizeEquipmentFacts(input.signals?.allyEquipment, "ally");
   const detectedEnemyItems = normalizeStrings(input.signals?.enemyItems);

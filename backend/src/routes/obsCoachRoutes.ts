@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSource.js";
+import { AdbCaptureError, captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSource.js";
 import { getLatestNativeObsFrame, getNativeObsBridgeStatus, ingestNativeObsFrame, ingestNativeObsRawFrame } from "../services/nativeObsBridge.js";
 import { attachScrcpyH264Client, getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
 import { getNativeObsUltralyticsStatus, queueNativeObsUltralyticsFrame } from "../vision/ultralyticsVision.js";
@@ -162,7 +162,13 @@ export async function obsCoachRoutes(app: FastifyInstance) {
         .send(frame.buffer);
     } catch (error) {
       app.log.warn({ error }, "ADB frame capture failed");
-      reply.code(503).send({ ok: false, error: error instanceof Error ? error.message : "ADB frame capture failed." });
+      const code = error instanceof AdbCaptureError ? error.code : "capture_failed";
+      reply.code(503).send({
+        ok: false,
+        code,
+        error: error instanceof Error ? error.message : "ADB frame capture failed.",
+        status: await getAdbCaptureStatus(),
+      });
     }
   });
 
