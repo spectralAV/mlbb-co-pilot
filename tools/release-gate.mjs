@@ -2,6 +2,7 @@
  * CI-parity pre-tag gate: debug ingest grep + build + test.
  */
 import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,8 +12,6 @@ const searchRoots = [
   path.join(root, "backend", "src"),
   path.join(root, "frontend", "src"),
 ];
-
-const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
 
 function runNpmScript(script) {
   const result =
@@ -32,17 +31,45 @@ function runNpmScript(script) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-console.log("Release gate: scanning for debug ingest markers...");
-for (const dir of searchRoots) {
-  const rg = spawnSync(npxCmd, ["--yes", "rg", "-n", patterns.join("|"), dir], {
-    cwd: root,
-    encoding: "utf8",
-    shell: false,
-  });
-  if (rg.status === 0 && String(rg.stdout ?? "").trim()) {
-    console.error("Release gate failed: debug markers found:\n", rg.stdout);
-    process.exit(1);
+function* walkFiles(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      yield* walkFiles(fullPath);
+    } else if (entry.isFile()) {
+      yield fullPath;
+    }
   }
+}
+
+function scanDebugMarkers() {
+  const findings = [];
+  for (const dir of searchRoots) {
+    for (const file of walkFiles(dir)) {
+      let text = "";
+      try {
+        text = readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      const lines = text.split(/\r?\n/);
+      for (const [index, line] of lines.entries()) {
+        for (const pattern of patterns) {
+          if (line.includes(pattern)) {
+            findings.push(`${path.relative(root, file)}:${index + 1}: ${pattern}`);
+          }
+        }
+      }
+    }
+  }
+  return findings;
+}
+
+console.log("Release gate: scanning for debug ingest markers...");
+const debugFindings = scanDebugMarkers();
+if (debugFindings.length) {
+  console.error("Release gate failed: debug markers found:\n", debugFindings.join("\n"));
+  process.exit(1);
 }
 
 const grepOnly = process.argv.includes("--grep-only");
