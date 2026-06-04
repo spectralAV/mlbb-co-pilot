@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BrainCircuit, CheckCircle2, Database, Image, KeyRound, RefreshCw, SlidersHorizontal, Smartphone } from "lucide-react";
-import { apiPost, getAdbAssetStatus, getDinoIdentityStatus, getDraftHeroModelStatus, getRuntimeStatus, getScreenStateTrainingStatus, getSkinSignatureStatus, getTimerOcrStatus, getUltralyticsStatus, indexDinoReferences, installTimerOcrRuntime, installUltralyticsRuntime, syncAdbAssets, trainDraftHeroModel, trainScreenStateModel, trainUltralyticsModel } from "../../api/client";
+import { apiPost, getAdbAssetStatus, getDinoIdentityStatus, getDraftHeroModelStatus, getRuntimeStatus, getScreenStateTrainingStatus, getSkinSignatureStatus, getTimerOcrStatus, getUltralyticsStatus, indexDinoReferences, installTimerOcrRuntime, installUltralyticsRuntime, syncAdbAssets, trainDraftHeroModel, trainScreenStateModel } from "../../api/client";
+import { useUltralyticsTrainingJob } from "../../utils/useUltralyticsTrainingJob";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../../utils/cvTraining";
 
 type ExtractedTexture = { file: string; name: string; width: number; height: number };
@@ -135,7 +136,7 @@ export function DataSync() {
   const [heroTraining, setHeroTraining] = useState<DraftHeroTrainingStatus | null>(null);
   const [heroTrainingBusy, setHeroTrainingBusy] = useState(false);
   const [ultralytics, setUltralytics] = useState<UltralyticsStatus | null>(null);
-  const [ultralyticsBusy, setUltralyticsBusy] = useState<"install" | "train" | null>(null);
+  const [ultralyticsBusy, setUltralyticsBusy] = useState<"install" | null>(null);
   const [dinoIdentity, setDinoIdentity] = useState<DinoIdentityStatus | null>(null);
   const [dinoBusy, setDinoBusy] = useState(false);
   const [timerOcr, setTimerOcr] = useState<TimerOcrStatus | null>(null);
@@ -178,6 +179,11 @@ export function DataSync() {
       setScreenTrainingError(error instanceof Error ? error.message : String(error));
     }
   }
+
+  const { trainingBusy: yoloTrainingBusy, startTraining: startYoloTraining } = useUltralyticsTrainingJob({
+    onMessage: (message) => setScreenTrainingError(message),
+    onCompleted: loadScreenTrainingStatus,
+  });
 
   useEffect(() => {
     void loadOfficialStatus();
@@ -279,15 +285,15 @@ export function DataSync() {
       setScreenTrainingError(cpuTrainingDisabledMessage);
       return;
     }
-    setUltralyticsBusy("train");
+    if (yoloTrainingBusy) {
+      setScreenTrainingError("A training job is already running.");
+      return;
+    }
     setScreenTrainingError("");
     try {
-      const response = await trainUltralyticsModel({ baseModel: "yolo26n.pt", epochs: 60, imageSize: 960 });
-      setUltralytics(response.data as UltralyticsStatus);
+      await startYoloTraining({ baseModel: "yolo26n.pt", epochs: 60, imageSize: 960, batch: 4, trainingScope: "full" });
     } catch (error) {
       setScreenTrainingError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setUltralyticsBusy(null);
     }
   }
 
@@ -466,8 +472,8 @@ export function DataSync() {
             <button className="btn" disabled={Boolean(ultralyticsBusy)} onClick={() => void installYoloRuntime()}>
               {ultralyticsBusy === "install" ? "Installing" : "Install YOLO Runtime"}
             </button>
-            <button className="btn" disabled={Boolean(ultralyticsBusy) || !ultralytics?.packageAvailable || !ultralytics.training.labels || cpuTrainingBlocked(ultralytics) || trainingUnavailable(ultralytics)} onClick={() => void trainYoloModel()}>
-              {ultralyticsBusy === "train" ? "Training" : "Train YOLO Model"}
+            <button className="btn" disabled={Boolean(ultralyticsBusy) || yoloTrainingBusy || !ultralytics?.packageAvailable || !ultralytics.training.labels || cpuTrainingBlocked(ultralytics) || trainingUnavailable(ultralytics)} onClick={() => void trainYoloModel()}>
+              {yoloTrainingBusy ? "Training" : "Train YOLO Model"}
             </button>
           </div>
         </div>

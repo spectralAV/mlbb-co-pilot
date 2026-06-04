@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiGet, apiPost, apiWsUrl, getLatestDraftRecognition } from "../api/client";
+import { Link } from "react-router-dom";
+import {
+  apiGet,
+  apiPost,
+  apiWsUrl,
+  approveDraftFeedback,
+  denyDraftFeedback,
+  getDraftFeedbackStatus,
+  getLatestDraftRecognition,
+} from "../api/client";
 import { HeroPicker } from "../components/HeroPicker";
 import { useCaptureRuntimeStore } from "../runtime/captureRuntime";
 import { useDraftStore, type DraftKind, type DraftSide, type DraftSlots, type Hero } from "../stores/draftStore";
+import { rosterFingerprint } from "../vision/draftRosterFingerprint";
 
 type Target = { kind: DraftKind; side: DraftSide; slot: number };
 
@@ -25,16 +35,28 @@ function slotIds(slots?: any[]) {
   return next;
 }
 
-function recognizedKey(state: any) {
+function recognizedKey(state: any, contentOnly = false) {
   if (!state) return "";
-  return JSON.stringify({
+  const base = {
     allyPicks: slotIds(state.allyPicks),
     enemyPicks: slotIds(state.enemyPicks),
     allyBans: slotIds(state.allyBans),
     enemyBans: slotIds(state.enemyBans),
-    timestamp: state.timestamp,
-    frameId: state.frameId
-  });
+  };
+  if (contentOnly) return JSON.stringify(base);
+  return JSON.stringify({ ...base, timestamp: state.timestamp, frameId: state.frameId });
+}
+
+function rosterBodyFromStore(draft: ReturnType<typeof useDraftStore.getState>) {
+  return {
+    phase: "pick",
+    allyPicks: draft.allyPicks,
+    enemyPicks: draft.enemyPicks,
+    allyBans: draft.allyBans,
+    enemyBans: draft.enemyBans,
+    selectedLane: draft.selectedLane,
+    laneOrientation: draft.laneOrientation,
+  };
 }
 
 function sameTarget(a: Target, b: Target) {
@@ -90,11 +112,19 @@ export function DraftRoom() {
   const [latestRecognition, setLatestRecognition] = useState<any>(null);
   const [realtimeAnalysis, setRealtimeAnalysis] = useState<any>(null);
   const [realtimeStatus, setRealtimeStatus] = useState("Waiting for draft recognition");
+  const [correctionMode, setCorrectionMode] = useState(false);
+  const [draftApproved, setDraftApproved] = useState(false);
+  const [cvStudioSampleId, setCvStudioSampleId] = useState<string | null>(null);
   const appliedRecognitionRef = useRef("");
   const captureRunning = useCaptureRuntimeStore((runtime) => runtime.running);
   const captureMode = useCaptureRuntimeStore((runtime) => runtime.sourceMode);
   const captureOperational = captureRunning && captureMode !== "idle";
   const effectiveRealtime = captureOperational || realtime;
+  const feedbackQ = useQuery({
+    queryKey: ["draft-feedback-status"],
+    queryFn: getDraftFeedbackStatus,
+    refetchInterval: effectiveRealtime ? 4000 : false,
+  });
   const analyze = useMutation({
     mutationFn: () => apiPost<any>("/api/draft/analyze", {
       allyPicks: compactSlots(draft.allyPicks),
@@ -118,8 +148,62 @@ export function DraftRoom() {
     draft.clear();
     setLatestRecognition(null);
     setRealtimeAnalysis(null);
+    setCorrectionMode(false);
+    setDraftApproved(false);
+    setCvStudioSampleId(null);
     setRealtimeStatus(reason);
   }
+
+  useEffect(() => {
+    if (feedbackQ.data?.data?.approved) setDraftApproved(true);
+  }, [feedbackQ.data]);
+
+  const approveDraft = useMutation({
+    mutationFn: async () => {
+      const body = latestRecognition?.state
+        ? { useLatest: true }
+        : rosterBodyFromStore(draft);
+      return approveDraftFeedback(body);
+    },
+    onSuccess: (response) => {
+      setDraftApproved(true);
+      setCorrectionMode(false);
+      const payload = response?.data?.recognition;
+      if (payload) applyRecognition(payload, true);
+      setRealtimeStatus("Draft approved — recognition locked until roster changes");
+      void feedbackQ.refetch();
+    },
+  });
+
+  const denyDraft = useMutation({
+    mutationFn: () =>
+      denyDraftFeedback({
+        corrected: rosterBodyFromStore(draft),
+        cvFingerprint: latestRecognition?.state ? rosterFingerprint({
+          phase: latestRecognition.state.phase,
+          allyPicks: latestRecognition.state.allyPicks,
+          enemyPicks: latestRecognition.state.enemyPicks,
+          allyBans: latestRecognition.state.allyBans,
+          enemyBans: latestRecognition.state.enemyBans,
+          selectedLane: latestRecognition.state.selectedLane,
+          selfSlot: latestRecognition.state.selfSlot,
+          firstPickSide: latestRecognition.state.firstPickSide,
+          laneOrientation: latestRecognition.state.laneOrientation,
+        }) : undefined,
+      }),
+    onSuccess: (response) => {
+      setCorrectionMode(false);
+      setDraftApproved(false);
+      const annotationId = response?.data?.annotationId;
+      if (annotationId) setCvStudioSampleId(annotationId);
+      const payload = response?.data?.recognition;
+      if (payload) applyRecognition(payload, true);
+      setRealtimeStatus(annotationId
+        ? "Correction saved — refine slot boxes in CV Studio if needed"
+        : "Correction applied to draft state");
+      void feedbackQ.refetch();
+    },
+  });
 
   useEffect(() => {
     if (!effectiveRealtime) return;
@@ -141,6 +225,14 @@ export function DraftRoom() {
       try {
         const event = JSON.parse(message.data);
         if (event.type === "draft_cleared") clearRecognizedDraft("Draft state cleared for a new session");
+        if (event.type === "draft_approved") {
+          setDraftApproved(true);
+          setCorrectionMode(false);
+        }
+        if (event.type === "draft_denied") {
+          setDraftApproved(false);
+          if (event.payload?.annotationId) setCvStudioSampleId(event.payload.annotationId);
+        }
         if (event.type === "draft_recognized") applyRecognition(event.payload);
         if (event.type === "draft_updated") setRealtimeAnalysis(event.payload);
       } catch {}
@@ -150,10 +242,11 @@ export function DraftRoom() {
     return () => socket.close();
   }, [effectiveRealtime]);
 
-  function applyRecognition(payload: any) {
+  function applyRecognition(payload: any, force = false) {
     const state = payload?.state;
-    const key = recognizedKey(state);
-    if (!state || !key || appliedRecognitionRef.current === key) return;
+    const key = recognizedKey(state, draftApproved && !correctionMode);
+    if (!state || !key) return;
+    if (!force && appliedRecognitionRef.current === key) return;
     appliedRecognitionRef.current = key;
     draft.replaceSlots({
       allyPicks: slotIds(state.allyPicks),
@@ -174,6 +267,7 @@ export function DraftRoom() {
     ...compactSlots(draft.enemyBans)
   ];
   const strategyData = effectiveRealtime ? realtimeAnalysis : analyze.data?.data;
+  const hasDraftEvidence = selectedIds.length > 0;
   const recognitionConfidence = useMemo(() => {
     const slots = [
       ...(latestRecognition?.state?.allyPicks ?? []),
@@ -184,6 +278,7 @@ export function DraftRoom() {
     const values = slots.map((slot: any) => Number(slot?.confidence)).filter(Number.isFinite);
     return values.length ? values.reduce((sum: number, value: number) => sum + value, 0) / values.length : null;
   }, [latestRecognition]);
+  const showFeedbackActions = effectiveRealtime && hasDraftEvidence && (recognitionConfidence == null || recognitionConfidence >= 0.7);
 
   function slotsFor(nextTarget: Target) {
     if (nextTarget.kind === "ban") return nextTarget.side === "ally" ? draft.allyBans : draft.enemyBans;
@@ -205,8 +300,50 @@ export function DraftRoom() {
       </div>
     </div>
 
-    {effectiveRealtime && <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
-      <b>{captureOperational ? "Capture runtime active." : "Realtime recommendations enabled."}</b> {realtimeStatus}{recognitionConfidence == null ? "" : ` / confidence ${(recognitionConfidence * 100).toFixed(0)}%`}
+    {effectiveRealtime && <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100 space-y-3">
+      <div>
+        <b>{captureOperational ? "Capture runtime active." : "Realtime recommendations enabled."}</b>{" "}
+        {draftApproved && !correctionMode && <span className="ml-2 rounded-full bg-emerald-400/20 px-2 py-0.5 text-xs">Approved draft</span>}
+        {correctionMode && <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs">Correcting draft</span>}
+        <div className="mt-1">{realtimeStatus}{recognitionConfidence == null ? "" : ` / confidence ${(recognitionConfidence * 100).toFixed(0)}%`}</div>
+      </div>
+      {showFeedbackActions && !correctionMode && !draftApproved && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="min-h-10 rounded-lg bg-emerald-500/30 px-4 py-2 font-semibold text-emerald-50 active:bg-emerald-500/40"
+            disabled={approveDraft.isPending}
+            onClick={() => approveDraft.mutate()}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            className="min-h-10 rounded-lg bg-amber-500/25 px-4 py-2 font-semibold text-amber-50 active:bg-amber-500/35"
+            onClick={() => setCorrectionMode(true)}
+          >
+            Deny
+          </button>
+        </div>
+      )}
+      {correctionMode && (
+        <div className="space-y-2">
+          <p className="text-xs text-amber-100/90">Fix wrong slots below, then submit. A correction frame is saved for CV Studio.</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn" disabled={denyDraft.isPending} onClick={() => denyDraft.mutate()}>
+              Submit correction
+            </button>
+            <button type="button" className="min-h-10 rounded-lg bg-white/10 px-4 py-2" onClick={() => setCorrectionMode(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {cvStudioSampleId && (
+        <Link className="inline-block text-sm font-semibold text-cyan-200 underline" to={`/cv-studio/frame?sample=${encodeURIComponent(cvStudioSampleId)}`}>
+          Open correction in CV Studio
+        </Link>
+      )}
     </div>}
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -216,8 +353,8 @@ export function DraftRoom() {
       <SlotGroup title="Enemy Bans" kind="ban" side="enemy" ids={draft.enemyBans} heroes={heroes} target={target} onTarget={setTarget} onClear={(slot) => draft.clearSlot(slot.kind, slot.side, slot.slot)} />
     </div>
 
-    <div className={effectiveRealtime ? "grid gap-4" : "grid gap-4 xl:grid-cols-[minmax(280px,1fr)_minmax(280px,1.1fr)]"}>
-      {!effectiveRealtime && <HeroPicker heroes={heroes} selected={selectedIds} onToggle={placeHero} />}
+    <div className={effectiveRealtime && !correctionMode ? "grid gap-4" : "grid gap-4 xl:grid-cols-[minmax(280px,1fr)_minmax(280px,1.1fr)]"}>
+      {(!effectiveRealtime || correctionMode) && <HeroPicker heroes={heroes} selected={selectedIds} onToggle={placeHero} />}
       <div className="card p-4">
         <h3 className="mb-3 font-bold">Strategy Brain</h3>
         {strategyData ? <div className="space-y-3">

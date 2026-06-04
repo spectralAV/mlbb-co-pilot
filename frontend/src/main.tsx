@@ -20,6 +20,7 @@ function RouteFallback() {
 const Dashboard = lazyNamed(() => import("./pages/Dashboard"), "Dashboard");
 const Setup = lazyNamed(() => import("./pages/Setup"), "Setup");
 const DraftRoom = lazyNamed(() => import("./pages/DraftRoom"), "DraftRoom");
+const DraftSimulator = lazyNamed(() => import("./pages/DraftSimulator"), "DraftSimulator");
 const BuildLab = lazyNamed(() => import("./pages/BuildLab"), "BuildLab");
 const LiveCapture = lazyNamed(() => import("./pages/LiveCapture"), "LiveCapture");
 const Settings = lazyNamed(() => import("./pages/Settings"), "Settings");
@@ -31,6 +32,7 @@ const CvStudioDataset = lazyNamed(() => import("./pages/CvStudio"), "CvStudioDat
 const CvModelEditor = lazyNamed(() => import("./pages/CvModelEditor"), "CvModelEditor");
 const CvOcrStudio = lazyNamed(() => import("./pages/CvOcrStudio"), "CvOcrStudio");
 const CvVideoTool = lazyNamed(() => import("./pages/CvVideoTool"), "CvVideoTool");
+const VideoCvReviewPage = lazyNamed(() => import("./pages/VideoCvReview"), "VideoCvReviewPage");
 const GameAnalysis = lazyNamed(() => import("./pages/GameAnalysis"), "GameAnalysis");
 const GameOverlay = lazyNamed(() => import("./pages/GameOverlay"), "GameOverlay");
 const GamePage = lazyNamed(() => import("./pages/GamePage"), "GamePage");
@@ -62,6 +64,7 @@ const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       { path: "setup", element: <Setup /> },
       { path: "draft", element: <DraftRoom /> },
+      { path: "draft-simulator", element: <DraftSimulator /> },
       { path: "game", element: <GamePage /> },
       { path: "analysis", element: <GameAnalysis /> },
       { path: "game-analysis", element: <GameAnalysis /> },
@@ -81,6 +84,7 @@ const router = createBrowserRouter([
           { path: "editor", element: <CvModelEditor /> },
           { path: "ocr", element: <CvOcrStudio /> },
           { path: "video", element: <CvVideoTool embedded /> },
+          { path: "batch-review", element: <VideoCvReviewPage /> },
           { path: "frame", element: <CvLab embedded /> }
         ]
       },

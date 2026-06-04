@@ -29,6 +29,8 @@ __pycache__/
 
 data/cache/*.json
 data/cache/*.hevc
+data/cache/last-adb-frame.png
+data/cache/last-adb-frame.jpg
 !data/cache/.gitkeep
 data/capture/*
 !data/capture/.gitkeep
@@ -48,6 +50,7 @@ data/cv/runs/
 data/cv/runtime/
 data/cv/identity/
 data/cv/footage/
+data/cv/reviews/
 data/cv/annotations/
 data/cv/result-screens/images/train/*
 data/cv/result-screens/images/val/*

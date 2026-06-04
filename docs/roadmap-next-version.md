@@ -1,6 +1,6 @@
 # Roadmap — Next Version
 
-**Suggested label:** `v0.5.0-desktop-alpha` (package currently `0.4.1-live-cockpit` in root `package.json`).
+**Suggested label:** `v0.5.0-desktop-alpha` (package currently `0.5.0-desktop-alpha` in root `package.json`).
 
 **Theme:** Harden the CV training lifecycle and ship a trustworthy desktop alpha, while keeping coach System 1 stable and opening the System 2 sidecar seam for multi-device NPU/LLM later.
 
@@ -10,13 +10,13 @@
 
 ## Success criteria (release gate for 0.5.x)
 
-- [ ] Start/stop WSL training from CvStudio survives backend restart without orphan `ultralyticsVision.py` processes (or documented manual recovery is one command).
-- [ ] All CV training entry points use the same async job API (no hidden 24h HTTP block on `/train` from primary UIs).
-- [ ] `live-reasoning` fixtures cover every `coach-scenario-v2` rule ID (or generated contract test from `listCoachReasoningScenarios()`).
-- [ ] `npm run build && npm test` green on CI; local Windows checklist: `npm run cv:status`, `cv:wsl:status`, one full-train smoke, one DirectML infer smoke (documented in release checklist).
-- [ ] `npm run desktop:dist` uses freshly built `backend/dist` and `frontend/dist`.
-- [ ] No debug ingest URLs in `backend/src` (grep gate).
-- [ ] README links this roadmap + improvement map.
+- [x] Start/stop WSL training from CvStudio survives backend restart without orphan `ultralyticsVision.py` processes — `rehydrateUltralyticsTrainingJob` + mock WSL integration tests (maintainer WSL matrix still required before tag).
+- [x] All CV training entry points use the same async job API (`useUltralyticsTrainingJob`; legacy `/train` non-blocking).
+- [x] `live-reasoning` contract test + fixtures; ≤8 documented exemptions (target: zero in v0.5.2).
+- [x] `npm run build && npm test` green on CI; `npm run release:gate` and `cv:verify:draft-offline:ci` on Ubuntu. Local Windows: `cv:status`, `cv:wsl:status`, train/infer smoke per release checklist.
+- [ ] `npm run desktop:dist` uses freshly built `backend/dist` and `frontend/dist` — **human:** run `npm run build` before `desktop:pack` / `desktop:dist`.
+- [x] No debug ingest URLs in `backend/src` / `frontend/src` (`npm run release:gate` grep).
+- [x] README links this roadmap + improvement map.
 
 ---
 

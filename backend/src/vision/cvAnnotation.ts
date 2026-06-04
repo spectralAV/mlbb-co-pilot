@@ -70,10 +70,14 @@ export function getAnnotationClasses() {
   return ultralyticsClasses.map((name, id) => ({ id, name, group: groupForClass(name) }));
 }
 
+function compareAnnotationsByCreatedAt(left: AnnotationMetadata, right: AnnotationMetadata) {
+  return String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? ""));
+}
+
 export async function listAnnotations() {
   const manual = await listManualAnnotations();
   const active = await listActiveDatasetAnnotations(manual);
-  return [...manual, ...active].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return [...manual, ...active].sort(compareAnnotationsByCreatedAt);
 }
 
 export async function getAnnotation(id: string) {
@@ -90,11 +94,60 @@ async function listManualAnnotations() {
     if (!(await exists(directory))) continue;
     for (const name of await readdir(directory)) {
       if (!name.endsWith(".json")) continue;
-      const metadata = JSON.parse(await readFile(path.join(directory, name), "utf8")) as AnnotationMetadata;
+      const metadataPath = path.join(directory, name);
+      const raw = JSON.parse(await readFile(metadataPath, "utf8")) as Partial<AnnotationMetadata> & { id?: string };
+      const metadata = await hydrateManualMetadata(split, raw);
       annotations.push({ ...metadata, origin: "manual" });
     }
   }
-  return annotations.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return annotations.sort(compareAnnotationsByCreatedAt);
+}
+
+async function hydrateManualMetadata(
+  split: AnnotationSplit,
+  raw: Partial<AnnotationMetadata> & { id?: string; imageName?: string },
+): Promise<AnnotationMetadata> {
+  const id = String(raw.id ?? path.basename(String(raw.imageName ?? ""), path.extname(String(raw.imageName ?? ""))));
+  const imageName = String(raw.imageName ?? `${id}.jpg`);
+  const resolvedSplit: AnnotationSplit = raw.split === "val" ? "val" : split;
+  const canonicalImage = path.join(annotationRoot, "images", resolvedSplit, imageName);
+  const canonicalLabel = path.join(annotationRoot, "labels", resolvedSplit, `${id}.txt`);
+  const needsHydration = !raw.createdAt || !raw.boxes?.length || !raw.width || !raw.height;
+  let width = Number(raw.width) || 0;
+  let height = Number(raw.height) || 0;
+  let boxes = Array.isArray(raw.boxes) ? raw.boxes as AnnotationBox[] : [];
+  let createdAt = typeof raw.createdAt === "string" ? raw.createdAt : "";
+
+  if (needsHydration) {
+    if (!boxes.length) boxes = await readYoloLabelFile(canonicalLabel);
+    if ((!width || !height) && (await exists(canonicalImage))) {
+      const info = await sharp(canonicalImage).metadata();
+      width = info.width ?? width;
+      height = info.height ?? height;
+    }
+    if (!createdAt) {
+      if (await exists(canonicalImage)) {
+        createdAt = (await stat(canonicalImage)).mtime.toISOString();
+      } else if (await exists(canonicalLabel)) {
+        createdAt = (await stat(canonicalLabel)).mtime.toISOString();
+      } else {
+        createdAt = new Date(0).toISOString();
+      }
+    }
+  }
+
+  return {
+    id,
+    split: resolvedSplit,
+    source: String(raw.source ?? "cv-lab"),
+    width,
+    height,
+    boxes,
+    imageName,
+    createdAt,
+    updatedAt: raw.updatedAt,
+    origin: raw.origin,
+  };
 }
 
 async function listActiveDatasetAnnotations(manual: AnnotationMetadata[] = []) {

@@ -52,7 +52,7 @@ Game knowledge reference: `docs/mlbb-match-logic.md`.
 - `recommendations[]`: max 3 slots (`id`, `title`, `action`, `horizon`)
 - `macroNotes[]`: max 2
 
-### Future NPU / LLM Sidecar (not implemented)
+### LLM / NPU Sidecar (phase 1 — HTTP client)
 
 Set environment:
 
@@ -61,7 +61,17 @@ ADVISORY_COACH_PROVIDER=llm-sidecar
 ADVISORY_SIDECAR_URL=http://127.0.0.1:8790/advise
 ```
 
-Planned backends (separate phase): AMD Vitis AI, Intel OpenVINO, Qualcomm QNN, DML+CPU fallback. Implement `AdvisoryCoach` in a sidecar process; lane already resolves provider from config.
+Dev stub (heuristic-style JSON):
+
+```powershell
+node tools/advisory-sidecar-stub/server.mjs
+```
+
+Health: `GET /api/reasoning/advisory/sidecar-health` (proxies sidecar `/health`).
+
+Implementation: `backend/src/engines/llmSidecarAdvisoryCoach.ts` — POST `{ context, decision }`, validates `groundedRuleId`, falls back to heuristic on timeout/error.
+
+Planned backends (separate phase): AMD Vitis AI, Intel OpenVINO, Qualcomm QNN, DML+CPU fallback.
 
 ## API
 

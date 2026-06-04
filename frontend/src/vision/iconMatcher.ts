@@ -117,6 +117,29 @@ export function rankIconCandidates(signature: number[], references: HeroIconRefe
     .sort((a, b) => b.confidence - a.confidence);
 }
 
+function mergeIconRankings(...rankings: ReturnType<typeof rankIconCandidates>[]) {
+  const merged = new Map<number, ReturnType<typeof rankIconCandidates>[number]>();
+  for (const ranked of rankings) {
+    for (const entry of ranked) {
+      const previous = merged.get(entry.heroId);
+      if (!previous || entry.confidence > previous.confidence) merged.set(entry.heroId, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => right.confidence - left.confidence);
+}
+
+/** Score a crop against both facing directions; references keep normal and mirror-x variants. */
+export function rankOrientedIconCandidates(
+  signature: number[],
+  references: HeroIconReference[],
+  gridSize = 16,
+) {
+  return mergeIconRankings(
+    rankIconCandidates(signature, references),
+    rankIconCandidates(mirrorIconSignature(signature, gridSize), references),
+  );
+}
+
 export function acceptIconMatch(
   ranking: HeroIconRanking[],
   minimumConfidence = 0.76,
@@ -127,4 +150,16 @@ export function acceptIconMatch(
   if (!best || best.confidence < minimumConfidence) return null;
   if (second && best.confidence - second.confidence < minimumMargin) return null;
   return best;
+}
+
+/** Ban heads on 20:9 often score ~0.71–0.75 for the correct hero; accept when the lead is decisive. */
+export function acceptBanIconMatch(ranking: HeroIconRanking[]) {
+  const accepted = acceptIconMatch(ranking, 0.76, 0.012);
+  if (accepted) return accepted;
+  const best = ranking[0];
+  const second = ranking.find((candidate) => candidate.heroId !== best?.heroId);
+  if (!best || !second) return null;
+  const margin = best.confidence - second.confidence;
+  if (best.confidence >= 0.7 && margin >= 0.034) return best;
+  return null;
 }

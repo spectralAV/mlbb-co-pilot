@@ -24,3 +24,15 @@ test("hero recognition accepts freshly fetched nested painting assets", () => {
     "https://assets.example/nested-painting.png",
   );
 });
+
+test("hero recognition falls back when painting is an empty string", () => {
+  assert.equal(
+    officialHeroPortraitUrl({
+      id: 130,
+      painting: "",
+      portrait: "https://assets.example/obsidia-portrait.png",
+      icon: "https://assets.example/obsidia-icon.png",
+    }),
+    "https://assets.example/obsidia-portrait.png",
+  );
+});

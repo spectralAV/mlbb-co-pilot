@@ -97,6 +97,8 @@ export type LiveReasoningInput = {
     invadeWindow?: boolean;
     buffThreat?: string;
     waveState?: string;
+    enemyRetributionReady?: boolean;
+    teamHasRetribution?: boolean;
   };
 };
 
@@ -238,6 +240,14 @@ let latest: LiveReasoningOutput | null = null;
 export function ingestLiveReasoning(input: LiveReasoningInput) {
   const previous = latest;
   latest = evaluateLiveReasoning(input);
+  if (latest.ruleId !== previous?.ruleId) {
+    console.info(JSON.stringify({
+      event: "coach_rule",
+      ruleId: latest.ruleId,
+      previousRuleId: previous?.ruleId ?? null,
+      screen: input.screen,
+    }));
+  }
   eventBus.emit("reasoning_updated", latest);
   scheduleAdvisoryFromReasoning(input, latest, previous);
   return latest;
@@ -472,6 +482,32 @@ const scenarioRules: ScenarioRule[] = [
     },
   },
   {
+    id: "retribution_contest",
+    category: "objective",
+    tags: ["retribution", "objective", "jungle"],
+    description: "Warn when bursting Turtle/Lord while enemy Retribution is likely ready.",
+    evaluate: (ctx) => {
+      if (ctx.screen !== "live_hud" || ctx.role !== "jungle") return null;
+      const objective = ctx.objectiveName ?? String(ctx.signals.objectiveName ?? "");
+      if (!objective.toLowerCase().includes("turtle") && !objective.toLowerCase().includes("lord")) return null;
+      const contestNow = ctx.objectiveActive || (ctx.signals.objectiveActive === true) || (ctx.objectiveSpawnsInSec ?? 999) <= 20;
+      if (!contestNow) return null;
+      const enemySmiteThreat = ctx.signals.enemyRetributionReady === true;
+      const teamMissingSmite = ctx.signals.teamHasRetribution === false;
+      if (!enemySmiteThreat && !teamMissingSmite) return null;
+      return scenario(ctx, {
+        ruleId: "retribution_contest",
+        category: "objective",
+        scene: "map",
+        priority: "high",
+        callout: "Check enemy Retribution.",
+        reason: `${objective} is contestable but enemy smite may be up.`,
+        recommendedAction: "Confirm enemy jungler position and Retribution before committing burst.",
+        tags: ["retribution", "objective"],
+      });
+    },
+  },
+  {
     id: "objective_active_secure",
     category: "objective",
     tags: ["objective", "secure", "smite-window"],
@@ -617,6 +653,9 @@ const scenarioRules: ScenarioRule[] = [
     description: "Default objective setup when a timer is close and no stronger blocker exists.",
     evaluate: (ctx) => {
       if (!ctx.objectiveSoon) return null;
+      const needsCrash = ctx.waveState === "push" || ctx.waveState === "large" || ctx.waveState === "slow";
+      const midNotReady = ctx.lanePressure.mid !== "winning" && ctx.lanePressure.mid !== "unknown";
+      if (needsCrash || midNotReady) return null;
       const objective = ctx.objectiveName ?? "Objective";
       return scenario(ctx, {
         ruleId: "objective_setup",
@@ -843,12 +882,34 @@ const scenarioRules: ScenarioRule[] = [
     },
   },
   {
+    id: "defensive_warding_behind",
+    category: "map",
+    tags: ["behind", "vision", "defense"],
+    description: "Behind in mid/late without river vision — ward defensively before contests.",
+    evaluate: (ctx) => {
+      if (ctx.goldState !== "behind" || ctx.riverVision !== false) return null;
+      if (ctx.phase === "early" || ctx.phase === "unknown") return null;
+      if (ctx.objectiveActive) return null;
+      return scenario(ctx, {
+        ruleId: "defensive_warding_behind",
+        category: "map",
+        scene: "counter",
+        priority: "medium",
+        callout: "Behind: ward defensively.",
+        reason: "Team is behind and lacks river vision in mid or late phase.",
+        recommendedAction: "Place defensive wards on jungle entrances; avoid blind river fights.",
+        tags: ["behind", "vision"],
+      });
+    },
+  },
+  {
     id: "behind_safe_farm",
     category: "tempo",
     tags: ["behind", "farm", "defense"],
     description: "Default behind-state macro: defend waves and avoid low-information fights.",
     evaluate: (ctx) => {
       if (ctx.goldState !== "behind") return null;
+      if (ctx.riverVision === false && ctx.phase !== "early" && ctx.phase !== "unknown") return null;
       return scenario(ctx, {
         ruleId: "behind_safe_farm",
         category: "tempo",
@@ -985,27 +1046,6 @@ const scenarioRules: ScenarioRule[] = [
         recommendedAction: "Fast-clear mid or side wave, then move to pit with vision.",
         tags: ["wave", "objective"],
         evidence: ctx.waveState ? [`wave=${ctx.waveState}`] : ["midPriority=low"],
-      });
-    },
-  },
-  {
-    id: "defensive_warding_behind",
-    category: "map",
-    tags: ["behind", "vision", "defense"],
-    description: "Behind in mid/late without river vision — ward defensively before contests.",
-    evaluate: (ctx) => {
-      if (ctx.goldState !== "behind" || ctx.riverVision !== false) return null;
-      if (ctx.phase === "early" || ctx.phase === "unknown") return null;
-      if (ctx.objectiveActive) return null;
-      return scenario(ctx, {
-        ruleId: "defensive_warding_behind",
-        category: "map",
-        scene: "counter",
-        priority: "medium",
-        callout: "Behind: ward defensively.",
-        reason: "Team is behind and lacks river vision in mid or late phase.",
-        recommendedAction: "Place defensive wards on jungle entrances; avoid blind river fights.",
-        tags: ["behind", "vision"],
       });
     },
   },

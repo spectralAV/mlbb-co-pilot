@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getMatchState, resetMatchState } from "../backend/src/state/matchState.ts";
+import { __resetDraftGroundTruthForTests } from "../backend/src/services/draftGroundTruth.ts";
 import { getLatestDraftRecognition, ingestDraftRecognition, resetDraftRecognition } from "../backend/src/vision/draftRecognition.ts";
 import { ingestLiveVisionFrame } from "../backend/src/vision/liveVisionState.ts";
 
@@ -45,4 +46,26 @@ test("resetDraftRecognition clears cached draft payload", async () => {
   assert.ok(getLatestDraftRecognition());
   resetDraftRecognition();
   assert.equal(getLatestDraftRecognition(), null);
+});
+
+test("manual corrected draft ingest is trusted over provisional CV", async () => {
+  __resetDraftGroundTruthForTests();
+  resetMatchState();
+  resetDraftRecognition();
+  await ingestDraftRecognition({
+    phase: "pick",
+    allyPicks: [{ heroId: 99, heroName: "Wrong", confidence: 0.95, source: "draft-pick-portrait", slot: 1 }],
+    provisional: true,
+  });
+  await ingestDraftRecognition({
+    phase: "pick",
+    userFeedback: "corrected",
+    allyPicks: [{ heroId: 16, slot: 1, confidence: 1, source: "manual" }],
+    enemyPicks: [],
+    allyBans: [],
+    enemyBans: [],
+  });
+  const latest = getLatestDraftRecognition();
+  assert.equal(latest?.state?.allyPicks?.[0]?.heroId, 16);
+  assert.equal(latest?.state?.groundTruthTrusted, true);
 });

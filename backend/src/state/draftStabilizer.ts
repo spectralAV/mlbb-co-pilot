@@ -25,7 +25,9 @@ type SlotMemory = {
 const windowSize = 5;
 const stableVotes = 2;
 const highConfidenceLock = 0.85;
-const unlockVotes = 3;
+const pickUnlockVotes = 3;
+const banUnlockVotes = 3;
+const pickStaleMs = 2500;
 
 const memories = new Map<string, SlotMemory>();
 
@@ -36,24 +38,32 @@ export function resetDraftSlotStabilizer() {
 export function stabilizeDraftSlotGroup(group: DraftSlotGroup, facts: DraftSlotFact[], now = Date.now()) {
   const updated = new Set<string>();
   const output = new Map<string, DraftSlotFact>();
+  const retainStalePicks = group.includes("Picks");
 
   for (const fact of facts) {
     const key = slotKey(group, fact);
     updated.add(key);
-    const stable = updateSlotMemory(key, fact, now);
+    const stable = updateSlotMemory(key, fact, group, now);
     if (stable) output.set(key, stable);
   }
 
   for (const [key, memory] of memories) {
     if (!key.startsWith(`${group}:`) || updated.has(key)) continue;
+    // Missed bans stay empty; do not resurrect a hero from an older frame.
+    if (!retainStalePicks) continue;
+    // Live draft frames are snapshots: if this frame scanned picks, omit slots with no read.
+    if (facts.length > 0) continue;
+    if (now - memory.lastSeenAt > pickStaleMs) continue;
     const stable = memory.locked ?? memory.stable;
     if (stable) output.set(key, stable);
   }
 
-  return [...output.values()].sort((left, right) => Number(left.slot ?? 99) - Number(right.slot ?? 99));
+  const sorted = [...output.values()].sort((left, right) => Number(left.slot ?? 99) - Number(right.slot ?? 99));
+  return group.includes("Picks") ? reconcileDuplicateHeroSlots(group, sorted, updated) : sorted;
 }
 
-function updateSlotMemory(key: string, fact: DraftSlotFact, now: number) {
+function updateSlotMemory(key: string, fact: DraftSlotFact, group: DraftSlotGroup, now: number) {
+  const unlockVotes = group.includes("Picks") ? pickUnlockVotes : banUnlockVotes;
   const memory = memories.get(key) ?? { votes: [], locked: null, stable: null, contradictionVotes: 0, lastSeenAt: now };
   const identity = factIdentity(fact);
   memory.lastSeenAt = now;
@@ -71,6 +81,8 @@ function updateSlotMemory(key: string, fact: DraftSlotFact, now: number) {
       memory.stable = null;
       memory.contradictionVotes = 0;
       memory.votes = [{ identity, fact }];
+      memories.set(key, memory);
+      return fact;
     } else {
       memory.contradictionVotes = 0;
       if (fact.confidence >= memory.locked.confidence) memory.locked = fact;
@@ -91,6 +103,34 @@ function updateSlotMemory(key: string, fact: DraftSlotFact, now: number) {
   if (stable) memory.stable = stable;
   memories.set(key, memory);
   return stable ?? null;
+}
+
+/** Pre-lock hero swaps can leave the same hero on two slots briefly; prefer this frame's read over stale memory. */
+export function reconcileDuplicateHeroSlots(
+  group: DraftSlotGroup,
+  facts: DraftSlotFact[],
+  updatedKeys: Set<string>,
+) {
+  const winners = new Map<string, DraftSlotFact>();
+  for (const fact of facts) {
+    const identity = factIdentity(fact);
+    const key = slotKey(group, fact);
+    const previous = winners.get(identity);
+    if (!previous) {
+      winners.set(identity, fact);
+      continue;
+    }
+    const previousKey = slotKey(group, previous);
+    const previousFresh = updatedKeys.has(previousKey);
+    const nextFresh = updatedKeys.has(key);
+    if (nextFresh && !previousFresh) {
+      winners.set(identity, fact);
+      continue;
+    }
+    if (!nextFresh && previousFresh) continue;
+    if (fact.confidence > previous.confidence) winners.set(identity, fact);
+  }
+  return [...winners.values()].sort((left, right) => Number(left.slot ?? 99) - Number(right.slot ?? 99));
 }
 
 function majorityFact(votes: Vote[]) {

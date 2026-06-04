@@ -2,9 +2,20 @@ import json
 import random
 import shutil
 import subprocess
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cvDatasetAlign import (  # noqa: E402
+    build_draft_label_lines,
+    relabel_yolo_lines,
+    roboflow_profile_allowed,
+)
+from cvLayoutProfiles import PROFILE_BY_ID, select_profile  # noqa: E402
 
 
 CLASS_IDS = {
@@ -119,6 +130,72 @@ def yolo_line(class_id, rect):
     return f"{class_id} {x + width / 2:.6f} {y + height / 2:.6f} {width:.6f} {height:.6f}"
 
 
+CLASS_NAMES_BY_ID = [None] * (max(CLASS_IDS.values()) + 1)
+for class_name, class_id in CLASS_IDS.items():
+    CLASS_NAMES_BY_ID[class_id] = class_name
+
+
+def iso_timestamp():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_annotation_rect(rect):
+    x, y, width, height = rect
+    width = max(0.0, min(width, 1.0 - x))
+    height = max(0.0, min(height, 1.0 - y))
+    if width <= 0 or height <= 0:
+        return None
+    return [x, y, width, height]
+
+
+def yolo_lines_to_boxes(lines):
+    boxes = []
+    for line in lines:
+        parts = line.strip().split()
+        if len(parts) < 5:
+            continue
+        try:
+            class_id = int(parts[0])
+            center_x = float(parts[1])
+            center_y = float(parts[2])
+            box_width = float(parts[3])
+            box_height = float(parts[4])
+        except ValueError:
+            continue
+        if class_id < 0 or class_id >= len(CLASS_NAMES_BY_ID) or not CLASS_NAMES_BY_ID[class_id]:
+            continue
+        rect = normalize_annotation_rect([
+            center_x - box_width / 2,
+            center_y - box_height / 2,
+            box_width,
+            box_height,
+        ])
+        if not rect:
+            continue
+        boxes.append({
+            "classId": class_id,
+            "className": CLASS_NAMES_BY_ID[class_id],
+            "rect": rect,
+        })
+    return boxes
+
+
+def build_phone_cache_annotation_metadata(stem, output_name, split, source_path, width, height, labels, note):
+    return {
+        "id": stem,
+        "split": split,
+        "source": source_path,
+        "width": width,
+        "height": height,
+        "boxes": yolo_lines_to_boxes(labels),
+        "imageName": output_name,
+        "createdAt": iso_timestamp(),
+        "label": "draft",
+        "profile": "phone_20_9",
+        "note": note,
+    }
+
+
 def rect_pixels(image_size, rect):
     width, height = image_size
     x, y, rect_width, rect_height = rect
@@ -161,38 +238,38 @@ def split_horizontal(rect, count):
     return [[x + part_width * index, y, part_width, height] for index in range(count)]
 
 
-def draft_labels(recording_id):
-    labels = [yolo_line(CLASS_IDS["draft_screen"], [0.0, 0.0, 1.0, 1.0])]
-    labels.extend(yolo_line(CLASS_IDS["ally_pick_slot"], rect)
-                  for rect in split_vertical(DRAFT_REGIONS["ally_pick_rail"], 5))
-    labels.extend(yolo_line(CLASS_IDS["enemy_pick_slot"], rect)
-                  for rect in split_vertical(DRAFT_REGIONS["enemy_pick_rail"], 5))
-    labels.extend(yolo_line(CLASS_IDS["ally_ban_slot"], rect)
-                  for rect in split_horizontal(DRAFT_REGIONS["ally_ban_rail"], BAN_SLOTS[recording_id]))
-    labels.extend(yolo_line(CLASS_IDS["enemy_ban_slot"], rect)
-                  for rect in split_horizontal(DRAFT_REGIONS["enemy_ban_rail"], BAN_SLOTS[recording_id]))
-    return labels
+def draft_labels(recording_id, width=2856, height=1280):
+    profile = select_profile(width, height)
+    return build_draft_label_lines(recording_id, profile, finalized=False)
 
 
 def rect_for_spell_slot(slot):
     return [SPELL_SLOT_BASE[0], SPELL_SLOT_BASE[1] + ROW_STEP * (slot - 1), SPELL_SLOT_BASE[2], SPELL_SLOT_BASE[3]]
 
 
-def finalized_draft_labels(recording_id):
-    labels = draft_labels(recording_id)
-    labels.append(yolo_line(CLASS_IDS["lane_marker"], SELF_LANE_RECTS[recording_id]))
-    labels.extend(yolo_line(CLASS_IDS["battle_spell_marker"], rect_for_spell_slot(slot)) for slot in range(1, 6))
-    return labels
+def finalized_draft_labels(recording_id, width=2856, height=1280):
+    profile = select_profile(width, height)
+    return build_draft_label_lines(recording_id, profile, finalized=True)
 
 
-def labels_for_sample(recording_id, label, finalized=False):
+def labels_for_sample(recording_id, label, finalized=False, width=2856, height=1280):
     if label == "draft":
-        return finalized_draft_labels(recording_id) if finalized else draft_labels(recording_id)
+        return finalized_draft_labels(recording_id, width, height) if finalized else draft_labels(recording_id, width, height)
     if label == "live_hud":
-        return [yolo_line(CLASS_IDS["minimap_panel"], LIVE_MINIMAP_REGION)]
+        profile = select_profile(width, height)
+        return [yolo_line(CLASS_IDS["minimap_panel"], profile["minimap_panel"])]
     if label in ("equipment_scoreboard", "attributes_scoreboard"):
-        return [yolo_line(CLASS_IDS[label], SCOREBOARD_REGION)]
+        profile = select_profile(width, height)
+        return [yolo_line(CLASS_IDS[label], profile["scoreboard_region"])]
     return []
+
+
+def frame_size_for_source(source: Path):
+    try:
+        with Image.open(source) as image:
+            return image.size
+    except Exception:
+        return 2856, 1280
 
 
 def locate_ffmpeg(project_root):
@@ -208,7 +285,8 @@ def locate_ffmpeg(project_root):
 def write_sample(project_root, cv_root, source, split, recording_id, label, target_name, finalized=False, origin="recorded"):
     image_target = cv_root / "images" / split / target_name
     label_target = cv_root / "labels" / split / f"{Path(target_name).stem}.txt"
-    labels = labels_for_sample(recording_id, label, finalized)
+    width, height = frame_size_for_source(source)
+    labels = labels_for_sample(recording_id, label, finalized, width, height)
     shutil.copy2(source, image_target)
     label_target.write_text("\n".join(labels) + ("\n" if labels else ""), encoding="ascii")
     return {
@@ -376,6 +454,38 @@ def build_synthetic_minimap_sample(rng, background_sprite, sprite_sets, variant_
     return image, labels
 
 
+def add_resolution_synthetic_draft_samples(project_root, cv_root, prepared):
+    """Stretch reference 20:9 draft keyframes onto 16:9 canvases with profile-correct slot labels."""
+    synthetic_dir = cv_root / "runtime" / "resolution-synthetic-draft"
+    synthetic_dir.mkdir(parents=True, exist_ok=True)
+    target_profile = PROFILE_BY_ID["video_16_9"]
+    target_size = (target_profile["width"], target_profile["height"])
+    sources = {key: project_root / path for key, path in FINALIZED_DRAFT_FRAMES.items()}
+    for recording_id, source in sources.items():
+        if not source.exists():
+            continue
+        base = Image.open(source).convert("RGB").resize(target_size, Image.Resampling.LANCZOS)
+        for index in range(8):
+            output_name = f"{recording_id}-draft-synthetic-16x9-{index:02d}.jpg"
+            output = synthetic_dir / output_name
+            image = base
+            if index:
+                factor = 0.92 + index * 0.02
+                image = ImageEnhance.Brightness(image).enhance(factor)
+            image.save(output, quality=94)
+            labels = build_draft_label_lines(recording_id, target_profile, finalized=True)
+            prepared["train"].append(write_explicit_sample(
+                project_root,
+                cv_root,
+                output,
+                "train",
+                output_name,
+                labels,
+                "draft",
+                "resolution-synthetic-16x9",
+            ))
+
+
 def add_asset_augmented_draft_samples(project_root, cv_root, prepared):
     rng = random.Random(20260526)
     asset_root = project_root / "data" / "adb-assets" / "textures"
@@ -465,6 +575,65 @@ def add_scoreboard_samples(project_root, cv_root, prepared):
                 origin="recorded-color-augmentation"))
 
 
+def add_phone_draft_capture_samples(project_root, cv_root, prepared, max_samples=50):
+    """Seed phone_20_9 draft labels from cached ADB frames (data/cache) for CV Lab refinement."""
+    cache_dir = project_root / "data" / "cache"
+    if not cache_dir.exists():
+        return 0
+    staging = cv_root / "runtime" / "phone-draft-captures"
+    staging.mkdir(parents=True, exist_ok=True)
+    added = 0
+    for source in sorted(cache_dir.iterdir()):
+        if added >= max_samples:
+            break
+        if not source.is_file() or source.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        width, height = frame_size_for_source(source)
+        profile = select_profile(width, height)
+        if profile["id"] != "phone_20_9":
+            continue
+        aspect = width / max(height, 1)
+        if abs(aspect - (20 / 9)) > 0.08:
+            continue
+        recording_id = "mythic"
+        output_name = f"phone-cache-{source.stem}-{added:02d}{source.suffix.lower()}"
+        labels = draft_labels(recording_id, width, height)
+        prepared["train"].append(write_explicit_sample(
+            project_root,
+            cv_root,
+            source,
+            "train",
+            output_name,
+            labels,
+            "draft",
+            "phone-adb-cache",
+        ))
+        annotation_image = cv_root / "annotations" / "images" / "train" / output_name
+        annotation_label = cv_root / "annotations" / "labels" / "train" / f"{Path(output_name).stem}.txt"
+        annotation_meta = cv_root / "annotations" / "metadata" / "train" / f"{Path(output_name).stem}.json"
+        annotation_image.parent.mkdir(parents=True, exist_ok=True)
+        annotation_label.parent.mkdir(parents=True, exist_ok=True)
+        annotation_meta.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cv_root / "images" / "train" / output_name, annotation_image)
+        shutil.copy2(cv_root / "labels" / "train" / f"{Path(output_name).stem}.txt", annotation_label)
+        stem = Path(output_name).stem
+        annotation_meta.write_text(json.dumps(
+            build_phone_cache_annotation_metadata(
+                stem,
+                output_name,
+                "train",
+                str(source.relative_to(project_root).as_posix()),
+                width,
+                height,
+                labels,
+                "Auto rail labels from phone_20_9; refine in CV Lab if slots drift.",
+            ),
+            indent=2,
+        ) + "\n", encoding="utf-8")
+        added += 1
+    return added
+
+
 def add_user_annotations(project_root, cv_root, prepared):
     metadata_root = cv_root / "annotations" / "metadata"
     if not metadata_root.exists():
@@ -508,6 +677,9 @@ def add_roboflow_training_samples(project_root, cv_root, prepared):
                 manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
             except Exception:
                 manifest = {}
+        profile = manifest.get("profile")
+        if not roboflow_profile_allowed(profile):
+            continue
         dataset_entry = {
             "name": dataset_root.name,
             "profile": manifest.get("profile"),
@@ -526,6 +698,12 @@ def add_roboflow_training_samples(project_root, cv_root, prepared):
                 if not label.exists():
                     continue
                 labels = [line.strip() for line in label.read_text(encoding="ascii").splitlines() if line.strip()]
+                width, height = frame_size_for_source(image)
+                recording_id = "mythic" if "mythic" in image.name else "legend" if "legend" in image.name else "mythic"
+                if profile in (None, "draft-slots", "local-game-capture-ultrawide-v2-weak-labels") or any(
+                    line.split()[0] in {"1", "4", "5", "6", "7"} for line in labels if line.split()
+                ):
+                    labels = relabel_yolo_lines(labels, width, height, recording_id)
                 target_name = f"roboflow-{safe_training_name(dataset_root.name)}-{image.name}"
                 prepared[split].append(write_explicit_sample(
                     project_root,
@@ -613,15 +791,22 @@ def main():
                     project_root, cv_root, extracted, split, recording_id, "draft", name,
                     finalized=True, origin="recorded-finalized-draft"))
 
+    add_resolution_synthetic_draft_samples(project_root, cv_root, prepared)
     add_asset_augmented_draft_samples(project_root, cv_root, prepared)
     add_asset_synthetic_minimap_samples(project_root, cv_root, prepared)
     add_scoreboard_samples(project_root, cv_root, prepared)
+    phone_captures = add_phone_draft_capture_samples(project_root, cv_root, prepared)
     add_user_annotations(project_root, cv_root, prepared)
     add_roboflow_training_samples(project_root, cv_root, prepared)
 
     output = cv_root / "runtime" / "bootstrap-dataset-manifest.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(prepared, indent=2) + "\n", encoding="ascii")
+
+    analysis_script = project_root / "backend" / "tools" / "analyzeCvDataset.py"
+    if analysis_script.exists():
+        subprocess.run([sys.executable, str(analysis_script)], check=False, cwd=str(project_root))
+
     print(json.dumps({
         "ok": True,
         "trainImages": len(prepared["train"]),
@@ -635,6 +820,7 @@ def main():
             "minimapSprites": sum(len(paths) for paths in MINIMAP_SPRITE_FILES.values()) + 1,
         },
         "roboflowEnhancements": prepared["roboflowEnhancements"],
+        "phoneDraftCaptures": phone_captures,
         "manifest": str(output),
     }))
 

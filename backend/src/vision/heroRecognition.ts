@@ -116,8 +116,16 @@ function toHeroReference(hero: any, portraitUrl?: string, officialIconUrl?: stri
   };
 }
 
+function firstNonEmptyUrl(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 export function officialHeroPortraitUrl(hero: any) {
-  return String(hero?.painting ?? hero?.data?.painting ?? hero?.portrait ?? hero?.icon ?? "").trim();
+  return firstNonEmptyUrl(hero?.painting, hero?.data?.painting, hero?.portrait, hero?.data?.portrait);
 }
 
 function officialHeroIconUrl(hero: any) {

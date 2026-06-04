@@ -30,15 +30,17 @@ The model should recognize stable visual facts and UI surfaces. Device differenc
 2. Select the closest normalized aspect-ratio profile.
 3. Detect or validate major UI anchors.
 4. Adapt ROIs from anchors and saved calibration.
-5. Run surface-specific detectors and matchers inside those ROIs.
+5. Run surface-specific detectors and matchers inside those ROIs. Draft ban/pick crops prefer per-slot YOLO boxes (`ally_ban_slot`, `ally_pick_slot`, etc.) when the Ultralytics model is available; missing slots fall back to calibrated or default normalized rails.
 6. Gate facts by owner, surface, confidence, temporal stability, and current screen state.
 7. Merge accepted facts with manual overrides and existing match state.
+
+Runtime Ultralytics inference is screen-gated: draft screens request draft anchor classes only, `live_hud` requests minimap/HUD classes, and `loading`/`lobby` skip YOLO entirely. Between YOLO ticks, cached detections still drive draft slot geometry and minimap panel crops; color minimap blobs merge with cached YOLO hero markers.
 
 Training data should include multiple aspect ratios and UI states so the recognizers learn robust surfaces. Runtime adaptation still happens through normalized coordinates, anchors, calibration, and confidence gates rather than per-device model branching.
 
 ## Live Capture Flow
 
-1. `LiveCapture` receives a frame from ADB, scrcpy, OBS, NDI, a capture card, a browser window, or a recording.
+1. `LiveCapture` receives a frame from scrcpy (preferred for Android live CV), ADB PNG stills (diagnostics/fallback), OBS, NDI, a capture card, a browser window, or a recording.
 2. The runtime records source width, height, and aspect ratio.
 3. The runtime selects the likely layout profile, such as `20:9 phone`, `19.5:9 phone`, `16:9 video`, tablet, or custom.
 4. The runtime validates minimap, timer/HUD, draft rail, and scoreboard anchors from calibrated normalized ROIs.

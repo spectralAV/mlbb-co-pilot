@@ -1,19 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Boxes, Database, Film, Pencil, RefreshCw, ScanSearch, ScanText, Trash2, Wand2 } from "lucide-react";
+import { Boxes, Clapperboard, Database, Film, Pencil, RefreshCw, ScanSearch, ScanText, Trash2, Wand2 } from "lucide-react";
 import {
   apiUrl,
   deleteCvAnnotation,
   exportUltralyticsOnnx,
   getCvAnnotationClasses,
   getCvAnnotations,
+  getCvDatasetQuality,
   getUltralyticsStatus,
-  getUltralyticsTrainingStatus,
-  startUltralyticsTraining,
-  stopUltralyticsTraining,
   syncCvAnnotations,
 } from "../api/client";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../utils/cvTraining";
+import { useUltralyticsTrainingJob } from "../utils/useUltralyticsTrainingJob";
 
 type LabelClass = { id: number; name: string; group: string };
 type AnnotationBox = { classId: number; rect: [number, number, number, number]; heroId?: number; heroName?: string; transcript?: string };
@@ -55,6 +54,7 @@ export function CvStudio() {
       <StudioTab to="/cv-studio/editor" icon={<Boxes size={16} />}><span className="cv-studio-label-full">Model Editor</span><span className="cv-studio-label-short">Editor</span></StudioTab>
       <StudioTab to="/cv-studio/ocr" icon={<ScanText size={16} />}><span className="cv-studio-label-full">HUD OCR</span><span className="cv-studio-label-short">OCR</span></StudioTab>
       <StudioTab to="/cv-studio/video" icon={<Film size={16} />}><span className="cv-studio-label-full">Video Review</span><span className="cv-studio-label-short">Video</span></StudioTab>
+      <StudioTab to="/cv-studio/batch-review" icon={<Clapperboard size={16} />}><span className="cv-studio-label-full">Batch Review</span><span className="cv-studio-label-short">Batch</span></StudioTab>
       <StudioTab to="/cv-studio/frame" icon={<ScanSearch size={16} />}><span className="cv-studio-label-full">Frame Annotator</span><span className="cv-studio-label-short">Frame</span></StudioTab>
     </nav>
 
@@ -70,26 +70,50 @@ export function CvStudioDataset() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("Dataset editor is ready.");
   const [busy, setBusy] = useState("");
-  const [trainingJob, setTrainingJob] = useState<any>(null);
+  const [datasetQuality, setDatasetQuality] = useState<any>(null);
 
-  const trainingActive = Boolean(
-    trainingJob &&
-      !["idle", "completed", "failed", "killed"].includes(String(trainingJob.state ?? "")),
-  );
-  const trainingBusy = trainingActive || busy === "quick-train" || busy === "full-train";
+  async function refresh() {
+    const [classResult, annotationResult, modelResult, qualityResult] = await Promise.allSettled([
+      getCvAnnotationClasses(),
+      getCvAnnotations(),
+      getUltralyticsStatus(),
+      getCvDatasetQuality(),
+    ]);
+    if (classResult.status === "fulfilled") setClasses(classResult.value.data ?? []);
+    if (annotationResult.status === "fulfilled") setSamples(annotationResult.value.data ?? []);
+    if (modelResult.status === "fulfilled") setModel(modelResult.value.data ?? modelResult.value);
+    if (qualityResult.status === "fulfilled") setDatasetQuality(qualityResult.value.data ?? qualityResult.value);
+    if ([classResult, annotationResult, modelResult].every((result) => result.status === "rejected")) {
+      setMessage("CV dataset status is unavailable.");
+    }
+  }
+
+  const {
+    trainingJob,
+    trainingActive,
+    trainingBusy: hookTrainingBusy,
+    startTraining,
+    stopTraining: requestStopTraining,
+  } = useUltralyticsTrainingJob({
+    onMessage: setMessage,
+    onCompleted: async () => {
+      setBusy("");
+      await refresh();
+    },
+    busyKeys: ["quick-train", "full-train", "stop-train"],
+  });
+
+  const trainingBusy = hookTrainingBusy || busy === "quick-train" || busy === "full-train";
 
   useEffect(() => {
     void refresh();
-    void refreshTrainingJob();
   }, []);
 
   useEffect(() => {
-    if (!trainingActive) return;
-    const timer = window.setInterval(() => {
-      void refreshTrainingJob();
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [trainingActive, trainingJob?.id, trainingJob?.state]);
+    const state = trainingJob?.state;
+    if (!state || state === "starting" || state === "training" || state === "validating" || state === "exporting" || state === "mirroring" || state === "cleanup") return;
+    if (busy === "quick-train" || busy === "full-train") setBusy("");
+  }, [trainingJob?.state, busy]);
 
   const classMap = useMemo(() => new Map(classes.map((item) => [item.id, item])), [classes]);
   const sampleStats = useMemo(() => {
@@ -128,49 +152,6 @@ export function CvStudioDataset() {
 
   const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
 
-  async function refresh() {
-    const [classResult, annotationResult, modelResult] = await Promise.allSettled([
-      getCvAnnotationClasses(),
-      getCvAnnotations(),
-      getUltralyticsStatus(),
-    ]);
-    if (classResult.status === "fulfilled") setClasses(classResult.value.data ?? []);
-    if (annotationResult.status === "fulfilled") setSamples(annotationResult.value.data ?? []);
-    if (modelResult.status === "fulfilled") setModel(modelResult.value.data ?? modelResult.value);
-    if ([classResult, annotationResult, modelResult].every((result) => result.status === "rejected")) {
-      setMessage("CV dataset status is unavailable.");
-    }
-  }
-
-  async function refreshTrainingJob() {
-    try {
-      const response = await getUltralyticsTrainingStatus();
-      const job = response.data ?? response;
-      setTrainingJob(job);
-      if (job.state === "completed") {
-        setBusy("");
-        setMessage("Training completed. Export ONNX when ready for DirectML inference.");
-        await refresh();
-      } else if (job.state === "failed" || job.state === "killed") {
-        setBusy("");
-        setMessage(job.error ?? `Training ${job.state}.`);
-      } else if (job.state === "stuck") {
-        setBusy("");
-        setMessage(job.stuckReason ?? "Training is stuck with artifacts present. Stop the process to release the GPU.");
-      } else if (trainingJobIsActive(job.state)) {
-        const minutes = Math.floor(Number(job.elapsedMs ?? 0) / 60000);
-        const seconds = Math.floor((Number(job.elapsedMs ?? 0) % 60000) / 1000);
-        setMessage(`Training ${job.state} (${minutes}:${String(seconds).padStart(2, "0")}) · PID ${job.pid ?? "-"} · scope ${job.trainingScope ?? "-"}`);
-      }
-    } catch {
-      // ignore polling errors
-    }
-  }
-
-  function trainingJobIsActive(state: string) {
-    return ["starting", "training", "validating", "exporting", "mirroring", "cleanup"].includes(state);
-  }
-
   async function syncDataset() {
     setBusy("sync");
     try {
@@ -198,11 +179,9 @@ export function CvStudioDataset() {
     setMessage(quick ? "Starting quick fine-tune for recent manual corrections." : "Starting full training from the active dataset.");
     try {
       await syncCvAnnotations();
-      const response = await startUltralyticsTraining(quick
+      await startTraining(quick
         ? { trainingScope: "correction", epochs: 8, imageSize: 640, batch: 4, recentLimit: 32, repeatManual: 8 }
         : { trainingScope: "full", epochs: 30, imageSize: 960, batch: 4 });
-      setTrainingJob(response.data ?? response);
-      await refreshTrainingJob();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Training failed to start.");
       setBusy("");
@@ -212,14 +191,11 @@ export function CvStudioDataset() {
   async function stopTraining() {
     setBusy("stop-train");
     try {
-      const response = await stopUltralyticsTraining();
-      setTrainingJob(response.data ?? response);
-      setMessage("Training stop requested. GPU workers should exit shortly.");
+      await requestStopTraining();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not stop training.");
     } finally {
       setBusy("");
-      await refreshTrainingJob();
     }
   }
 
@@ -273,7 +249,12 @@ export function CvStudioDataset() {
     </section>
 
     {trainingJob && trainingJob.state !== "idle" ? (
-      <section className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+      <section className={`rounded-xl border p-4 text-sm ${trainingJob.state === "stuck" ? "border-amber-400/30 bg-amber-500/10 text-amber-50" : "border-white/10 bg-white/[0.03] text-slate-300"}`}>
+        {trainingJob.state === "stuck" ? (
+          <p className="mb-3 text-xs leading-relaxed text-amber-100/90">
+            Training is stuck. Stop the job to release WSL GPU, then start a new run after reviewing dataset quality.
+          </p>
+        ) : null}
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           <div><span className="text-slate-500">State</span><div className="font-bold text-white">{trainingJob.state}</div></div>
           <div><span className="text-slate-500">PID</span><div className="font-bold text-white">{trainingJob.pid ?? "-"}</div></div>
@@ -297,6 +278,11 @@ export function CvStudioDataset() {
       <StudioMetric label="Inference" value={model?.inferenceBackend?.selected === "directml" ? "DirectML ONNX" : model?.device?.type?.toUpperCase() ?? "Unknown"} detail={model?.onnxModelAvailable ? "ONNX export available" : "ONNX export missing"} />
       <StudioMetric label="Model" value={model?.modelAvailable ? "Weights loaded" : "No weights"} detail={model?.weights?.split(/[\\/]/).pop() ?? "-"} />
       <StudioMetric label="Classes" value={String(classes.length)} detail="Ultralytics label set" />
+      <StudioMetric
+        label="Draft slot IoU"
+        value={typeof datasetQuality?.draftMeanSlotIoU === "number" ? datasetQuality.draftMeanSlotIoU.toFixed(3) : "—"}
+        detail={datasetQuality?.hints?.[0] ?? (datasetQuality?.gaps?.missingValClasses?.length ? `${datasetQuality.gaps.missingValClasses.length} classes lack val` : "Run cv:analyze for dataset report")}
+      />
     </section>
 
     <section className="grid gap-4 xl:grid-cols-[minmax(520px,1fr)_420px]">

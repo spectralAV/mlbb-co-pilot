@@ -2,7 +2,9 @@
 
 Review baseline: `main` at `59b8849` (2026-06-03). Scope: managed Ultralytics training jobs, WSL kill (`bash -c`), event-loop-safe training status, coach-scenario v2 + advisory lane, MLBB match logic doc, CvVideoTool per-frame labels, CI/docs.
 
-**Verification note:** Findings below are from **code and doc reads** on the current tree. `npm test` / `npm run build` / WSL training / DirectML infer were **not executed** in this pass (per review constraints). CI on GitHub is documented as Linux build+test only.
+**Verification note:** Several items below were addressed in `v0.5.0-desktop-alpha` work (see git history). Run `npm run release:gate` before tagging. CI on GitHub remains Linux build+test only.
+
+**Recently addressed (0.5.x):** training rehydrate on boot, async job UX across CV pages, coach contract + expanded fixtures, dataset quality API, sidecar advisory HTTP client, CV Lab metadata schema, video review path constraints, `npm run release:gate`.
 
 ---
 
@@ -10,9 +12,9 @@ Review baseline: `main` at `59b8849` (2026-06-03). Scope: managed Ultralytics tr
 
 | Finding | Impact | References |
 | --- | --- | --- |
-| Training job state is in-process only; persisted `data/cv/runtime/training-job.json` is write-only for UI/history | Backend restart during WSL ROCm train leaves orphan GPU processes and a misleading `idle` API while weights may still be writing | `backend/src/vision/ultralyticsTrainingJob.ts` (`currentJob`, `persistJobSnapshot`, no boot-time reload) |
-| No automated integration test for start → poll → stop → stuck recovery on real WSL | Regressions in `buildWslKillCommand`, `probeWslProcesses`, and stuck detection are unit-tested only; production kill/orphan bugs are easy to reintroduce | `tests/ultralyticsTrainingJob.test.ts`, `data/cv/README.md` (CI scope) |
-| Coach rules: ~34 scenario IDs in engine, ~10 fixture cases | Silent logic drift in `liveReasoningEngine.ts` ships without CI catching wrong `ruleId` / priority ordering | `backend/src/engines/liveReasoningEngine.ts`, `tests/fixtures/live-reasoning.json`, `tests/liveReasoningRules.test.ts` |
+| ~~Training job not rehydrated on boot~~ | **Mitigated:** `rehydrateUltralyticsTrainingJob()` on server start; mock WSL integration tests in `tests/ultralyticsTrainingJob.integration.test.ts` | `backend/src/server.ts`, `ultralyticsTrainingJob.ts` |
+| WSL train kill/orphan on real hardware | Still requires maintainer matrix on Windows+WSL; CI uses mocked probe/kill only | `data/cv/README.md` |
+| ~~Coach fixture gap~~ | **Mitigated:** `coachScenarioContract.test.ts` + expanded `live-reasoning.json` (≤8 documented exemptions) | `tests/coachScenarioContract.test.ts` |
 
 ---
 
@@ -20,8 +22,8 @@ Review baseline: `main` at `59b8849` (2026-06-03). Scope: managed Ultralytics tr
 
 | Finding | Impact | References |
 | --- | --- | --- |
-| Dual training UX: blocking `/train` vs async job APIs | CvStudio uses `training/start` + status polling; CvVideoTool, CvLab, CvModelEditor, Settings still call `trainUltralyticsModel` → `waitForUltralyticsTrainingJob` (blocks HTTP up to 24h). Timeouts, duplicate starts, and poor cancel UX | `frontend/src/pages/CvStudio.tsx`, `CvVideoTool.tsx`, `CvLab.tsx`, `CvModelEditor.tsx`, `Settings/DataSync.tsx`, `backend/src/vision/ultralyticsVision.ts` |
-| `ADVISORY_COACH_PROVIDER=llm-sidecar` still resolves to heuristic stub | Documented sidecar seam exists; no HTTP client, no multi-vendor NPU routing | `backend/src/engines/advisoryCoachLane.ts` (`resolveAdvisor`), `docs/coach-reasoning-model.md` |
+| ~~Dual training UX~~ | **Mitigated:** shared `useUltralyticsTrainingJob` on CV pages; legacy `/train` returns immediately with deprecation flag | `frontend/src/utils/useUltralyticsTrainingJob.ts`, `backend/src/server.ts` |
+| Sidecar NPU multi-vendor routing | HTTP sidecar client exists; production NPU backends still phase 2 | `backend/src/engines/llmSidecarAdvisoryCoach.ts` |
 | Electron release ships stale `backend/dist` if build skipped | `extraResources` copies prebuilt `backend/dist`; desktop can run old training/coach code after source edits | `package.json` (`build.extraResources`), `docs/release-checklist.md` |
 | Local API has no auth; binds `127.0.0.1` by default | Acceptable for solo dev; risky if user exposes port via proxy/tunnel or runs on shared LAN | `backend/src/config.ts`, `backend/src/server.ts` (CORS allowlist) |
 | GMS / Roboflow secrets via env and request body | `MLBB_GMS_AUTHORIZATION`, `ROBOFLOW_API_KEY` can leak in logs, issue attachments, or accidental commits | `backend/src/routes/syncRoutes.ts`, `backend/src/scripts/syncOfficial.ts`, `data/cv/README.md` |
@@ -34,11 +36,11 @@ Review baseline: `main` at `59b8849` (2026-06-03). Scope: managed Ultralytics tr
 | Finding | Impact | References |
 | --- | --- | --- |
 | Debug ingest / Cursor agent `fetch` to local debug port | **Not found on `main` @59b8849** in `ultralyticsTrainingJob.ts` or `backend/src`. Treat as release gate: grep for `7242`, `debug-session`, `#region agent` before tagging | N/A on current main; user scope flagged prior WIP |
-| CvVideoTool shows hardcoded mAP `0.892` when model “ready” | Misleading dataset quality signal during review | `frontend/src/pages/CvVideoTool.tsx` (~MetricCard mAP) |
+| ~~CvVideoTool fake mAP~~ | **Mitigated:** `GET /api/cv/dataset/quality` wired in CvStudio/CvVideoTool | `backend/src/services/cvDatasetQuality.ts` |
 | Playwright smoke covers core routes only (no capture/GPU/CV train lifecycle) | Draft live-capture flows still need fixture video or mocked APIs | `e2e/`, `playwright.config.ts`, `.github/workflows/ci.yml` |
 | Legacy `/api/vision/models/ultralytics/train` still public alongside job routes | Confuses API consumers; should deprecate or alias with clear job id in response | `backend/src/server.ts` |
 | `trainUltralyticsModel` wait loop blocks one Fastify worker thread | Long train blocks other long requests on single-process dev server | `ultralyticsVision.ts` (`waitForUltralyticsTrainingJob`) |
-| Dataset/class coverage not surfaced in CV Studio | Operators cannot see which YOLO classes lack train/val examples before train | `frontend/src/pages/CvStudio.tsx` (class stats partial; no gap report API) |
+| Dataset gaps only partially surfaced | Setup + CvStudio show quality hints; deeper class-gap UX still optional | `setupRoutes.ts`, `CvStudio.tsx` |
 | OCR and multi-pipeline CV complexity | Operators may enable OCR before detection gates are stable; increases false match-state | `docs/known-limitations.md`, `screenTextRecognition.ts` |
 | `data/cv/runtime/` gitignored | Correct for artifacts; training job file not in repo — document recovery/orphan cleanup | `.gitignore`, `ultralyticsTrainingJob.ts` |
 | Roadmap docs split: `roadmap-1.0.md` vs new next-version doc | README still points only at 1.0 roadmap; easy to miss near-term milestone | `README.md`, `docs/roadmap-1.0.md` |

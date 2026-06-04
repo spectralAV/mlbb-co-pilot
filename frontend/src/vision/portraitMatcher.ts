@@ -120,6 +120,24 @@ export function rankDraftBannerCandidates(signature: number[], references: HeroP
     .sort((left, right) => right.confidence - left.confidence);
 }
 
+function mergePortraitRankings(...rankings: ReturnType<typeof rankDraftBannerCandidates>[]) {
+  const merged = new Map<number, ReturnType<typeof rankDraftBannerCandidates>[number]>();
+  for (const ranked of rankings) {
+    for (const entry of ranked) {
+      const previous = merged.get(entry.heroId);
+      if (!previous || entry.confidence > previous.confidence) merged.set(entry.heroId, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => right.confidence - left.confidence);
+}
+
+export function rankOrientedDraftBannerCandidates(signature: number[], references: HeroPortraitReference[]) {
+  return mergePortraitRankings(
+    rankDraftBannerCandidates(signature, references),
+    rankDraftBannerCandidates(mirrorDraftBannerSignature(signature), references),
+  );
+}
+
 function similarity(a: number[], b: number[]) {
   if (!a.length || a.length !== b.length) return 0;
   let squaredError = 0;

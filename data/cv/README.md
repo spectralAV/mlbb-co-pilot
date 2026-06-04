@@ -4,6 +4,8 @@ This dataset is for local Ultralytics object detection. It locates visual facts;
 
 Production CV is device-adaptive, not device-specific. The model should learn stable MLBB UI surfaces, while runtime support for different phones, emulators, capture cards, and aspect ratios comes from normalized ROIs, dynamic UI anchors, aspect-ratio layout profiles, calibration fallback, confidence gates, and manual override. See `../../docs/cv-device-adaptation.md`.
 
+For live phone capture on Android, prefer **Backend scrcpy** (H.264 stream) over **ADB PNG** polling (`adb screencap`); see `../../docs/external-repo-notes.md`.
+
 ## Reference Dev Hardware And CI Scope
 
 GitHub Actions CI (`ubuntu-latest`) runs `npm run build` and `npm test` only. It does not install the managed CV runtime, train YOLO weights, or exercise DirectML or WSL ROCm. That is intentional: GPU paths are machine-specific and too heavy for a shared Linux runner.
@@ -27,6 +29,22 @@ npm run cv:wsl:status
 ```
 
 Training must not use DirectML (unsupported loss ops). Use WSL ROCm instead; keep live inference on the Windows DirectML worker.
+
+## Training job lifecycle (WSL)
+
+CvStudio and other CV pages use the async job API (`POST /api/vision/models/ultralytics/training/start`, poll `GET .../training/status`, `POST .../training/stop`). Job state is persisted to `data/cv/runtime/training-job.json` and **rehydrated on backend restart** so a mid-train server bounce does not show a false `idle` while ROCm is still running.
+
+Manual verification matrix (run once before a release tag on the maintainer AMD box):
+
+| Step | Action | Expected |
+| --- | --- | --- |
+| 1 | Start full train from CvStudio | `training-job.json` state `training`; WSL `pgrep` shows `ultralyticsVision.py train --job-id ...` |
+| 2 | Stop mid-epoch | State `killed`; WSL PIDs cleared; `canStart` true |
+| 3 | Start again, let weights appear, wait for stuck timeout (~5 min with artifacts) | State `stuck`; Stop still works |
+| 4 | Start train, kill backend process during epoch, restart backend | Status shows same job id, `processAlive` true, polling resumes; Stop clears WSL tree |
+| 5 | After stop | No orphan `ultralyticsVision.py` / `pt_data_worker` for that job id |
+
+Kill path uses `buildWslKillCommand` in `backend/src/vision/ultralyticsTrainingJob.ts` (`pkill` on job-scoped train argv, then `pt_data_worker`).
 
 ## Initial Labels
 
@@ -53,10 +71,13 @@ Keep source annotations and saved runtime regions normalized. Pixel coordinates 
 From the project root after the managed runtime is installed:
 
 ```powershell
+npm run cv:analyze
 npm run cv:prepare
 npm run cv:status
 npm run cv:train
 ```
+
+`cv:analyze` writes `data/cv/runtime/dataset-analysis.json` (resolution mix, draft slot IoU vs layout profiles, Roboflow breakdown). `cv:prepare` rebuilds `images/` and `labels/`, snaps draft Roboflow boxes to per-aspect slot rails, excludes staged `camera-objectives` imports, and adds 16:9 synthetic draft frames from official keyframes.
 
 Extract every frame from a gameplay video into a reviewable footage workspace:
 
@@ -65,6 +86,8 @@ npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01
 ```
 
 The extractor writes frames to `data/cv/footage/<name>/frames`, plus `manifest.json` and `frames.csv`. It does not add frames to active YOLO training by default because unlabeled gameplay frames should be reviewed and labelled first. To intentionally add extracted frames as background-negative training examples, pass `-DatasetSplit train`; this creates matching empty YOLO label files. Running `cv:prepare` rebuilds the active dataset, so keep source footage exports under `data/cv/footage` and only copy reviewed/intentional frames into `images/train` or `images/val`.
+
+Run batch CV timeline review over a manifest with `npm run cv:video:review -- -Footage "<name>"` or CV Studio → Batch Review. See `../../docs/video-cv-review.md`.
 
 `cv:train` is GPU-first: it uses Windows CUDA when available, then falls back to WSL ROCm. CPU PyTorch training is intentionally blocked. torch-directml is installed for DirectML device visibility, but YOLO training does not target DirectML because required loss ops are unsupported there. `cv:train:rocm` is available after `npm run cv:wsl:bootstrap` when you want to force the WSL path. Live inference remains on the Windows DirectML worker by default because it has lower warm-frame latency for this model.
 

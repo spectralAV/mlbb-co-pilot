@@ -87,3 +87,49 @@ test("active CV dataset frames are listed, opened, and updated", async (t) => {
   assert.equal(updated?.id, id);
   assert.equal(await readFile(label, "utf8"), "1 0.250000 0.400000 0.300000 0.400000\n");
 });
+
+test("listAnnotations tolerates legacy phone-cache metadata missing createdAt", async (t) => {
+  const stem = `test-legacy-meta-${Date.now()}`;
+  const split = "train";
+  const imageName = `${stem}.png`;
+  const metaDir = path.join(cvRoot, "annotations", "metadata", split);
+  const imageDir = path.join(cvRoot, "annotations", "images", split);
+  const labelDir = path.join(cvRoot, "annotations", "labels", split);
+  const metaPath = path.join(metaDir, `${stem}.json`);
+  const imagePath = path.join(imageDir, imageName);
+  const labelPath = path.join(labelDir, `${stem}.txt`);
+
+  t.after(async () => {
+    await Promise.all([
+      rm(metaPath, { force: true }),
+      rm(imagePath, { force: true }),
+      rm(labelPath, { force: true }),
+    ]);
+  });
+
+  await mkdir(metaDir, { recursive: true });
+  await mkdir(imageDir, { recursive: true });
+  await mkdir(labelDir, { recursive: true });
+  await writeFile(imagePath, tinyPng);
+  await writeFile(labelPath, "1 0.500000 0.500000 0.250000 0.500000\n", "ascii");
+  await writeFile(
+    metaPath,
+    JSON.stringify({
+      id: stem,
+      imageName,
+      label: "draft",
+      profile: "phone_20_9",
+      source: "data/cache/last-adb-frame.png",
+      note: "legacy partial metadata",
+    }, null, 2) + "\n",
+    "utf8",
+  );
+
+  const listed = await listAnnotations();
+  const sample = listed.find((entry) => entry.id === stem);
+  assert.ok(sample);
+  assert.ok(sample?.createdAt);
+  assert.equal(sample?.split, "train");
+  assert.equal(sample?.boxes.length, 1);
+  assert.equal(sample?.boxes[0]?.className, "draft_screen");
+});

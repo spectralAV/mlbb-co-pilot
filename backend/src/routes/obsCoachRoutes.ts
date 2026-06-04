@@ -1,5 +1,12 @@
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
+import sharp from "sharp";
+import { appendAgentDebugLog } from "../services/agentDebugLog.js";
 import { AdbCaptureError, captureAdbPngFrame, getAdbCaptureStatus } from "../services/adbFrameSource.js";
+
+const ANALYSIS_MAX_WIDTH = 1428;
+const LAST_ADB_FRAME_PATH = path.resolve(process.cwd(), "..", "data", "cache", "last-adb-frame.png");
 import { getLatestNativeObsFrame, getNativeObsBridgeStatus, ingestNativeObsFrame, ingestNativeObsRawFrame } from "../services/nativeObsBridge.js";
 import { attachScrcpyH264Client, getScrcpyStatus, startScrcpy, stopScrcpy } from "../services/scrcpySource.js";
 import { getNativeObsUltralyticsStatus, queueNativeObsUltralyticsFrame } from "../vision/ultralyticsVision.js";
@@ -21,6 +28,26 @@ import {
 
 function isRegion(value: unknown): value is number[] {
   return Array.isArray(value) && value.length === 4 && value.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1);
+}
+
+function pngDimensions(buffer: Buffer) {
+  if (buffer.length < 24 || buffer.readUInt32BE(0) !== 0x89504e47) return null;
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+async function prepareClientAdbFrame(buffer: Buffer) {
+  const source = pngDimensions(buffer);
+  if (buffer.length < 500_000 && (source?.width ?? 0) <= ANALYSIS_MAX_WIDTH) {
+    return { buffer, contentType: "image/png" as const, width: source?.width ?? 0, height: source?.height ?? 0 };
+  }
+  const resized = await sharp(buffer).resize({ width: ANALYSIS_MAX_WIDTH, withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+  const meta = await sharp(resized).metadata();
+  return {
+    buffer: resized,
+    contentType: "image/jpeg" as const,
+    width: meta.width ?? source?.width ?? 0,
+    height: meta.height ?? source?.height ?? 0,
+  };
 }
 
 export async function obsCoachRoutes(app: FastifyInstance) {
@@ -154,12 +181,34 @@ export async function obsCoachRoutes(app: FastifyInstance) {
   app.get("/api/capture/frame", async (_req, reply) => {
     try {
       const frame = await captureAdbPngFrame();
+      const sourceDimensions = pngDimensions(frame.buffer);
+      if (frame.buffer.length >= 1_000_000) {
+        void writeFile(LAST_ADB_FRAME_PATH, frame.buffer).catch(() => {});
+      }
+      const clientFrame = await prepareClientAdbFrame(frame.buffer);
+      await appendAgentDebugLog({
+        hypothesisId: "I5",
+        location: "obsCoachRoutes.ts:frameServed",
+        message: "ADB frame served to client",
+        data: {
+          sourceBytes: frame.buffer.length,
+          clientBytes: clientFrame.buffer.length,
+          elapsedMs: frame.elapsedMs,
+          sourceWidth: sourceDimensions?.width ?? null,
+          sourceHeight: sourceDimensions?.height ?? null,
+          clientWidth: clientFrame.width,
+          clientHeight: clientFrame.height,
+          contentType: clientFrame.contentType,
+        },
+      });
       reply
         .header("cache-control", "no-store")
         .header("x-captured-at", frame.capturedAt)
         .header("x-capture-elapsed-ms", String(frame.elapsedMs))
-        .type("image/png")
-        .send(frame.buffer);
+        .header("x-source-width", String(sourceDimensions?.width ?? clientFrame.width))
+        .header("x-source-height", String(sourceDimensions?.height ?? clientFrame.height))
+        .type(clientFrame.contentType)
+        .send(clientFrame.buffer);
     } catch (error) {
       app.log.warn({ error }, "ADB frame capture failed");
       const code = error instanceof AdbCaptureError ? error.code : "capture_failed";

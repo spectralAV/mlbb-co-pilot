@@ -29,6 +29,20 @@ function ronePath(path: string) {
 export async function apiGetAuth<T>(path:string, token:string):Promise<T>{ const res=await fetch(apiUrl(path), { cache: "no-store", headers: { authorization: bearer(token) } }); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 export async function apiPostAuth<T>(path:string, token:string, body:unknown={}):Promise<T>{ const res=await fetch(apiUrl(path),{method:"POST",headers:{"content-type":"application/json",authorization:bearer(token)},body:JSON.stringify(body)}); if(!res.ok) throw await responseError(res, path); return res.json() as Promise<T>; }
 export { API_BASE, apiUrl, apiWsUrl };
+
+export function agentDebugLog(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown> = {},
+) {
+  if (!import.meta.env.DEV) return;
+  void fetch(apiUrl("/api/debug/agent-log"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ hypothesisId, location, message, data }),
+  }).catch(() => {});
+}
 export const syncOfficialData = (authorization: string) => apiPost<any>("/api/sync/official", { authorization });
 export const getRoneStatus = () => apiGet<any>("/api/rone/status");
 export const getSetupStatus = () => apiGet<any>("/api/setup/status");
@@ -95,6 +109,15 @@ export const compileSkinPortraitSignatures = () => apiPost<any>("/api/vision/ski
 export const getLaneRecognitionManifest = () => apiGet<any>("/api/vision/lanes/manifest");
 export const getLatestDraftRecognition = () => apiGet<any>("/api/vision/draft/latest");
 export const ingestDraftRecognition = (state: unknown) => apiPost<any>("/api/vision/draft/recognition", state);
+export const getDraftFeedbackStatus = () => apiGet<any>("/api/draft/feedback/status");
+export const approveDraftFeedback = (body: unknown = {}) => apiPost<any>("/api/draft/feedback/approve", body);
+export const denyDraftFeedback = (body: unknown) => apiPost<any>("/api/draft/feedback/deny", body);
+export const getDraftSimulatorScenarios = () => apiGet<any>("/api/draft/simulator/scenarios");
+export const getDraftSimulatorAssetsStatus = () => apiGet<any>("/api/draft/simulator/assets-status");
+export const getDraftSimulatorReferenceFrames = () => apiGet<any>("/api/draft/simulator/reference-frames");
+export const replayDraftSimulatorScenario = (scenarioId: string, delayMs = 400) =>
+  apiPost<any>("/api/draft/simulator/replay", { scenarioId, delayMs, reset: true });
+export const draftSimulatorReferenceFrameUrl = (id = "last-adb") => apiUrl(`/api/draft/simulator/reference-frame/${id}`);
 export const getLatestLiveVision = () => apiGet<any>("/api/vision/live/latest");
 export const getLatestLiveObservation = () => apiGet<any>("/api/vision/live/observation");
 export const ingestLiveVisionFrame = (state: unknown) => apiPost<any>("/api/vision/live/frame", state);
@@ -104,9 +127,15 @@ export const trainScreenStateModel = () => apiPost<any>("/api/vision/models/scre
 export const getDraftHeroModel = () => apiGet<any>("/api/vision/models/draft-heroes");
 export const getDraftHeroModelStatus = () => apiGet<any>("/api/vision/models/draft-heroes/status");
 export const trainDraftHeroModel = () => apiPost<any>("/api/vision/models/draft-heroes/train");
+export const getDraftBannerModel = () => apiGet<any>("/api/vision/models/draft-banners");
+export const getDraftBannerModelStatus = () => apiGet<any>("/api/vision/models/draft-banners/status");
+export const trainDraftBannerModel = () => apiPost<any>("/api/vision/models/draft-banners/train");
 export const getUltralyticsStatus = () => apiGet<any>("/api/vision/models/ultralytics/status");
 export const installUltralyticsRuntime = () => apiPost<any>("/api/vision/models/ultralytics/install");
-export const trainUltralyticsModel = (options: unknown = {}) => apiPost<any>("/api/vision/models/ultralytics/train", options);
+/** @deprecated Legacy alias — starts async job via /train (non-blocking). Prefer startUltralyticsTraining. */
+export const trainUltralyticsModel = (options: unknown = {}) => startUltralyticsTraining(options);
+export const getCvDatasetQuality = () => apiGet<any>("/api/cv/dataset/quality");
+export const getAdvisorySidecarHealth = () => apiGet<any>("/api/reasoning/advisory/sidecar-health");
 export const getUltralyticsTrainingStatus = () => apiGet<any>("/api/vision/models/ultralytics/training/status");
 export const startUltralyticsTraining = (options: unknown = {}) => apiPost<any>("/api/vision/models/ultralytics/training/start", options);
 export const stopUltralyticsTraining = () => apiPost<any>("/api/vision/models/ultralytics/training/stop");
@@ -188,3 +217,15 @@ export async function applyPatchZip(file: File) {
   if (!res.ok || json.ok === false) throw new Error(json.error ?? `Patch upload failed: ${res.status}`);
   return json;
 }
+export const getVideoCvFootage = () => apiGet<{ success: boolean; data: unknown[] }>("/api/cv/video/footage");
+export const listVideoCvReviews = () => apiGet<{ success: boolean; data: unknown[] }>("/api/cv/video/reviews");
+export const getVideoCvReview = (id: string) => apiGet<{ success: boolean; data: any }>(`/api/cv/video/reviews/${encodeURIComponent(id)}`);
+export const runVideoCvReview = (body: {
+  footage: string;
+  sampleIntervalSeconds?: number;
+  maxFrames?: number;
+  runYolo?: boolean;
+  yoloConfidence?: number;
+  minSegmentConfidence?: number;
+  replayCoach?: boolean;
+}) => apiPost<{ success: boolean; data: any }>("/api/cv/video/review", body);

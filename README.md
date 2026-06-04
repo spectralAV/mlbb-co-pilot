@@ -30,7 +30,9 @@
 
 MLBB Co-Pilot is a Windows-first public alpha that combines a React tactical workspace, Fastify backend, Electron desktop shell, computer-vision tooling, map/runtime data, and OBS-ready overlays. It is designed to help players and creators reason about draft picks, counter picks, item builds, objective timing, lane pressure, gank risk, and live match context from local data.
 
-The project is moving toward `1.0.0`. Current release: `v0.4.1-live-cockpit`.
+The project is moving toward `1.0.0`. Current release: `v0.5.0-desktop-alpha`.
+
+Planning and triage: [Roadmap — next version](docs/roadmap-next-version.md) · [Improvement map](docs/improvement-map.md) · Pre-tag gate: `npm run release:gate`
 
 ## Status
 
@@ -200,6 +202,7 @@ npm run cv:wsl:train
 | `npm run cv:roboflow:inference:status` | Inspect Roboflow Inference package/server readiness |
 | `npm run cv:roboflow:training:status` | Inspect staged Roboflow training enhancements |
 | `npm run cv:video:extract -- -Video "C:\path\to\match.mp4" -Name "ranked-match-01"` | Extract frames from gameplay footage for review |
+| `npm run cv:video:review -- -Footage "ranked-match-01"` | Run offline CV timeline review over extracted footage |
 
 ## Documentation
 
@@ -215,6 +218,7 @@ npm run cv:wsl:train
 | [Release Checklist](docs/release-checklist.md) | Pre-release and release validation steps |
 | [Coach Reasoning Model](docs/coach-reasoning-model.md) | Dual-lane coach (System 1 deterministic + System 2 advisory) |
 | [CV Device Adaptation](docs/cv-device-adaptation.md) | Contract for normalized ROI adaptation instead of device-specific models |
+| [Video CV Review](docs/video-cv-review.md) | Batch timeline review over extracted footage manifests |
 | [CV Dataset Notes](data/cv/README.md) | Local dataset and CV runtime guidance |
 
 ## Roadmap

@@ -16,9 +16,9 @@ import {
   installTimerOcrRuntime,
   saveCvAnnotation,
   syncCvAnnotations,
-  trainUltralyticsModel,
   updateCvAnnotation,
 } from "../api/client";
+import { useUltralyticsTrainingJob } from "../utils/useUltralyticsTrainingJob";
 import { captureCurrentRuntimeFrame, captureSources, useCaptureRuntimeStore } from "../runtime/captureRuntime";
 import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../utils/cvTraining";
@@ -112,6 +112,11 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
       setMessage("CV dataset status is unavailable.");
     }
   }
+
+  const { trainingBusy, startTraining } = useUltralyticsTrainingJob({
+    onMessage: setMessage,
+    onCompleted: refresh,
+  });
 
   async function loadBlob(blob: Blob, label: string, existingBoxes: LabelBox[] = [], existingSampleId = "") {
     const bitmap = await createImageBitmap(blob);
@@ -367,18 +372,16 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
       setMessage(cpuTrainingDisabledMessage);
       return;
     }
-    setBusy("train");
-    setMessage("Synchronizing labels and training at 960px on the configured GPU runtime.");
+    if (trainingBusy) {
+      setMessage("A training job is already running.");
+      return;
+    }
+    setMessage("Synchronizing labels and starting training at 960px on the configured GPU runtime.");
     try {
       await syncCvAnnotations();
-      const result = await trainUltralyticsModel({ epochs: 30, imageSize: 960 });
-      setModel(result.data ?? result);
-      await refresh();
-      setMessage("Training complete. Updated weights are ready for native OBS inference.");
+      await startTraining({ trainingScope: "full", epochs: 30, imageSize: 960, batch: 4 });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Training failed.");
-    } finally {
-      setBusy("");
+      setMessage(error instanceof Error ? error.message : "Training failed to start.");
     }
   }
 
@@ -531,7 +534,7 @@ export function CvLab({ embedded = false }: { embedded?: boolean } = {}) {
         <section className="card p-4">
           <h3 className="flex items-center gap-2 font-bold"><Cpu className="h-4 w-4 text-cyan-300" />Training</h3>
           <p className="mt-2 text-xs text-slate-400">Ultralytics detection dataset</p>
-          <button className="btn mt-3 flex w-full items-center justify-center gap-2" disabled={Boolean(busy) || trainingBlocked} onClick={train}><Play size={16} />{busy === "train" ? "Training..." : "Train Ultralytics"}</button>
+          <button className="btn mt-3 flex w-full items-center justify-center gap-2" disabled={Boolean(busy) || trainingBlocked || trainingBusy} onClick={() => void train()}><Play size={16} />{trainingBusy ? "Training..." : "Train Ultralytics"}</button>
           {!timerOcr?.packageAvailable || !timerOcr?.paddleAvailable || !screenOcr?.packageAvailable || !screenOcr?.paddleAvailable
             ? <button className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/5 text-sm font-semibold text-slate-100" disabled={Boolean(busy)} onClick={() => void installOcr()}>{busy === "install-ocr" ? "Installing OCR..." : "Install PaddleOCR"}</button>
             : null}

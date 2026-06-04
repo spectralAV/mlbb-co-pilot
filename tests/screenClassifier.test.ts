@@ -80,6 +80,32 @@ test("screen classifier keeps completed bright portrait rails in draft instead o
   assert.equal(state.screen, "draft");
 });
 
+test("screen classifier keeps Pixel 10 bright draft rails ahead of trained live HUD", () => {
+  const metrics = emptyMetrics();
+  metrics.minimap = probe(89.94, 33.24);
+  const state = classifyVisionFrame(metrics, {
+    top_hud: probe(66.77, 45.65),
+    draft_left_rail: probe(73.54, 27.02),
+    draft_right_rail: probe(74.03, 34.3),
+    center_panel: probe(82.36, 30.9),
+    modal_body: probe(80.07, 33.12),
+  }, [], false);
+  assert.equal(state.screen, "draft");
+});
+
+test("screen classifier keeps Pixel 10 dark draft rails ahead of decorative minimap", () => {
+  const metrics = emptyMetrics();
+  metrics.minimap = probe(53.39, 39.56);
+  const state = classifyVisionFrame(metrics, {
+    top_hud: probe(38.38, 34.7),
+    draft_left_rail: probe(41.53, 5.96),
+    draft_right_rail: probe(31.34, 9.75),
+    center_panel: probe(32.38, 9.06),
+    modal_body: probe(103.44, 39.8),
+  }, [], false);
+  assert.equal(state.screen, "draft");
+});
+
 test("screen classifier keeps the recorded enemy-selection screen in draft despite its decorative minimap", () => {
   const metrics = emptyMetrics();
   metrics.minimap = probe(69.72, 51.55);

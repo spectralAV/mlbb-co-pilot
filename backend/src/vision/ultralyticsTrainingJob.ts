@@ -96,8 +96,36 @@ const weightsPath = path.join(cvRoot, "models", "mlbb-detect.pt");
 const onnxPath = path.join(cvRoot, "models", "mlbb-detect.onnx");
 const runsRoot = path.join(cvRoot, "runs");
 const script = path.join(ultralyticsProjectRoot, "backend", "tools", "ultralyticsVision.py");
-const statusFilePath = path.join(runtimeDir, "training-job.json");
-const phaseFilePath = path.join(runtimeDir, "training-job-phase.json");
+const defaultStatusFilePath = path.join(runtimeDir, "training-job.json");
+const defaultPhaseFilePath = path.join(runtimeDir, "training-job-phase.json");
+
+type TrainingJobTestOverrides = {
+  statusFilePath?: string;
+  phaseFilePath?: string;
+  probeWslProcesses?: (jobId: string) => Promise<WslProcessProbe | undefined>;
+  killWslTrainingTree?: (jobId: string) => Promise<void>;
+};
+
+let trainingJobTestOverrides: TrainingJobTestOverrides = {};
+
+function statusFilePath() {
+  return trainingJobTestOverrides.statusFilePath ?? defaultStatusFilePath;
+}
+
+function phaseFilePath() {
+  return trainingJobTestOverrides.phaseFilePath ?? defaultPhaseFilePath;
+}
+
+export function setUltralyticsTrainingJobTestOverrides(overrides: TrainingJobTestOverrides | null) {
+  trainingJobTestOverrides = overrides ?? {};
+}
+
+export function resetUltralyticsTrainingJobForTest() {
+  currentJob = idleJob();
+  activeChild = null;
+  stopPolling();
+  trainingJobTestOverrides = {};
+}
 
 const ACTIVE_STATES = new Set<UltralyticsTrainingJobState>([
   "starting",
@@ -134,7 +162,7 @@ function idleJob(): UltralyticsTrainingJob {
     artifactPaths: artifactPaths("full"),
     stagedWorkspace: null,
     runPath: null,
-    statusFile: statusFilePath,
+    statusFile: statusFilePath(),
     startedAt: null,
     updatedAt: now,
     elapsedMs: 0,
@@ -193,6 +221,71 @@ export function trainingJobIsActive(state: UltralyticsTrainingJobState) {
 export function canStartUltralyticsTraining(job: UltralyticsTrainingJob | null) {
   if (!job || job.state === "idle") return true;
   return TERMINAL_STATES.has(job.state);
+}
+
+export type RehydratedTrainingJobResolution =
+  | { action: "idle" }
+  | { action: "restore"; resumePolling: boolean }
+  | { action: "finalize"; state: "completed" | "failed"; error: string | null };
+
+export function resolveRehydratedTrainingJob(
+  job: UltralyticsTrainingJob,
+  options: {
+    wslProcessCount: number;
+    artifactsReady: boolean;
+    pythonState?: UltralyticsTrainingJobState | null;
+  },
+): RehydratedTrainingJobResolution {
+  if (!job.id || job.state === "idle") return { action: "idle" };
+  if (TERMINAL_STATES.has(job.state)) {
+    return { action: "restore", resumePolling: job.state === "stuck" };
+  }
+  if (!trainingJobIsActive(job.state)) {
+    return { action: "restore", resumePolling: false };
+  }
+
+  const wslAlive = job.runtime === "wsl" && options.wslProcessCount > 0;
+  if (wslAlive) {
+    return { action: "restore", resumePolling: true };
+  }
+
+  if (options.pythonState === "completed" && options.artifactsReady) {
+    return { action: "finalize", state: "completed", error: null };
+  }
+  if (options.pythonState === "failed") {
+    return {
+      action: "finalize",
+      state: "failed",
+      error: "Training failed before the backend restarted.",
+    };
+  }
+
+  return {
+    action: "finalize",
+    state: "failed",
+    error:
+      "Backend restarted while no training process was found for this job. Stop is not required; start a new training run.",
+  };
+}
+
+function normalizePersistedJob(raw: unknown): UltralyticsTrainingJob | null {
+  if (!raw || typeof raw !== "object") return null;
+  const snapshot = raw as Partial<UltralyticsTrainingJob>;
+  if (!snapshot.id || typeof snapshot.id !== "string") return null;
+  const base = idleJob();
+  const trainingScope = snapshot.trainingScope === "correction" ? "correction" : "full";
+  return {
+    ...base,
+    ...snapshot,
+    trainingScope,
+    artifactPaths: {
+      ...artifactPaths(trainingScope),
+      ...(snapshot.artifactPaths ?? {}),
+    },
+    statusFile: statusFilePath(),
+    pid: null,
+    childPids: Array.isArray(snapshot.childPids) ? snapshot.childPids : [],
+  };
 }
 
 export function detectStuckWithArtifacts(
@@ -273,6 +366,7 @@ function newJobId() {
 
 function mergeJob(patch: Partial<UltralyticsTrainingJob>) {
   if (!currentJob) currentJob = idleJob();
+  const previousState = currentJob.state;
   const startedAt = currentJob.startedAt ?? patch.startedAt ?? null;
   const now = Date.now();
   currentJob = {
@@ -281,13 +375,21 @@ function mergeJob(patch: Partial<UltralyticsTrainingJob>) {
     updatedAt: patch.updatedAt ?? new Date().toISOString(),
     elapsedMs: startedAt ? now - Date.parse(startedAt) : 0,
   };
+  if (patch.state && patch.state !== previousState) {
+    console.info(JSON.stringify({
+      event: "training_state",
+      jobId: currentJob.id,
+      state: currentJob.state,
+      previousState,
+    }));
+  }
   return currentJob;
 }
 
 async function persistJobSnapshot() {
   if (!currentJob) return;
   await mkdirSafe(runtimeDir);
-  await writeFile(statusFilePath, `${JSON.stringify(currentJob, null, 2)}\n`, "utf8");
+  await writeFile(statusFilePath(), `${JSON.stringify(currentJob, null, 2)}\n`, "utf8");
 }
 
 async function mkdirSafe(dir: string) {
@@ -301,7 +403,7 @@ async function mkdirSafe(dir: string) {
 
 async function readPythonPhaseFile(): Promise<Partial<UltralyticsTrainingJob> | null> {
   try {
-    const raw = await readFile(phaseFilePath, "utf8");
+    const raw = await readFile(phaseFilePath(), "utf8");
     const payload = JSON.parse(raw) as {
       pythonState?: UltralyticsTrainingJobState;
       stagedWorkspace?: string | null;
@@ -353,6 +455,9 @@ export function parsePgrepAfOutput(output: string, distro: string, python: strin
 }
 
 async function probeWslProcesses(jobId: string): Promise<WslProcessProbe | undefined> {
+  if (trainingJobTestOverrides.probeWslProcesses) {
+    return trainingJobTestOverrides.probeWslProcesses(jobId);
+  }
   const distro = wslDistro();
   const python = wslPython();
   const safeId = jobId.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -438,7 +543,7 @@ function buildTrainingArgs(
     "--job-id",
     jobId,
     "--status-file",
-    runner.runtime === "wsl" ? wslPath(phaseFilePath) : phaseFilePath,
+    runner.runtime === "wsl" ? wslPath(phaseFilePath()) : phaseFilePath(),
   ];
 }
 
@@ -507,6 +612,20 @@ async function pollTrainingJob() {
       stuckReason: stuckCheck.reason ?? null,
       childPids,
       wsl,
+      ...(pythonStatus ?? {}),
+    });
+    await persistJobSnapshot();
+    return;
+  }
+
+  const wslAlive = currentJob.runtime === "wsl" && (wsl?.linuxPids?.length ?? 0) > 0;
+
+  if (!alive && trainingJobIsActive(currentJob.state) && wslAlive) {
+    mergeJob({
+      artifactsReady,
+      childPids,
+      wsl,
+      pid: null,
       ...(pythonStatus ?? {}),
     });
     await persistJobSnapshot();
@@ -618,11 +737,77 @@ function attachChildHandlers(child: ChildProcessWithoutNullStreams, jobId: strin
 export function getUltralyticsTrainingStatus() {
   if (!currentJob) return idleJob();
   const startedAt = currentJob.startedAt;
+  const wslAlive = currentJob.runtime === "wsl" && (currentJob.wsl?.linuxPids?.length ?? 0) > 0;
   return {
     ...currentJob,
     elapsedMs: startedAt ? Date.now() - Date.parse(startedAt) : 0,
-    processAlive: isProcessAlive(activeChild),
+    processAlive: isProcessAlive(activeChild) || wslAlive,
+    rehydrated: Boolean(currentJob.id && !isProcessAlive(activeChild) && wslAlive),
   };
+}
+
+export async function rehydrateUltralyticsTrainingJob() {
+  activeChild = null;
+  stopPolling();
+  let snapshot: UltralyticsTrainingJob | null = null;
+  try {
+    const raw = await readFile(statusFilePath(), "utf8");
+    snapshot = normalizePersistedJob(JSON.parse(raw));
+  } catch {
+    currentJob = idleJob();
+    return getUltralyticsTrainingStatus();
+  }
+  if (!snapshot) {
+    currentJob = idleJob();
+    return getUltralyticsTrainingStatus();
+  }
+
+  currentJob = snapshot;
+  const wsl =
+    snapshot.runtime === "wsl" && snapshot.id && trainingJobIsActive(snapshot.state)
+      ? await probeWslProcesses(snapshot.id)
+      : snapshot.wsl;
+  const artifactsReady = await artifactsAreReady(snapshot);
+  const phase = await readPythonPhaseFile();
+  const resolution = resolveRehydratedTrainingJob(snapshot, {
+    wslProcessCount: wsl?.linuxPids?.length ?? 0,
+    artifactsReady,
+    pythonState: phase?.state ?? null,
+  });
+
+  if (resolution.action === "idle") {
+    currentJob = idleJob();
+    return getUltralyticsTrainingStatus();
+  }
+
+  if (resolution.action === "finalize") {
+    if (resolution.state === "completed") {
+      await finalizeCompletedTraining(snapshot.exitCode, snapshot.signal);
+    } else {
+      mergeJob({
+        state: "failed",
+        error: resolution.error,
+        artifactsReady,
+        wsl,
+        pid: null,
+        childPids: wsl?.linuxPids ?? [],
+      });
+      stopPolling();
+      await persistJobSnapshot();
+    }
+    return getUltralyticsTrainingStatus();
+  }
+
+  mergeJob({
+    artifactsReady,
+    wsl,
+    pid: null,
+    childPids: wsl?.linuxPids ?? [],
+    ...(phase ?? {}),
+  });
+  if (resolution.resumePolling) startPolling();
+  await persistJobSnapshot();
+  return getUltralyticsTrainingStatus();
 }
 
 export async function startUltralyticsTrainingJob(options: UltralyticsTrainingStartOptions = {}) {
@@ -658,7 +843,7 @@ export async function startUltralyticsTrainingJob(options: UltralyticsTrainingSt
   await mkdirSafe(runtimeDir);
   try {
     const { unlink } = await import("node:fs/promises");
-    await unlink(phaseFilePath).catch(() => undefined);
+    await unlink(phaseFilePath()).catch(() => undefined);
   } catch {
     // ignore
   }
@@ -670,7 +855,7 @@ export async function startUltralyticsTrainingJob(options: UltralyticsTrainingSt
     env: {
       ...process.env,
       MLBB_TRAINING_JOB_ID: jobId,
-      MLBB_TRAINING_STATUS_FILE: statusFilePath,
+      MLBB_TRAINING_STATUS_FILE: statusFilePath(),
     },
   });
   activeChild = child;
@@ -693,7 +878,13 @@ export async function stopUltralyticsTrainingJob() {
   const runtime = currentJob.runtime;
   mergeJob({ state: "killed", error: null, stuckReason: null });
   try {
-    if (currentJob.runtime === "wsl" && jobId) await killWslTrainingTree(jobId);
+    if (currentJob.runtime === "wsl" && jobId) {
+      if (trainingJobTestOverrides.killWslTrainingTree) {
+        await trainingJobTestOverrides.killWslTrainingTree(jobId);
+      } else {
+        await killWslTrainingTree(jobId);
+      }
+    }
     if (activeChild?.pid) await killWindowsProcessTree(activeChild.pid);
     else if (activeChild && !activeChild.killed) activeChild.kill("SIGKILL");
   } catch (error) {

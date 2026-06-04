@@ -8,6 +8,7 @@ import {
   detectStuckWithArtifacts,
   parsePgrepAfOutput,
   parseWslProcessProbe,
+  resolveRehydratedTrainingJob,
   trainingJobIsActive,
   type UltralyticsTrainingJob,
 } from "../backend/src/vision/ultralyticsTrainingJob.ts";
@@ -129,4 +130,44 @@ test("parseWslProcessProbe reads cwd, cmdline, and child workers", () => {
   assert.match(String(probe.processes[0]?.cmdline), /ultralyticsVision\.py train/);
   assert.equal(probe.processes[0]?.children[0]?.pid, 992);
   assert.match(String(probe.processes[0]?.children[0]?.cmdline), /pt_data_worker/);
+});
+
+test("resolveRehydratedTrainingJob resumes WSL training when linux PIDs exist", () => {
+  const resolution = resolveRehydratedTrainingJob(sampleJob({ state: "training" }), {
+    wslProcessCount: 2,
+    artifactsReady: false,
+    pythonState: "training",
+  });
+  assert.deepEqual(resolution, { action: "restore", resumePolling: true });
+});
+
+test("resolveRehydratedTrainingJob fails orphan active job without WSL processes", () => {
+  const resolution = resolveRehydratedTrainingJob(sampleJob({ state: "training" }), {
+    wslProcessCount: 0,
+    artifactsReady: false,
+    pythonState: "training",
+  });
+  assert.equal(resolution.action, "finalize");
+  if (resolution.action === "finalize") {
+    assert.equal(resolution.state, "failed");
+    assert.match(String(resolution.error), /Backend restarted/);
+  }
+});
+
+test("resolveRehydratedTrainingJob completes when phase and artifacts are ready", () => {
+  const resolution = resolveRehydratedTrainingJob(sampleJob({ state: "mirroring" }), {
+    wslProcessCount: 0,
+    artifactsReady: true,
+    pythonState: "completed",
+  });
+  assert.deepEqual(resolution, { action: "finalize", state: "completed", error: null });
+});
+
+test("resolveRehydratedTrainingJob restores stuck jobs for stop UX", () => {
+  const resolution = resolveRehydratedTrainingJob(sampleJob({ state: "stuck", artifactsReady: true }), {
+    wslProcessCount: 0,
+    artifactsReady: true,
+    pythonState: null,
+  });
+  assert.deepEqual(resolution, { action: "restore", resumePolling: true });
 });

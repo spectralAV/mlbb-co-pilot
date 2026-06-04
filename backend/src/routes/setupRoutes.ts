@@ -11,6 +11,11 @@ import { getScrcpyStatus } from "../services/scrcpySource.js";
 import { readRuntime } from "../runtime/RuntimeStore.js";
 import { getScreenOcrStatus } from "../vision/screenTextRecognition.js";
 import { getTimerOcrStatus } from "../vision/timerRecognition.js";
+import { getCvDatasetQuality } from "../services/cvDatasetQuality.js";
+import { getMlbbAdbAssetStatus } from "../services/mlbbAdbAssets.js";
+import { getUiLayoutGraphSummary } from "../services/uiLayoutGraph.js";
+import { getDraftBannerModelStatus } from "../vision/draftBannerModel.js";
+import { getUltralyticsTrainingStatus } from "../vision/ultralyticsTrainingJob.js";
 import { getUltralyticsStatus } from "../vision/ultralyticsVision.js";
 
 const ROOT = path.resolve(process.cwd(), "..");
@@ -83,7 +88,7 @@ function summarize(checks: SetupCheck[]) {
 
 export async function setupRoutes(app: FastifyInstance) {
   app.get("/api/setup/status", async () => {
-    const [pkg, runtime, adb, scrcpy, obs, obsPlugin, ndiTools, ndiDirect, yolo, timerOcr, screenOcr] = await Promise.all([
+    const [pkg, runtime, adb, scrcpy, obs, obsPlugin, ndiTools, ndiDirect, yolo, trainingJob, datasetQuality, adbAssets, draftBanners, uiLayout, timerOcr, screenOcr] = await Promise.all([
       rootPackage(),
       settled(readRuntime()),
       settled(getAdbCaptureStatus()),
@@ -93,6 +98,11 @@ export async function setupRoutes(app: FastifyInstance) {
       settled(getNdiToolsStatus()),
       settled(Promise.resolve(getNdiDirectStatus())),
       settled(getUltralyticsStatus()),
+      settled(Promise.resolve(getUltralyticsTrainingStatus())),
+      settled(getCvDatasetQuality()),
+      settled(getMlbbAdbAssetStatus()),
+      settled(getDraftBannerModelStatus()),
+      settled(getUiLayoutGraphSummary()),
       settled(getTimerOcrStatus()),
       settled(getScreenOcrStatus()),
     ]);
@@ -136,6 +146,115 @@ export async function setupRoutes(app: FastifyInstance) {
         data: yolo.value,
       });
     } else checks.push(errored("ultralytics", "YOLO Vision", "vision", resultError(yolo)));
+
+    if (trainingJob.ok) {
+      const state = String(trainingJob.value.state ?? "idle");
+      const active = ["starting", "training", "validating", "exporting", "mirroring", "cleanup", "stuck"].includes(state);
+      if (active) {
+        checks.push({
+          id: "training-job",
+          label: "Training Job",
+          group: "vision",
+          state: "action",
+          summary: state === "stuck" ? "Training stuck" : "Training active",
+          detail: trainingJob.value.stuckReason
+            ? String(trainingJob.value.stuckReason)
+            : `Ultralytics job ${trainingJob.value.id ?? "-"} is ${state}.`,
+          action: "Open CV Studio and stop the training job before starting capture or another train.",
+          data: trainingJob.value,
+        });
+      }
+    } else checks.push(errored("training-job", "Training Job", "vision", resultError(trainingJob)));
+
+    if (datasetQuality.ok) {
+      const quality = datasetQuality.value;
+      const zeroClasses = (quality.classRows ?? []).filter((row: { train: number; val: number }) => row.train + row.val === 0).length;
+      const draftMeanSlotIoU =
+        typeof quality.draftMeanSlotIoU === "number" ? quality.draftMeanSlotIoU : null;
+      const draftWeak = draftMeanSlotIoU !== null && draftMeanSlotIoU < 0.85;
+      if (zeroClasses > 0 || draftWeak) {
+        checks.push({
+          id: "dataset-quality",
+          label: "Dataset Quality",
+          group: "vision",
+          state: "action",
+          summary: draftWeak ? "Draft slot IoU low" : "Class coverage gaps",
+          detail: draftWeak
+            ? `Draft mean slot IoU ${draftMeanSlotIoU.toFixed(3)} is below 0.85.`
+            : `${zeroClasses} YOLO classes have no train or val examples.`,
+          action: "Run npm run cv:analyze, refine labels in CV Studio, then cv:prepare and train.",
+          data: quality,
+        });
+      }
+    } else checks.push(errored("dataset-quality", "Dataset Quality", "vision", resultError(datasetQuality), true));
+
+    if (adbAssets.ok) {
+      const manifest = adbAssets.value.manifest as {
+        extraction?: { textures?: number };
+        library?: { uiDownloaded?: number };
+        inventory?: { uiBundles?: number };
+      } | null;
+      const textures = manifest?.extraction?.textures ?? 0;
+      const uiDownloaded = manifest?.library?.uiDownloaded ?? 0;
+      const uiBundles = manifest?.inventory?.uiBundles ?? 0;
+      const draftAssetsThin = textures < 50;
+      if (draftAssetsThin) {
+        checks.push({
+          id: "draft-adb-assets",
+          label: "Draft ADB Assets",
+          group: "vision",
+          state: "action",
+          summary: "Hero textures not indexed",
+          detail: `Only ${textures} extracted textures in the local ADB library. Draft ban/pick matchers need indexed game UI from the phone.`,
+          action: "Settings → Data Sync: Index Draft Assets and Index CV Surfaces (USB debugging + authorized device).",
+          data: adbAssets.value,
+        });
+      }
+      if (uiBundles > 0 && uiDownloaded < Math.min(uiBundles, 10)) {
+        checks.push({
+          id: "draft-ui-library",
+          label: "Unity UI Library",
+          group: "vision",
+          state: "optional",
+          summary: "Partial UI download",
+          detail: `${uiDownloaded}/${uiBundles} UI bundles on disk. Full UI download improves layout graph extraction.`,
+          action: "Settings → Data Sync → Download Full UI, then run npm run assets:layout:extract:draft.",
+          optional: true,
+          data: { uiDownloaded, uiBundles },
+        });
+      }
+    } else checks.push(errored("draft-adb-assets", "Draft ADB Assets", "vision", resultError(adbAssets), true));
+
+    if (draftBanners.ok && !draftBanners.value.available) {
+      checks.push({
+        id: "draft-banner-model",
+        label: "Draft Banner Model",
+        group: "vision",
+        state: "action",
+        summary: "Not trained",
+        detail: "Server-side draft pick banner signatures are empty. Train once after runtime heroes are synced.",
+        action: "POST /api/vision/models/draft-banners/train from CV Lab or open Draft Simulator after Data Sync.",
+        data: draftBanners.value,
+      });
+    } else if (!draftBanners.ok) {
+      checks.push(errored("draft-banner-model", "Draft Banner Model", "vision", resultError(draftBanners), true));
+    }
+
+    if (uiLayout.ok && !uiLayout.value.ready) {
+      checks.push({
+        id: "ui-layout-graph",
+        label: "UI Layout Graph",
+        group: "vision",
+        state: "optional",
+        summary: "Not extracted",
+        detail: "Unity UI layout graph is missing. Optional for offline slot taxonomy; run after Download Full UI.",
+        action: "npm run assets:layout:extract:draft after data/adb-assets/library/UI is populated.",
+        optional: true,
+        data: uiLayout.value,
+      });
+    } else if (!uiLayout.ok) {
+      checks.push(errored("ui-layout-graph", "UI Layout Graph", "vision", resultError(uiLayout), true));
+    }
 
     if (adb.ok) {
       checks.push({

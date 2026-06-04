@@ -4,6 +4,27 @@ This folder is for local screenshot samples used to train/verify UI recognition.
 
 Image samples are ignored by Git because they can contain personal avatars, friend names, and account information.
 
+## Unity Layout RE (offline)
+
+MLBB draft UI uses **NGUI `Transform` widgets**, not `RectTransform`. After a full UI sync (`scope: ui` → `data/adb-assets/library/UI/android`), extract a layout graph:
+
+```powershell
+pip install UnityPy
+npm run assets:layout:extract        # draft + hud + loading + lobby + scoreboard bundles
+npm run assets:layout:extract:draft  # draft-only (faster)
+```
+
+Output: `data/adb-assets/ui-layout-graph.json` (gitignored with other adb assets). Taxonomy rules live in `backend/tools/mlbbUiTaxonomy.py` (derived from real asset names like `m_Button_Confirm`, `m_zlabel_wantpickhero`, `m_MonsterHPBar`).
+
+Each node includes: `elementKind` (button, label, bar, icon, …), `semanticTags`, `copilotClassHint` (YOLO class), optional `normalizedRect`. Each bundle includes `screen` (`draft`, `live_hud`, `loading`, `lobby`, …) and `draftUiStates` (e.g. `pick_confirm_visible`, `enemy_pick_active`, `ban_in_progress`).
+
+API:
+
+- `GET /api/sync/adb-assets/layout` — summary (bundle/node counts)
+- `GET /api/sync/adb-assets/layout/UI_ChooseHeroBP.unity3d` — one bundle’s nodes
+
+Runtime draft geometry still comes from **YOLO + calibration** on live frames; the layout graph is for training seeds, simulator UI, and RE validation after patches.
+
 ## Current Region Map
 
 These maps are sample geometry from one capture shape, not production truth. Convert useful regions into normalized layout profiles, validate dynamic anchors at runtime, and keep calibration/manual override as the fallback for devices whose UI placement differs.
@@ -45,6 +66,46 @@ This set adds coverage for:
 - item shop recommendation and build-path panels
 
 Use this set to build a first-pass screen-state classifier before attempting OCR or deeper recognition. The `2856x1280` region scale applies only to these source maps; production CV should adapt normalized ROIs through aspect-ratio profiles, dynamic UI anchors, saved calibration, and manual override.
+
+## Draft Lifecycle Scenarios (no live lobby)
+
+`draft-lifecycle-scenarios.json` replays short frame sequences through the same ingest path as Live Capture: missed ban slots, pre-lock pick swaps, lane changes, and cross-team duplicate bans.
+
+- **CI:** `npx tsx --test ../tests/draftLifecycle.test.ts` (from `backend/`)
+- **Running backend + Draft Room UI:** `node tools/replay-draft-scenarios.mjs` (optional `--id missed_ally_ban_slot`)
+
+You do not need a custom 10-player lobby to validate roster logic. One real screenshot set (`last-adb-frame.png`, `tools/analyze-draft-slots.mjs`) plus these scripted scenarios covers most draft state bugs.
+
+**Offline draft CV check (no lobby):**
+
+```powershell
+npm run cv:verify:draft-offline
+```
+
+Uses `data/cache/last-adb-frame.png` (from Live Capture) + `mlbb-detect.pt`. `cv:prepare` also imports phone cache frames into `data/cv/annotations/train/` with auto `phone_20_9` slot rails for CV Lab refinement.
+
+**In-app:** Advanced nav → **Draft Simulator** (`/draft-simulator`) replays scenarios, shows pass/fail vs `expect`, and displays the last ADB reference frame.
+
+**Draft Room feedback:** **Approve** caches a trusted roster for fast re-recognition; **Deny** saves a correction sample linked to CV Studio (`/cv-studio/frame?sample=...`) for label refinement and correction training.
+
+**Server models (after Data Sync):**
+
+- `GET /api/vision/models/draft-banners` — pick-rail banner signatures (`POST .../train` to rebuild)
+- `GET /api/sync/adb-assets/layout` — Unity UI layout graph summary (run `npm run assets:layout:extract:draft` after Full UI download)
+
+**CI:** `npm run cv:verify:draft-offline:ci` runs geometry-only checks without `mlbb-detect.pt`.
+
+## ADB asset library (simulation inputs)
+
+From **Settings → Data Sync** with the phone connected:
+
+| Action | What it pulls |
+|--------|----------------|
+| Index Draft Assets | Draft-related Unity bundles + hero head textures |
+| Index CV Surfaces | Draft, HUD, minimap, scoreboard, shop, lobby bundles |
+| Download Full UI | Entire `UI/android` library from the game install (large; enables texture extraction) |
+
+Extracted PNGs are served at `/api/sync/adb-assets/texture/...` and used to train `cv-draft-hero-model.json`. This is not a full re-skin of the MLBB draft UI in HTML yet—it feeds **recognition** and **offline analysis**, while roster logic is validated via scenarios above.
 
 ## Ranked Match Video Set
 

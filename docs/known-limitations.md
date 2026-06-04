@@ -17,6 +17,9 @@ MLBB Co-Pilot is currently a public alpha. The project is useful for local testi
 - DirectML is the preferred Windows AMD inference path today. WSL ROCm training is experimental and can stress the Windows display driver on some hardware.
 - GitHub CI validates TypeScript build and Node tests on Linux only; it does not run CV training or DirectML/ROCm inference. GPU workflows are validated locally on Windows (see `data/cv/README.md`, section Reference Dev Hardware And CI Scope).
 - OCR is optional and should be treated as a sidecar helper, not the source of truth for match-state decisions.
+- Video CV batch review accepts only footage folder names under `data/cv/footage/` (not arbitrary filesystem paths).
+- Offline coach replay from video review evaluates deterministic rules only; it does not ingest into live capture state.
+- Agent debug logging to `.cursor/debug-agent.log` is disabled unless `MLBB_AGENT_DEBUG=1` (or non-production backend); `npm run release:gate` greps for debug ingest markers.
 
 ## Data And Licensing
 

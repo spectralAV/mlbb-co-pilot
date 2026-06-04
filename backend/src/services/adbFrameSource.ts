@@ -108,6 +108,9 @@ function classifyCaptureError(adb: string, error: unknown): AdbCaptureError {
   if (lower.includes("enoent") || lower.includes("not recognized")) {
     return new AdbCaptureError("adb_unavailable", "ADB executable was not found.", adb, false);
   }
+  if (lower.includes("command failed") || lower.includes("exec-out")) {
+    return new AdbCaptureError("capture_failed", message, adb, true);
+  }
   return new AdbCaptureError("capture_failed", message, adb, isRetryableAdbError(error));
 }
 
@@ -139,7 +142,17 @@ export async function getAdbCaptureStatus() {
   }
 }
 
+let captureInFlight: Promise<{ adb: string; buffer: Buffer; capturedAt: string; elapsedMs: number; attempt: number }> | null = null;
+
 export async function captureAdbPngFrame(options?: { maxAttempts?: number; baseDelayMs?: number }) {
+  if (captureInFlight) return captureInFlight;
+  captureInFlight = captureAdbPngFrameInner(options).finally(() => {
+    captureInFlight = null;
+  });
+  return captureInFlight;
+}
+
+async function captureAdbPngFrameInner(options?: { maxAttempts?: number; baseDelayMs?: number }) {
   const maxAttempts = Math.max(1, options?.maxAttempts ?? defaultRetry.maxAttempts);
   const baseDelayMs = options?.baseDelayMs ?? defaultRetry.baseDelayMs;
   const adb = await resolveAdb();
@@ -160,7 +173,7 @@ export async function captureAdbPngFrame(options?: { maxAttempts?: number; baseD
       const { stdout } = await execFileAsync(adb, ["exec-out", "screencap", "-p"], {
         encoding: "buffer",
         maxBuffer: 32 * 1024 * 1024,
-        timeout: 5000,
+        timeout: 12000,
         windowsHide: true,
       });
       const buffer = Buffer.from(stdout);

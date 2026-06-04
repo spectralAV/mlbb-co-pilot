@@ -14,6 +14,9 @@ import { semanticRoutes } from "./routes/semanticRoutes.js";
 import { buildHeroRoutes } from "./routes/buildHeroRoutes.js";
 import { overlayRoutes } from "./routes/overlayRoutes.js";
 import { obsCoachRoutes } from "./routes/obsCoachRoutes.js";
+import { draftSimulatorRoutes } from "./routes/draftSimulatorRoutes.js";
+import { draftFeedbackRoutes } from "./routes/draftFeedbackRoutes.js";
+import { videoReviewRoutes } from "./routes/videoReviewRoutes.js";
 import { roneRoutes } from "./routes/roneRoutes.js";
 import { setupRoutes } from "./routes/setupRoutes.js";
 import { runtimeRoutes } from "./routes/runtimeRoutes.js";
@@ -31,6 +34,7 @@ import { getLaneRecognitionManifest, getLaneRecognitionReference } from "./visio
 import { compileSkinPortraitSignatures, fetchSkinPortrait, getSkinPortraitManifest, getSkinSignatureManifest, getSkinSignatureStatus, syncSkinPortraitManifest } from "./vision/skinPortraitRecognition.js";
 import { getLatestLiveVision, getLatestLiveVisionObservation, ingestLiveVisionFrame, parseLiveVisionFrameInput } from "./vision/liveVisionState.js";
 import { getScreenStateModel, getScreenStateTrainingStatus, trainScreenStateModel } from "./vision/screenStateTraining.js";
+import { ensureDraftBannerModel, getDraftBannerModel, getDraftBannerModelStatus, trainDraftBannerModel } from "./vision/draftBannerModel.js";
 import { getDraftHeroModel, getDraftHeroModelStatus, trainDraftHeroModel } from "./vision/draftHeroModelTraining.js";
 import { getLatestAdvisoryCoach } from "./engines/advisoryCoachLane.js";
 import { getLatestLiveReasoning, ingestLiveReasoning, listCoachReasoningScenarios } from "./engines/liveReasoningEngine.js";
@@ -38,10 +42,13 @@ import { getMatchState } from "./state/matchState.js";
 import { getPlayerProfile, savePlayerProfile } from "./services/playerProfile.js";
 import { getBattleSpellRecognitionManifest, getBattleSpellRecognitionReference } from "./vision/battleSpellRecognition.js";
 import { getEquipmentRecognitionManifest, getEquipmentRecognitionReference } from "./vision/equipmentRecognition.js";
-import { getUltralyticsStatus, inferUltralyticsFrame, installUltralyticsRuntime, mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects, trainUltralyticsModel } from "./vision/ultralyticsVision.js";
+import { getUltralyticsStatus, inferUltralyticsFrame, installUltralyticsRuntime, mapUltralyticsMinimapMarkers, mapUltralyticsMinimapObjects } from "./vision/ultralyticsVision.js";
+import { getCvDatasetQuality } from "./services/cvDatasetQuality.js";
+import { probeAdvisorySidecarHealth } from "./engines/llmSidecarAdvisoryCoach.js";
 import {
   exportUltralyticsOnnx,
   getUltralyticsTrainingStatus,
+  rehydrateUltralyticsTrainingJob,
   startUltralyticsTrainingJob,
   stopUltralyticsTrainingJob,
 } from "./vision/ultralyticsTrainingJob.js";
@@ -54,6 +61,7 @@ import { getMlbbHudOcrFeedStatus, getScreenOcrStatus, inferScreenTextFrame, inst
 import { getVisionReflectionSummary } from "./vision/visionReflection.js";
 import { addClientPerformanceSample, getPerformanceSnapshot, recordRequestMetric } from "./services/performanceMonitor.js";
 import { ensureObsScrcpyPluginInstalled } from "./services/obsPluginInstaller.js";
+import { appendAgentDebugLog, isAgentDebugEnabled } from "./services/agentDebugLog.js";
 
 const app = Fastify({ logger: true });
 const frontendDist = path.resolve(process.cwd(), "..", "frontend", "dist");
@@ -95,6 +103,9 @@ await app.register(runtimeRoutes);
 await app.register(updateRoutes);
 await app.register(overlayRoutes);
 await app.register(obsCoachRoutes);
+await app.register(draftSimulatorRoutes);
+await app.register(draftFeedbackRoutes);
+await app.register(videoReviewRoutes);
 
 app.addHook("onRequest", async (request) => {
   (request as any).performanceStartedAt = performance.now();
@@ -104,6 +115,14 @@ app.addHook("onResponse", async (request, reply) => {
   const startedAt = Number((request as any).performanceStartedAt ?? performance.now());
   recordRequestMetric(request.method, request.url, reply.statusCode, performance.now() - startedAt);
 });
+
+if (isAgentDebugEnabled()) {
+  app.post("/api/debug/agent-log", async (req) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    await appendAgentDebugLog(body);
+    return { ok: true };
+  });
+}
 
 async function fileExists(file: string) {
   try {
@@ -239,7 +258,10 @@ app.get("/api/vision/equipment/icon/:id", async (req, reply) => {
 });
 app.get("/api/vision/scenes", async () => ({ success:true, data: heroRecognitionScenes }));
 app.get("/api/vision/draft/latest", async () => ({ success:true, data:getLatestDraftRecognition() }));
-app.post("/api/vision/draft/recognition", async (req) => ({ success:true, data:await ingestDraftRecognition(req.body as any) }));
+app.post("/api/vision/draft/recognition", async (req) => {
+  const body = req.body as any;
+  return { success: true, data: await ingestDraftRecognition(body) };
+});
 app.get("/api/vision/live/latest", async () => ({ success:true, data:getLatestLiveVision() }));
 app.get("/api/vision/live/observation", async () => ({ success:true, data:getLatestLiveVisionObservation() }));
 app.post("/api/vision/live/frame", async (req, reply) => {
@@ -269,6 +291,15 @@ app.post("/api/vision/models/draft-heroes/train", async (_req, reply) => {
     return { success: true, data: await trainDraftHeroModel() };
   } catch (error) {
     return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Draft hero training failed" });
+  }
+});
+app.get("/api/vision/models/draft-banners", async () => ({ success: true, data: await ensureDraftBannerModel() }));
+app.get("/api/vision/models/draft-banners/status", async () => ({ success: true, data: await getDraftBannerModelStatus() }));
+app.post("/api/vision/models/draft-banners/train", async (_req, reply) => {
+  try {
+    return { success: true, data: await trainDraftBannerModel() };
+  } catch (error) {
+    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Draft banner training failed" });
   }
 });
 app.get("/api/vision/models/ultralytics/status", async () => ({ success: true, data: await getUltralyticsStatus() }));
@@ -339,13 +370,23 @@ app.post("/api/vision/models/ultralytics/training/export-onnx", async (_req, rep
     return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "ONNX export failed" });
   }
 });
+/** @deprecated Use POST /api/vision/models/ultralytics/training/start and poll GET .../training/status. */
 app.post("/api/vision/models/ultralytics/train", async (req, reply) => {
+  req.log.warn("Deprecated POST /api/vision/models/ultralytics/train — use /training/start + /training/status");
   try {
-    return { success: true, data: await trainUltralyticsModel(req.body as any) };
+    const job = await startUltralyticsTrainingJob(req.body as any);
+    return {
+      success: true,
+      deprecated: true,
+      message: "Training started asynchronously. Poll GET /api/vision/models/ultralytics/training/status.",
+      data: job,
+    };
   } catch (error) {
-    return reply.code(400).send({ success: false, error: error instanceof Error ? error.message : "Ultralytics training failed" });
+    return reply.code(409).send({ success: false, error: error instanceof Error ? error.message : "Could not start training" });
   }
 });
+app.get("/api/cv/dataset/quality", async () => ({ success: true, data: await getCvDatasetQuality() }));
+app.get("/api/reasoning/advisory/sidecar-health", async () => ({ success: true, data: await probeAdvisorySidecarHealth() }));
 app.post("/api/vision/models/ultralytics/infer", async (req, reply) => {
   try {
     const upload = await (req as any).file({ limits: { fileSize: 12 * 1024 * 1024 } });
@@ -466,6 +507,18 @@ app.get("/api/events/recent", async () => ({ success:true, events:eventBus.recen
 app.get("/ws/events", { websocket:true }, (socket) => { const unsub = eventBus.subscribe((event)=>socket.send(JSON.stringify(event))); socket.on("close", unsub); });
 
 await registerFrontendStatic();
+
+try {
+  const trainingJob = await rehydrateUltralyticsTrainingJob();
+  if (trainingJob.state !== "idle") {
+    app.log.info(
+      { jobId: trainingJob.id, state: trainingJob.state, processAlive: (trainingJob as { processAlive?: boolean }).processAlive },
+      "Rehydrated Ultralytics training job from disk.",
+    );
+  }
+} catch (error) {
+  app.log.warn({ error }, "Could not rehydrate Ultralytics training job; starting idle.");
+}
 
 try {
   await app.listen({ port: PORT, host: HOST });

@@ -32,7 +32,7 @@ type DetectedAllyLane = {
   source: string;
 };
 
-type DraftState = {
+export type DraftState = {
   phase: string;
   allyPicks: DetectedSlot[];
   enemyPicks: DetectedSlot[];
@@ -146,7 +146,7 @@ export function updateMatchVision(vision: any, reasoning: any) {
   });
 }
 
-function acceptedSlots(slots: unknown, expectedSource: "draft-ban-icon" | "draft-pick-portrait"): DetectedSlot[] {
+function acceptedSlots(slots: unknown, expectedSource: "draft-ban-icon" | "draft-pick-portrait", groundTruthTrusted = false): DetectedSlot[] {
   if (!Array.isArray(slots)) return [];
   return slots
     .map((slot: any) => ({
@@ -159,7 +159,7 @@ function acceptedSlots(slots: unknown, expectedSource: "draft-ban-icon" | "draft
     }))
     .filter(
       (slot) =>
-        slot.source === expectedSource &&
+        (groundTruthTrusted && slot.source === "manual" || slot.source === expectedSource) &&
         (slot.heroId !== undefined || Boolean(slot.heroName)) &&
         slot.confidence >= DETECTED_FACT_CONFIDENCE,
     );
@@ -221,6 +221,21 @@ function acceptedAllyLanes(lanes: unknown): DetectedAllyLane[] {
     );
 }
 
+function mergePerSlot<T extends { slot: number; confidence: number }>(
+  detected: T[],
+  preserved: T[],
+  slotOf: (entry: T) => number,
+) {
+  if (!detected.length) return preserved;
+  const merged = new Map(preserved.map((entry) => [slotOf(entry), entry]));
+  for (const entry of detected) {
+    const slot = slotOf(entry);
+    const previous = merged.get(slot);
+    if (!previous || entry.confidence >= previous.confidence) merged.set(slot, entry);
+  }
+  return [...merged.values()].sort((left, right) => slotOf(left) - slotOf(right));
+}
+
 function submittedSlotKey(slot: any) {
   if (!slot || typeof slot !== "object") return "";
   if (Number.isFinite(Number(slot.heroId))) return `id:${Number(slot.heroId)}`;
@@ -230,35 +245,56 @@ function submittedSlotKey(slot: any) {
 
 export function updateMatchDraft(recognition: any) {
   const source = recognition?.state ?? {};
+  const groundTruthTrusted = Boolean(source.groundTruthTrusted);
   if (String(source.phase ?? "") === "ban" && latest.draft?.phase !== "ban") resetDraftSlotStabilizer();
-  const preserve = source.provisional === true && latest.confidence.draftTrusted ? latest.draft : null;
-  const rawAllyPicks = acceptedSlots(source.allyPicks, "draft-pick-portrait");
-  const rawEnemyPicks = acceptedSlots(source.enemyPicks, "draft-pick-portrait");
-  const rawAllyBans = acceptedSlots(source.allyBans, "draft-ban-icon");
-  const rawEnemyBans = acceptedSlots(source.enemyBans, "draft-ban-icon");
+  const preserve = source.provisional === true && latest.confidence.draftTrusted && !groundTruthTrusted ? latest.draft : null;
+  const rawAllyPicks = acceptedSlots(source.allyPicks, "draft-pick-portrait", groundTruthTrusted);
+  const rawEnemyPicks = acceptedSlots(source.enemyPicks, "draft-pick-portrait", groundTruthTrusted);
+  const rawAllyBans = acceptedSlots(source.allyBans, "draft-ban-icon", groundTruthTrusted);
+  const rawEnemyBans = acceptedSlots(source.enemyBans, "draft-ban-icon", groundTruthTrusted);
   const detectedAllyPicks = stabilizeDraftSlotGroup("allyPicks", rawAllyPicks);
   const detectedEnemyPicks = stabilizeDraftSlotGroup("enemyPicks", rawEnemyPicks);
   const detectedAllyBans = stabilizeDraftSlotGroup("allyBans", rawAllyBans);
   const detectedEnemyBans = stabilizeDraftSlotGroup("enemyBans", rawEnemyBans);
   const detectedAllySpells = acceptedSpells(source.allySpells);
   const detectedAllyLanes = acceptedAllyLanes(source.allyLanes);
-  const detectedSelectedLane = acceptedContext(source.selectedLane, "draft-lane-icon", (value) => {
+  const detectedSelectedLane = acceptedContext(
+    source.selectedLane,
+    groundTruthTrusted ? "manual" : "draft-lane-icon",
+    (value) => {
     const lane = String(value ?? "").toLowerCase();
     return ["exp", "jungle", "mid", "roam", "gold"].includes(lane) ? lane : null;
-  });
-  const detectedSelfSlot = acceptedContext(source.selfSlot, "draft-self-highlight", (value) => {
+  }) ?? (groundTruthTrusted ? acceptedContext(source.selectedLane, "draft-lane-icon", (value) => {
+    const lane = String(value ?? "").toLowerCase();
+    return ["exp", "jungle", "mid", "roam", "gold"].includes(lane) ? lane : null;
+  }) : null);
+  const detectedSelfSlot = acceptedContext(
+    source.selfSlot,
+    groundTruthTrusted ? "manual" : "draft-self-highlight",
+    (value) => {
     const slot = Number(value);
     return Number.isInteger(slot) && slot >= 1 && slot <= 5 ? slot : null;
-  });
-  const detectedFirstPickSide = acceptedContext(source.firstPickSide, "draft-first-pick-indicator", (value) =>
-    value === "ally" || value === "enemy" ? value : null
-  );
+  }) ?? (groundTruthTrusted ? acceptedContext(source.selfSlot, "draft-self-highlight", (value) => {
+    const slot = Number(value);
+    return Number.isInteger(slot) && slot >= 1 && slot <= 5 ? slot : null;
+  }) : null);
+  const detectedFirstPickSide = acceptedContext(
+    source.firstPickSide,
+    groundTruthTrusted ? "manual" : "draft-first-pick-indicator",
+    (value) => value === "ally" || value === "enemy" ? value : null,
+  ) ?? (groundTruthTrusted ? acceptedContext(source.firstPickSide, "draft-first-pick-indicator", (value) =>
+    value === "ally" || value === "enemy" ? value : null,
+  ) : null);
   const allyPicks = detectedAllyPicks.length || !preserve ? detectedAllyPicks : preserve.allyPicks;
   const enemyPicks = detectedEnemyPicks.length || !preserve ? detectedEnemyPicks : preserve.enemyPicks;
   const allyBans = detectedAllyBans.length || !preserve ? detectedAllyBans : preserve.allyBans;
   const enemyBans = detectedEnemyBans.length || !preserve ? detectedEnemyBans : preserve.enemyBans;
   const allySpells = detectedAllySpells.length || !preserve ? detectedAllySpells : preserve.allySpells;
-  const allyLanes = detectedAllyLanes.length || !preserve ? detectedAllyLanes : preserve.allyLanes;
+  const allyLanes = mergePerSlot(
+    detectedAllyLanes,
+    preserve?.allyLanes ?? [],
+    (entry) => entry.slot,
+  );
   let selectedLane = detectedSelectedLane ?? preserve?.selectedLane ?? null;
   const selfSlot = detectedSelfSlot ?? preserve?.selfSlot ?? null;
   if (!selectedLane && selfSlot) {
@@ -294,7 +330,7 @@ export function updateMatchDraft(recognition: any) {
   const acceptedSubmittedFactCount =
     acceptedSubmittedSlots.length + detectedAllyLanes.length + detectedAllySpells.length + acceptedSubmittedContext.length;
   const evidenceFullyAccepted = submittedFactCount === acceptedSubmittedFactCount;
-  const draftTrusted = allFacts.length > 0;
+  const draftTrusted = groundTruthTrusted || allFacts.length > 0;
   const hasPickEvidence = allyPicks.length + enemyPicks.length > 0;
   const confidence = draftTrusted
     ? allFacts.reduce((sum, fact) => sum + fact.confidence, 0) / allFacts.length

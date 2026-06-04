@@ -172,7 +172,14 @@ function SetupCheckCard({ check }: { check: SetupCheck }) {
       <Icon className="shrink-0" size={22} />
     </div>
     <p className="mt-3 text-sm leading-relaxed text-slate-300">{check.detail}</p>
-    {check.action && <div className="mt-3 rounded-md border border-white/10 bg-black/20 p-3 text-xs leading-relaxed text-slate-200">{check.action}</div>}
+    {check.action && <div className="mt-3 rounded-md border border-white/10 bg-black/20 p-3 text-xs leading-relaxed text-slate-200">
+      {check.action}
+      {check.id === "training-job" && (
+        <div className="mt-2">
+          <Link className="text-cyan-300 underline" to="/cv-studio">Open CV Studio to stop or monitor training</Link>
+        </div>
+      )}
+    </div>}
   </div>;
 }
 

@@ -54,7 +54,6 @@ export function LiveCapture() {
     metrics,
     liveVision,
     error,
-    adbPreviewUrl,
     captureLog,
     stream,
     windowContentCrop,
@@ -366,7 +365,7 @@ export function LiveCapture() {
     <div className="capture-workspace">
       <section className="card overflow-hidden">
         <div className="capture-preview-stage" style={{ aspectRatio: sourceAspect }}>
-          {sourceMode === "scrcpy" || sourceMode === "browser" || sourceMode === "ndi" || sourceMode === "capture_card" ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="h-full w-full object-contain" /> : (sourceMode === "adb" || sourceMode === "obs") && adbPreviewUrl ? <img src={adbPreviewUrl} alt="" className="h-full w-full object-contain" /> : <video ref={previewRef} muted playsInline className="h-full w-full object-contain" />}
+          {running ? <canvas ref={(node) => { capturePreviewCanvasRef.current = node; attachCapturePreviewCanvas(node); }} className="capture-preview-canvas" /> : <video ref={previewRef} muted playsInline className="capture-preview-canvas" />}
           {regions.map((region) => {
             const [x, y, w, h] = region.rect;
             const active = metrics[region.key]?.active;

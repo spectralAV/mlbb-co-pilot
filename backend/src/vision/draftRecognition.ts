@@ -1,5 +1,12 @@
 import { analyzeDraft } from "../engines/draftEngine.js";
 import { eventBus } from "../event-bus/eventBus.js";
+import { appendAgentDebugLog } from "../services/agentDebugLog.js";
+import {
+  clearDraftGroundTruthSession,
+  isGroundTruthTrusted,
+  resolveDraftFastPath,
+  rosterToManualIngest,
+} from "../services/draftGroundTruth.js";
 import { DETECTED_FACT_CONFIDENCE, updateMatchDraft } from "../state/matchState.js";
 
 type RecognizedSlot = {
@@ -33,6 +40,8 @@ type RecognizedAllyLane = {
 
 type RecognizedDraft = {
   phase?: "ban" | "pick" | "finalize" | "loading";
+  /** Offline layout-RE markers (e.g. pick_confirm_visible, enemy_pick_active). */
+  draftUiStates?: string[];
   allyPicks?: Array<RecognizedSlot | number | string | null>;
   enemyPicks?: Array<RecognizedSlot | number | string | null>;
   allyBans?: Array<RecognizedSlot | number | string | null>;
@@ -49,42 +58,61 @@ type RecognizedDraft = {
   timestamp?: number;
   diagnostics?: unknown;
   provisional?: boolean;
+  userFeedback?: "approved" | "denied" | "corrected";
+  groundTruthTrusted?: boolean;
 };
 
 let latestDraftRecognition: any = null;
 
 export function resetDraftRecognition() {
+  clearDraftGroundTruthSession();
   if (!latestDraftRecognition) return;
   latestDraftRecognition = null;
-  eventBus.emit("draft_cleared");
+  eventBus.emit("draft_cleared", null);
 }
 
 export async function ingestDraftRecognition(input: RecognizedDraft) {
+  const resolved = await resolveDraftFastPath(input);
+  if (resolved.action === "block") {
+    return latestDraftRecognition;
+  }
+  const effectiveInput: RecognizedDraft =
+    resolved.action === "fast_path"
+      ? {
+          ...rosterToManualIngest(resolved.state),
+          frameId: input.frameId ?? `fastpath:${resolved.profileFingerprint.slice(0, 12)}`,
+          timestamp: input.timestamp ?? Date.now(),
+          provisional: false,
+        }
+      : input;
+  const groundTruthTrusted = isGroundTruthTrusted(effectiveInput);
   const normalized = {
-    phase: input.phase ?? "pick",
-    allyPicks: compactSlots(input.allyPicks),
-    enemyPicks: compactSlots(input.enemyPicks),
-    allyBans: compactSlots(input.allyBans),
-    enemyBans: compactSlots(input.enemyBans),
-    allySpells: compactSpells(input.allySpells),
-    allyLanes: compactLanes(input.allyLanes),
-    selectedHero: normalizeSlot(input.selectedHero),
-    selectedRole: input.selectedRole,
-    selectedLane: normalizeContext(input.selectedLane),
-    selfSlot: normalizeContext(input.selfSlot),
-    firstPickSide: normalizeContext(input.firstPickSide),
-    laneOrientation: input.laneOrientation,
-    frameId: input.frameId,
-    timestamp: input.timestamp ?? Date.now(),
-    diagnostics: input.diagnostics,
-    provisional: Boolean(input.provisional),
+    phase: effectiveInput.phase ?? "pick",
+    allyPicks: compactSlots(effectiveInput.allyPicks),
+    enemyPicks: compactSlots(effectiveInput.enemyPicks),
+    allyBans: compactSlots(effectiveInput.allyBans),
+    enemyBans: compactSlots(effectiveInput.enemyBans),
+    allySpells: compactSpells(effectiveInput.allySpells),
+    allyLanes: compactLanes(effectiveInput.allyLanes),
+    selectedHero: normalizeSlot(effectiveInput.selectedHero),
+    selectedRole: effectiveInput.selectedRole,
+    selectedLane: normalizeContext(effectiveInput.selectedLane),
+    selfSlot: normalizeContext(effectiveInput.selfSlot),
+    firstPickSide: normalizeContext(effectiveInput.firstPickSide),
+    laneOrientation: effectiveInput.laneOrientation,
+    frameId: effectiveInput.frameId,
+    timestamp: effectiveInput.timestamp ?? Date.now(),
+    diagnostics: effectiveInput.diagnostics,
+    provisional: groundTruthTrusted ? false : Boolean(effectiveInput.provisional),
+    userFeedback: effectiveInput.userFeedback,
+    groundTruthTrusted,
   };
   const state = {
     ...normalized,
-    allyPicks: detectedSlots(normalized.allyPicks, "draft-pick-portrait"),
-    enemyPicks: detectedSlots(normalized.enemyPicks, "draft-pick-portrait"),
-    allyBans: detectedSlots(normalized.allyBans, "draft-ban-icon"),
-    enemyBans: detectedSlots(normalized.enemyBans, "draft-ban-icon"),
+    allyPicks: acceptedSlots(normalized.allyPicks, "draft-pick-portrait", groundTruthTrusted),
+    enemyPicks: acceptedSlots(normalized.enemyPicks, "draft-pick-portrait", groundTruthTrusted),
+    allyBans: acceptedSlots(normalized.allyBans, "draft-ban-icon", groundTruthTrusted),
+    enemyBans: acceptedSlots(normalized.enemyBans, "draft-ban-icon", groundTruthTrusted),
     allySpells: detectedSpells(normalized.allySpells),
     allyLanes: detectedLanes(normalized.allyLanes),
     selectedHero: null,
@@ -120,6 +148,18 @@ export async function ingestDraftRecognition(input: RecognizedDraft) {
     })
     : null;
   latestDraftRecognition = { state, analysis, updatedAt: new Date().toISOString() };
+  await appendAgentDebugLog({
+    hypothesisId: "F",
+    location: "draftRecognition.ts:ingest",
+    message: "Draft roster ingested",
+    data: {
+      provisional: state.provisional,
+      allyBans: state.allyBans.map((s: { slot?: number; heroName?: string }) => `${s.slot}:${s.heroName}`),
+      enemyBans: state.enemyBans.map((s: { slot?: number; heroName?: string }) => `${s.slot}:${s.heroName}`),
+      allyPicks: state.allyPicks.map((s: { slot?: number; heroName?: string }) => `${s.slot}:${s.heroName}`),
+      enemyPicks: state.enemyPicks.map((s: { slot?: number; heroName?: string }) => `${s.slot}:${s.heroName}`),
+    },
+  });
   updateMatchDraft(latestDraftRecognition);
   eventBus.emit("draft_recognized", latestDraftRecognition);
   eventBus.emit("draft_updated", analysis);
@@ -182,8 +222,25 @@ function slotValue(slot: RecognizedSlot) {
   return slot.heroId ?? slot.heroName ?? "";
 }
 
-function detectedSlots(slots: RecognizedSlot[], expectedSource: "draft-ban-icon" | "draft-pick-portrait") {
-  return slots.filter((slot) => isDetectedSlot(slot, expectedSource));
+function acceptedSlots(
+  slots: RecognizedSlot[],
+  expectedSource: "draft-ban-icon" | "draft-pick-portrait",
+  groundTruthTrusted: boolean,
+) {
+  const detected = slots.filter((slot) => isDetectedSlot(slot, expectedSource));
+  if (!groundTruthTrusted) return detected;
+  const manual = slots.filter(
+    (slot) =>
+      slot?.source === "manual" &&
+      (slot.heroId !== undefined || Boolean(slot.heroName)) &&
+      Number(slot.confidence ?? 0) >= DETECTED_FACT_CONFIDENCE,
+  );
+  const merged = new Map<string, RecognizedSlot>();
+  for (const slot of [...manual, ...detected]) {
+    const key = `${slot.slot ?? 0}:${slot.heroId ?? slot.heroName ?? ""}`;
+    merged.set(key, slot);
+  }
+  return [...merged.values()].sort((left, right) => Number(left.slot ?? 0) - Number(right.slot ?? 0));
 }
 
 function detectedSpells(spells: ReturnType<typeof compactSpells>) {

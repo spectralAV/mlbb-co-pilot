@@ -138,5 +138,252 @@
     },
     "expectedRule": "enemy_item_spike",
     "expectedScene": "counter"
+  },
+  {
+    "name": "draft screen opens draft plan",
+    "input": { "screen": "draft", "confidence": 0.82 },
+    "expectedRule": "draft_state",
+    "expectedScene": "picks"
+  },
+  {
+    "name": "death replay resets tempo",
+    "input": { "screen": "death_replay", "confidence": 0.8 },
+    "expectedRule": "death_reset",
+    "expectedScene": "text"
+  },
+  {
+    "name": "retribution contest on active lord",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.84,
+      "signals": {
+        "role": "jungle",
+        "objectiveName": "Lord",
+        "objectiveActive": true,
+        "enemyRetributionReady": true
+      }
+    },
+    "expectedRule": "retribution_contest",
+    "expectedScene": "map"
+  },
+  {
+    "name": "low health triggers reset call",
+    "input": { "screen": "live_hud", "confidence": 0.8, "signals": { "lowHealth": true } },
+    "expectedRule": "low_health_reset",
+    "expectedScene": "main"
+  },
+  {
+    "name": "three missing enemies warn vision gap",
+    "input": { "screen": "live_hud", "confidence": 0.82, "signals": { "missingEnemyCount": 3, "lanePressure": { "mid": "winning" } } },
+    "expectedRule": "missing_enemies",
+    "expectedScene": "counter"
+  },
+  {
+    "name": "four missing enemies collapse warning",
+    "input": { "screen": "live_hud", "confidence": 0.82, "signals": { "missingEnemyCount": 4, "lanePressure": { "mid": "winning" } } },
+    "expectedRule": "all_enemies_missing",
+    "expectedScene": "counter"
+  },
+  {
+    "name": "active objective with numbers secures",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.86,
+      "signals": {
+        "objectiveActive": true,
+        "objectiveName": "Lord",
+        "deadEnemies": 1,
+        "deadAllies": 0,
+        "mapMonitor": { "visibleObjectives": ["lord"], "visibleEnemies": 1, "visibleAllies": 3 }
+      }
+    },
+    "expectedRule": "objective_active_secure",
+    "expectedScene": "map"
+  },
+  {
+    "name": "late lord priority",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.85,
+      "signals": { "phase": "late", "objectiveSoon": true, "objectiveName": "Lord", "objectiveSpawnsInSec": 30 }
+    },
+    "expectedRule": "lord_late_priority",
+    "expectedScene": "map"
+  },
+  {
+    "name": "early turtle setup",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.84,
+      "signals": { "phase": "early", "objectiveSoon": true, "objectiveName": "Turtle", "objectiveSpawnsInSec": 45 }
+    },
+    "expectedRule": "turtle_early_setup",
+    "expectedScene": "map"
+  },
+  {
+    "name": "roam sets up losing gold lane gank",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.8,
+      "signals": { "role": "roam", "goldState": "even", "lanePressure": { "gold": "losing" } }
+    },
+    "expectedRule": "roam_gank_setup",
+    "expectedScene": "map"
+  },
+  {
+    "name": "split push threat on side lane",
+    "input": { "screen": "live_hud", "confidence": 0.83, "signals": { "splitPushThreat": true, "laneToPressure": "gold" } },
+    "expectedRule": "split_push_threat",
+    "expectedScene": "map"
+  },
+  {
+    "name": "ahead jungler invade window",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.84,
+      "signals": { "goldState": "ahead", "riverVision": true, "role": "jungle", "invadeWindow": true, "missingEnemyCount": 1 }
+    },
+    "expectedRule": "ahead_invade_window",
+    "expectedScene": "map"
+  },
+  {
+    "name": "objective numbers advantage",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.85,
+      "signals": {
+        "objectiveSoon": true,
+        "objectiveName": "Turtle",
+        "objectiveSpawnsInSec": 40,
+        "deadEnemies": 1,
+        "deadAllies": 0,
+        "riverVision": true
+      }
+    },
+    "expectedRule": "objective_numbers_advantage",
+    "expectedScene": "map"
+  },
+  {
+    "name": "generic objective setup",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.8,
+      "signals": { "objectiveSoon": true, "objectiveName": "Turtle", "objectiveSpawnsInSec": 50, "missingEnemyCount": 0, "riverVision": true }
+    },
+    "expectedRule": "objective_setup",
+    "expectedScene": "map"
+  },
+  {
+    "name": "explicit warning channel",
+    "input": { "screen": "live_hud", "confidence": 0.9, "signals": { "warning": "Enemy jungler spotted top" } },
+    "expectedRule": "explicit_warning",
+    "expectedScene": "text"
+  },
+  {
+    "name": "lobby idle lifecycle",
+    "input": { "screen": "lobby", "confidence": 0.7 },
+    "expectedRule": "lobby_idle",
+    "expectedScene": "main"
+  },
+  {
+    "name": "lost fight disengage",
+    "input": { "screen": "live_hud", "confidence": 0.82, "signals": { "deadAllies": 3, "deadEnemies": 1 } },
+    "expectedRule": "lost_fight_disengage",
+    "expectedScene": "text"
+  },
+  {
+    "name": "exp lane dive risk",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.81,
+      "signals": { "lanePressure": { "exp": "losing" }, "missingEnemyCount": 2 }
+    },
+    "expectedRule": "exp_lane_dive_risk",
+    "expectedScene": "map"
+  },
+  {
+    "name": "mid no priority",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.8,
+      "signals": { "lanePressure": { "mid": "losing" }, "missingEnemyCount": 2 }
+    },
+    "expectedRule": "mid_no_priority",
+    "expectedScene": "map"
+  },
+  {
+    "name": "behind safe farm",
+    "input": { "screen": "live_hud", "confidence": 0.8, "signals": { "goldState": "behind", "missingEnemyCount": 1 } },
+    "expectedRule": "behind_safe_farm",
+    "expectedScene": "main"
+  },
+  {
+    "name": "ultimate ready engage",
+    "input": { "screen": "live_hud", "confidence": 0.83, "signals": { "ultimateReady": true, "goldState": "ahead" } },
+    "expectedRule": "ultimate_ready_engage",
+    "expectedScene": "main"
+  },
+  {
+    "name": "build review on scoreboard",
+    "input": { "screen": "scoreboard", "confidence": 0.82 },
+    "expectedRule": "build_review",
+    "expectedScene": "main"
+  },
+  {
+    "name": "mid rotation winning",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.84,
+      "signals": { "lanePressure": { "mid": "winning" }, "missingEnemyCount": 2, "riverVision": true }
+    },
+    "expectedRule": "mid_rotation_winning",
+    "expectedScene": "map"
+  },
+  {
+    "name": "buff contest window",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.83,
+      "signals": { "buffThreat": "red buff", "goldState": "ahead", "riverVision": true }
+    },
+    "expectedRule": "buff_contest_window",
+    "expectedScene": "map"
+  },
+  {
+    "name": "wave crash before objective",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.85,
+      "signals": {
+        "objectiveSoon": true,
+        "objectiveName": "Turtle",
+        "objectiveSpawnsInSec": 35,
+        "waveState": "push",
+        "riverVision": true,
+        "missingEnemyCount": 0
+      }
+    },
+    "expectedRule": "wave_crash_objective",
+    "expectedScene": "map"
+  },
+  {
+    "name": "defensive warding behind",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.81,
+      "signals": { "goldState": "behind", "riverVision": false, "phase": "mid", "missingEnemyCount": 1 }
+    },
+    "expectedRule": "defensive_warding_behind",
+    "expectedScene": "counter"
+  },
+  {
+    "name": "early clear plan",
+    "input": {
+      "screen": "live_hud",
+      "confidence": 0.8,
+      "signals": { "phase": "early", "goldState": "even", "missingEnemyCount": 0, "riverVision": true }
+    },
+    "expectedRule": "early_clear_plan",
+    "expectedScene": "main"
   }
 ]

@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("bootstrap", "status", "train")]
+  [ValidateSet("bootstrap", "status", "train", "export-onnx")]
   [string]$Action = "status",
   [int]$Epochs = 60,
   [int]$ImageSize = 640,
@@ -64,6 +64,8 @@ if ($Action -eq "train") {
     "--recent-limit", "$RecentLimit",
     "--repeat-manual", "$RepeatManual"
   )
+} elseif ($Action -eq "export-onnx") {
+  $args += @("export-onnx")
 }
 
 & wsl @args

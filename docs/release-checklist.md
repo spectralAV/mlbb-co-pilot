@@ -7,10 +7,17 @@ Use this checklist before publishing a public release.
 - [ ] Confirm `package.json` version.
 - [ ] Update [README.md](../README.md) if commands, status, or package tags changed.
 - [ ] Update [Roadmap To 1.0.0](roadmap-1.0.md) if milestone status changed.
+- [ ] Check [Next Version Roadmap](roadmap-next-version.md) success criteria for `v0.5.0-desktop-alpha`.
 - [ ] Update [Known Limitations](known-limitations.md) with any new platform or CV caveats.
 - [ ] Confirm [NOTICE](../NOTICE) still describes third-party model and asset boundaries accurately.
 
 ## Quality Gates
+
+```powershell
+npm run release:gate
+```
+
+Or step by step:
 
 ```powershell
 npm run install:all
@@ -18,6 +25,7 @@ npm run build
 npm test
 npm run desktop:pack
 npm run cv:status
+npm run cv:wsl:status
 ```
 
 Expected result:
@@ -27,6 +35,20 @@ Expected result:
 - Test suite passes.
 - Electron unpacked build launches.
 - First-run setup page reports actionable readiness states.
+
+**Important:** Run `npm run build` before `npm run desktop:dist` or `desktop:pack`. The Electron bundle copies prebuilt `backend/dist` and `frontend/dist`; skipping build ships stale training/coach code.
+
+### Maintainer CV / training matrix (Windows + WSL ROCm)
+
+Documented in [data/cv/README.md](../data/cv/README.md#training-job-lifecycle-wsl). Before tagging:
+
+- [ ] One train start → stop mid-epoch (job API, WSL PIDs cleared).
+- [ ] Optional: backend restart during train → rehydrated status + stop works.
+- [ ] `rg "7242|debug-session|624fbe|#region agent" backend/src frontend/src` returns no release-blockers.
+- [ ] Copy [`.env.example`](../.env.example) to `.env` for local secrets (never commit `.env`).
+- [ ] One DirectML infer smoke: `npm run cv:status` shows `modelAvailable: true`.
+
+Near-term milestone doc: [roadmap-next-version.md](roadmap-next-version.md).
 
 ## Desktop Package
 

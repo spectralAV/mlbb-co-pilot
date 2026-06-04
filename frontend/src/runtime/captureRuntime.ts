@@ -1,11 +1,18 @@
 import { create } from "zustand";
-import { apiUrl, apiWsUrl, getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startNdiDirectCapture, startScrcpy, stopNdiDirectCapture, stopScrcpy } from "../api/client";
+import { agentDebugLog, apiUrl, apiWsUrl, getScreenStateModel, getUltralyticsStatus, inferUltralyticsFrame, ingestLiveVisionFrame, startNdiDirectCapture, startScrcpy, stopNdiDirectCapture, stopScrcpy } from "../api/client";
 import { detectDraftVisualContext } from "../vision/draftContextDetector";
-import { queueDraftBanIconRecognition } from "../vision/draftIconDetector";
+import { preloadDraftRecognitionModels, queueDraftBanIconRecognition } from "../vision/draftIconDetector";
 import { detectMinimapMarkerCandidatesFromRgba } from "../vision/minimapMarkerDetector";
+import { mapYoloMinimapMarkers, mapYoloMinimapObjects, mergeMinimapMarkers, type MinimapObjectDetection } from "../vision/minimapYolo";
+import {
+  filterYoloDetectionsForScreen,
+  minimapPanelRectFromYolo,
+  shouldQueueUltralyticsInference,
+} from "../vision/yoloScreenGate";
 import { detectEquipmentItems, type DetectedEquipmentItem } from "../vision/equipmentDetector";
 import { classifyWithTrainedScreenStateModel, type TrainedScreenStateModel } from "../vision/trainedScreenStateModel";
 import { calibratedRect, calibratedRectForKeys, ensureActiveCalibrationRegions } from "../vision/calibrationRegions";
+import { frameCanChallengeConfirmedState, requiredStableFrames } from "./visionStability";
 
 export type RegionKey = "equipment_window" | "attributes_window" | "scoreboard" | "minimap";
 export type Region = { key: RegionKey; label: string; rect: [number, number, number, number] };
@@ -49,13 +56,6 @@ type UltralyticsDetection = {
   trackId?: string;
   trackAge?: number;
   trackMissingFrames?: number;
-};
-type MinimapObjectDetection = {
-  id: string;
-  objectType: "turtle" | "lord" | "ally_turret" | "enemy_turret";
-  minimap: [number, number];
-  confidence: number;
-  source: "ultralytics-yolo";
 };
 type ScreenTextFact = {
   region: string;
@@ -305,6 +305,7 @@ const runtime = {
   adbPreviewUrl: "",
   adbTimer: null as number | null,
   adbActive: false,
+  adbPollInFlight: false,
   obsBridgeActive: false,
   ndiDirectActive: false,
   lastObsFrameAt: "",
@@ -345,6 +346,7 @@ const runtime = {
   ultralyticsFrameInFlight: false,
   lastUltralyticsAt: 0,
   lastUltralyticsStatusAt: 0,
+  lastYoloDetections: [] as UltralyticsDetection[],
   raf: null as number | null,
   ageTimer: null as number | null
 };
@@ -431,6 +433,7 @@ export function stopCaptureRuntime() {
   if (runtime.adbTimer != null) window.clearTimeout(runtime.adbTimer);
   if (runtime.ageTimer != null) window.clearInterval(runtime.ageTimer);
   runtime.adbActive = false;
+  runtime.adbPollInFlight = false;
   runtime.obsBridgeActive = false;
   runtime.ndiDirectActive = false;
   runtime.h264Socket?.close();
@@ -948,6 +951,8 @@ async function startAdbCapture() {
   useCaptureRuntimeStore.setState({ error: "" });
   resetBuffers();
   runtime.adbActive = true;
+  runtime.adbPollInFlight = false;
+  preloadDraftRecognitionModels();
   addCaptureLog("warn", "ADB still-frame capture started. This is for testing, not low-latency realtime CV.");
   useCaptureRuntimeStore.setState({ sourceMode: "adb", running: true });
   startAgeTimer();
@@ -979,7 +984,27 @@ function resetBuffers() {
   runtime.lastVisionPostedAt = 0;
   runtime.visionPostInFlight = false;
   runtime.visionStability = createVisionStabilityState();
-  useCaptureRuntimeStore.setState({ buffered: 0, nativeCrops: 0, fps: 0, analysisFps: 0, lastFrameAge: null, layoutProfile: null, uiAnchors: [], minimapDetections: [], liveVision: null });
+  useCaptureRuntimeStore.setState({
+    buffered: 0,
+    nativeCrops: 0,
+    fps: 0,
+    analysisFps: 0,
+    lastFrameAge: null,
+    sourceSize: { width: 0, height: 0 },
+    layoutProfile: null,
+    uiAnchors: [],
+    minimapDetections: [],
+    liveVision: null,
+  });
+}
+
+function syncPreviewCanvasFromAnalysis(width: number, height: number) {
+  if (!runtime.previewCanvas || !runtime.canvas) return;
+  if (runtime.previewCanvas.width !== width || runtime.previewCanvas.height !== height) {
+    runtime.previewCanvas.width = width;
+    runtime.previewCanvas.height = height;
+  }
+  runtime.previewCanvas.getContext("2d")?.drawImage(runtime.canvas, 0, 0, width, height);
 }
 
 function trimFrameTimes(times: number[], now: number) {
@@ -1041,40 +1066,109 @@ function processFrame() {
   analyzeCanvas(canvas, width, height);
 }
 
-async function pollAdbFrame() {
-  if (!runtime.adbActive) return;
-  const started = performance.now();
+function ensureAnalysisCanvas() {
+  if (!runtime.canvas) {
+    runtime.canvas = document.createElement("canvas");
+  }
+  return runtime.canvas;
+}
+
+async function readAdbFrameError(response: Response) {
+  const text = await response.text();
   try {
+    const json = JSON.parse(text) as { error?: string; code?: string };
+    return String(json.error ?? json.code ?? text).trim() || `HTTP ${response.status}`;
+  } catch {
+    return text.trim() || `HTTP ${response.status}`;
+  }
+}
+
+function adbPollErrorMessage(caught: unknown) {
+  if (caught instanceof Error && caught.message.trim()) return caught.message.trim();
+  if (caught instanceof Error && caught.name) return caught.name;
+  return String(caught || "ADB native frame capture failed.");
+}
+
+async function drawAdbFrameBlobToCanvas(canvas: HTMLCanvasElement, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("ADB frame image decode failed."));
+      element.src = url;
+    });
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    if (!width || !height) throw new Error("ADB frame image has no dimensions.");
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    canvas.getContext("2d", { willReadFrequently: true })?.drawImage(image, 0, 0);
+    return { width, height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function pollAdbFrame() {
+  if (!runtime.adbActive || runtime.adbPollInFlight) return;
+  runtime.adbPollInFlight = true;
+  const started = performance.now();
+  let nextDelayMs = 450;
+  try {
+    agentDebugLog("I6", "captureRuntime.ts:pollAdbStart", "ADB poll started", {});
     const response = await fetch(apiUrl(`/api/capture/frame?t=${Date.now()}`), { cache: "no-store" });
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) throw new Error(await readAdbFrameError(response));
+    const captureMs = Number(response.headers.get("x-capture-elapsed-ms") ?? 0);
     const elapsed = performance.now() - started;
+    nextDelayMs = Math.max(250, captureMs + 200, elapsed + 120);
     if (elapsed > 1000) addCaptureLog("warn", `ADB frame took ${Math.round(elapsed)}ms.`);
     const blob = await response.blob();
-    if (runtime.adbPreviewUrl) URL.revokeObjectURL(runtime.adbPreviewUrl);
-    runtime.adbPreviewUrl = URL.createObjectURL(blob);
-    useCaptureRuntimeStore.setState({ adbPreviewUrl: runtime.adbPreviewUrl });
-    const bitmap = await createImageBitmap(blob);
-    const canvas = runtime.canvas;
-    if (canvas) {
-      const width = bitmap.width;
-      const height = bitmap.height;
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-      updateSourceSize(width, height);
-      canvas.getContext("2d", { willReadFrequently: true })?.drawImage(bitmap, 0, 0);
-      recordRenderedFrame();
-      analyzeCanvas(canvas, width, height);
+    agentDebugLog("I6", "captureRuntime.ts:pollAdbBlob", "ADB frame blob received", {
+      bytes: blob.size,
+      type: blob.type,
+      captureMs,
+      clientMs: Math.round(elapsed),
+    });
+    if (blob.size < 120_000) {
+      agentDebugLog("I3", "captureRuntime.ts:pollAdbSkip", "ADB frame too small for CV", { bytes: blob.size });
+      return;
     }
-    bitmap.close();
+    const canvas = ensureAnalysisCanvas();
+    const { width, height } = await drawAdbFrameBlobToCanvas(canvas, blob);
+    agentDebugLog("I6", "captureRuntime.ts:pollAdbDecoded", "ADB frame decoded to canvas", { width, height });
+    const layoutProfile = selectLayoutProfile(width, height);
+    updateSourceSize(width, height);
+    syncPreviewCanvasFromAnalysis(width, height);
+    recordRenderedFrame();
+    const vision = analyzeCanvas(canvas, width, height);
+    agentDebugLog("D", "captureRuntime.ts:pollAdbFrame", "ADB frame analyzed", {
+      width,
+      height,
+      aspect: width / height,
+      bytes: blob.size,
+      screen: vision?.screen,
+      confidence: vision?.confidence,
+      layoutId: layoutProfile.id,
+      layoutLabel: layoutProfile.label,
+      fps: currentRenderFps(),
+    });
+    useCaptureRuntimeStore.setState({ error: "" });
   } catch (caught) {
-    const message = caught instanceof Error ? caught.message : "ADB native frame capture failed.";
+    const message = adbPollErrorMessage(caught);
+    agentDebugLog("A", "captureRuntime.ts:pollAdbError", "ADB poll failed", {
+      error: message.slice(0, 200),
+      kind: caught instanceof Error ? caught.name : typeof caught,
+    });
     addCaptureLog("error", message.slice(0, 180));
     useCaptureRuntimeStore.setState({ error: message });
+    nextDelayMs = Math.max(800, nextDelayMs);
   } finally {
+    runtime.adbPollInFlight = false;
     if (!runtime.adbActive) return;
-    runtime.adbTimer = window.setTimeout(() => void pollAdbFrame(), Math.max(120, 450 - (performance.now() - started)));
+    runtime.adbTimer = window.setTimeout(() => void pollAdbFrame(), nextDelayMs);
   }
 }
 
@@ -1291,17 +1385,41 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
   runtime.frameBuffer.push({ time: now, sourceWidth: width, sourceHeight: height, regions: metrics });
   while (runtime.frameBuffer.length > maxBufferedFrames) runtime.frameBuffer.shift();
   queueNativeWindowCrops(canvas, width, height, now, metrics, frameRegions);
-  const minimapDetections = detectMinimapMarkers(ctx, width, height, now, frameRegions);
   const draftContext = detectCachedDraftContext(canvas, now);
+  const screenHint = runtime.visionStability.confirmed?.screen ?? "unknown";
+  const sourceMode = sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode;
+  if (sourceMode === "obs" || sourceMode === "recording") {
+    const backendYolo = useCaptureRuntimeStore.getState().liveVision?.signals?.yoloDetections;
+    if (Array.isArray(backendYolo) && backendYolo.length) {
+      runtime.lastYoloDetections = filterYoloDetectionsForScreen(backendYolo, screenHint);
+    }
+  }
+  const yoloForLayout = filterYoloDetectionsForScreen(runtime.lastYoloDetections, screenHint);
+  const minimapPanelRect = minimapPanelRectFromYolo(yoloForLayout, regionRect(frameRegions, "minimap"));
+  const colorMinimapDetections = screenHint === "draft"
+    ? []
+    : detectMinimapMarkers(ctx, width, height, now, frameRegions, minimapPanelRect);
   const rawVision = {
-    ...classifyVisionFrame(metrics, probeMetrics, minimapDetections, Boolean(draftContext.selfSlot || draftContext.firstPickSide), runtime.trainedScreenModel),
+    ...classifyVisionFrame(metrics, probeMetrics, colorMinimapDetections, Boolean(draftContext.selfSlot || draftContext.firstPickSide), runtime.trainedScreenModel),
     layoutProfile,
     anchors: uiAnchors,
   };
   const liveVision = sourceOverride === "recording"
     ? rawVision
     : stabilizeVisionFrame(rawVision, runtime.visionStability);
-  const trustedMinimapDetections = liveVision.screen === "draft" ? [] : minimapDetections;
+  const gatedYolo = filterYoloDetectionsForScreen(runtime.lastYoloDetections, liveVision.screen);
+  const yoloMinimapDetections = liveVision.screen === "draft"
+    ? []
+    : mapYoloMinimapMarkers(gatedYolo, minimapPanelRect, now);
+  const minimapDetections = mergeMinimapMarkers(colorMinimapDetections, yoloMinimapDetections);
+  const minimapObjects = liveVision.screen === "draft" ? [] : mapYoloMinimapObjects(gatedYolo, minimapPanelRect);
+  const trustedMinimapDetections = minimapDetections;
+  if (minimapDetections.length && !rawVision.evidence.some((line) => line.includes("minimap marker"))) {
+    liveVision.evidence = [
+      ...liveVision.evidence,
+      `${minimapDetections.length} minimap marker${minimapDetections.length === 1 ? "" : "s"}`,
+    ];
+  }
 
   runtime.frameTimes.push(now);
   trimFrameTimes(runtime.frameTimes, now);
@@ -1319,14 +1437,24 @@ function analyzeCanvas(canvas: HTMLCanvasElement, width: number, height: number,
     minimapDetections: trustedMinimapDetections,
     liveVision
   });
-  queueLiveVisionFrame(canvas, liveVision, metrics, probeMetrics, trustedMinimapDetections, sourceOverride);
+  queueLiveVisionFrame(canvas, liveVision, metrics, probeMetrics, trustedMinimapDetections, sourceOverride, {
+    yoloDetections: gatedYolo,
+    minimapObjects,
+  });
   if (!runtime.ultralyticsReady && !runtime.ultralyticsStatusLoading && now - runtime.lastUltralyticsStatusAt > 10000) {
     void loadUltralyticsStatus();
   }
-  if ((sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode) !== "obs") {
+  const usesBackendYolo = sourceMode === "obs" || sourceMode === "recording";
+  if (!usesBackendYolo) {
     queueUltralyticsLiveFrame(canvas, liveVision);
   }
-  queueDraftBanIconRecognition(canvas, liveVision, sourceOverride ?? useCaptureRuntimeStore.getState().sourceMode);
+  queueDraftBanIconRecognition(
+    canvas,
+    liveVision,
+    sourceMode,
+    gatedYolo.length ? gatedYolo : runtime.lastYoloDetections,
+    usesBackendYolo && gatedYolo.length ? { yoloFresh: true } : undefined,
+  );
   return liveVision;
 }
 
@@ -1461,8 +1589,30 @@ export function classifyVisionFrame(
   const contextualDraftVisible =
     hasDraftContext &&
     center.mean < 90 &&
-    center.contrast > 42 &&
+    (center.contrast > 42 ||
+      (center.contrast > 7 && leftRail.contrast < 20 && rightRail.contrast < 20)) &&
     (leftRail.mean < 75 || rightRail.mean < 75);
+  const phoneDarkDraftRails =
+    minimapVisible &&
+    leftRail.contrast > 1 &&
+    rightRail.contrast > 1 &&
+    leftRail.contrast < 20 &&
+    rightRail.contrast < 20 &&
+    center.mean < 60 &&
+    center.contrast < 24 &&
+    topHud.mean < 60;
+  const phoneBrightDraftRails =
+    minimapVisible &&
+    leftRail.contrast > 18 &&
+    rightRail.contrast > 18 &&
+    leftRail.mean < 85 &&
+    rightRail.mean < 85 &&
+    center.mean >= 60 &&
+    center.mean < 95 &&
+    topHud.mean < 85 &&
+    !lobbyVisible &&
+    !modalVisible;
+  const draftRailSignature = phoneDarkDraftRails || phoneBrightDraftRails;
   const completedDraftVisible =
     railsVisible &&
     center.contrast > 27 &&
@@ -1483,6 +1633,13 @@ export function classifyVisionFrame(
   if (contextualDraftVisible) {
     evidence.push("confirmed draft context marker");
     return { screen: "draft", confidence: 0.78, evidence, timestamp: Date.now() };
+  }
+  if (draftRailSignature) {
+    evidence.push(
+      phoneDarkDraftRails ? "dark draft pick rails" : "bright draft pick rails",
+      "decorative minimap suppressed for draft",
+    );
+    return { screen: "draft", confidence: phoneDarkDraftRails ? 0.64 : 0.7, evidence, timestamp: Date.now() };
   }
   if (learned?.accepted && learned.confidence >= 0.58) {
     evidence.push(`trained screen model: ${learned.screen}`);
@@ -1513,18 +1670,6 @@ export function classifyVisionFrame(
   return { screen: "unknown", confidence: 0.2, evidence, timestamp: Date.now() };
 }
 
-function requiredStableFrames(current: VisionScreenState | null, next: VisionScreenState, confidence: number) {
-  if (!current) return confidence >= 0.7 ? 2 : 3;
-  if (next === "unknown") return 6;
-  if (next === "loading") return 4;
-  if (next === "draft" && confidence >= 0.75) return 2;
-  return 3;
-}
-
-function frameCanChallengeConfirmedState(frame: LiveVisionFrame) {
-  return frame.screen === "unknown" || frame.screen === "loading" || frame.confidence >= 0.52;
-}
-
 export function stabilizeVisionFrame(frame: LiveVisionFrame, state: VisionStabilityState): LiveVisionFrame {
   const current = state.confirmed;
   if (current?.screen === frame.screen) {
@@ -1537,7 +1682,7 @@ export function stabilizeVisionFrame(frame: LiveVisionFrame, state: VisionStabil
     return state.confirmed;
   }
 
-  if (current && !frameCanChallengeConfirmedState(frame)) {
+  if (current && !frameCanChallengeConfirmedState(frame, current.screen)) {
     state.candidate = null;
     state.candidateFrames = 0;
     state.confirmed = {
@@ -1553,7 +1698,7 @@ export function stabilizeVisionFrame(frame: LiveVisionFrame, state: VisionStabil
 
   state.candidateFrames = state.candidate?.screen === frame.screen ? state.candidateFrames + 1 : 1;
   state.candidate = frame;
-  const required = requiredStableFrames(current?.screen ?? null, frame.screen, frame.confidence);
+  const required = requiredStableFrames(current?.screen ?? null, frame.screen, frame.confidence, frame.evidence);
 
   if (!current && (frame.screen === "unknown" || frame.screen === "loading")) {
     return frame;
@@ -1595,7 +1740,8 @@ function queueLiveVisionFrame(
   metrics: Record<RegionKey, RegionMetrics>,
   probes: Record<string, RegionMetrics>,
   minimapMarkers: MinimapMarkerDetection[],
-  sourceOverride?: SourceMode
+  sourceOverride?: SourceMode,
+  extraSignals?: { yoloDetections?: UltralyticsDetection[]; minimapObjects?: MinimapObjectDetection[] },
 ) {
   const now = performance.now();
   if (runtime.visionPostInFlight || now - runtime.lastVisionPostedAt < 350) return;
@@ -1606,6 +1752,13 @@ function queueLiveVisionFrame(
     const equipmentItems = vision.screen === "scoreboard" ? await detectEquipmentItems(canvas) : [];
     const allyEquipment = equipmentItems.filter((item) => item.side === "ally");
     const enemyEquipment = equipmentItems.filter((item) => item.side === "enemy");
+    const attributesMetric = metrics.attributes_window;
+    const lowHealth = Boolean(
+      attributesMetric?.active
+      && attributesMetric.mean > 0
+      && attributesMetric.mean < 95
+      && attributesMetric.contrast > 18,
+    );
     return ingestLiveVisionFrame({
       source,
       timestamp: Date.now(),
@@ -1618,10 +1771,26 @@ function queueLiveVisionFrame(
       anchors: vision.anchors,
       regions: { ...metrics, ...probes },
       minimapMarkers,
-      ...(equipmentItems.length ? { signals: { allyEquipment, enemyEquipment } } : {}),
+      ...((equipmentItems.length || lowHealth || extraSignals?.yoloDetections?.length || extraSignals?.minimapObjects?.length)
+        ? {
+          signals: {
+            ...(equipmentItems.length ? { allyEquipment, enemyEquipment } : {}),
+            ...(lowHealth ? { lowHealth: true } : {}),
+            ...(extraSignals?.yoloDetections?.length ? { yoloDetections: extraSignals.yoloDetections } : {}),
+            ...(extraSignals?.minimapObjects?.length ? { minimapObjects: extraSignals.minimapObjects } : {}),
+          },
+        }
+        : {}),
     });
   })().then((result) => {
     const data = result.data ?? result;
+    const yoloFromBackend = Array.isArray(data.signals?.yoloDetections) ? data.signals.yoloDetections as UltralyticsDetection[] : [];
+    if (yoloFromBackend.length) {
+      runtime.lastYoloDetections = filterYoloDetectionsForScreen(
+        yoloFromBackend,
+        (data.screen ?? vision.screen) as VisionScreenState,
+      );
+    }
     useCaptureRuntimeStore.setState({
       liveVision: {
         screen: data.screen ?? vision.screen,
@@ -1643,12 +1812,15 @@ function queueLiveVisionFrame(
 function queueUltralyticsLiveFrame(canvas: HTMLCanvasElement, vision: LiveVisionFrame) {
   const now = performance.now();
   if (!runtime.ultralyticsReady || runtime.ultralyticsFrameInFlight || now - runtime.lastUltralyticsAt < 1200) return;
+  if (!shouldQueueUltralyticsInference(vision.screen)) return;
   runtime.lastUltralyticsAt = now;
   runtime.ultralyticsFrameInFlight = true;
   void canvasToBlob(canvas).then(async (blob) => {
     const result = await inferUltralyticsFrame(blob);
     const data = result.data ?? result;
-    const detections = Array.isArray(data.detections) ? data.detections as UltralyticsDetection[] : [];
+    const raw = Array.isArray(data.detections) ? data.detections as UltralyticsDetection[] : [];
+    const detections = filterYoloDetectionsForScreen(raw, vision.screen);
+    runtime.lastYoloDetections = detections.length ? detections : runtime.lastYoloDetections;
     const minimapMarkers = Array.isArray(data.minimapMarkers) ? data.minimapMarkers : [];
     const minimapObjects = Array.isArray(data.minimapObjects) ? data.minimapObjects : [];
     const surface = detectedYoloScreen(detections);
@@ -1672,19 +1844,27 @@ function queueUltralyticsLiveFrame(canvas: HTMLCanvasElement, vision: LiveVision
       signals: { yoloDetections: detections, minimapObjects },
     });
     const ingested = response.data ?? response;
-    useCaptureRuntimeStore.setState({
-      liveVision: {
-        screen: ingested.screen ?? screen,
-        confidence: Number(ingested.confidence ?? confidence),
-        evidence: ingested.evidence ?? vision.evidence,
-        layoutProfile: ingested.layoutProfile ?? vision.layoutProfile,
-        anchors: ingested.anchors ?? vision.anchors,
-        directorScene: ingested.directorScene,
-        timestamp: Number(ingested.timestamp ?? Date.now()),
-        source: ingested.source ?? "ultralytics-yolo",
-        signals: ingested.signals,
-      },
-    });
+    const refreshedVision: LiveVisionFrame = {
+      screen: (ingested.screen ?? screen) as VisionScreenState,
+      confidence: Number(ingested.confidence ?? confidence),
+      evidence: ingested.evidence ?? vision.evidence,
+      layoutProfile: ingested.layoutProfile ?? vision.layoutProfile,
+      anchors: ingested.anchors ?? vision.anchors,
+      directorScene: ingested.directorScene,
+      timestamp: Number(ingested.timestamp ?? Date.now()),
+      source: ingested.source ?? "ultralytics-yolo",
+      signals: ingested.signals,
+    };
+    useCaptureRuntimeStore.setState({ liveVision: refreshedVision });
+    if (refreshedVision.screen === "draft" && refreshedVision.confidence >= 0.55) {
+      queueDraftBanIconRecognition(
+        canvas,
+        refreshedVision,
+        useCaptureRuntimeStore.getState().sourceMode,
+        detections,
+        { yoloFresh: true },
+      );
+    }
   }).catch(() => {}).finally(() => {
     runtime.ultralyticsFrameInFlight = false;
   });
@@ -1726,8 +1906,17 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
   });
 }
 
-function detectMinimapMarkers(ctx: CanvasRenderingContext2D, width: number, height: number, sampledAt: number, frameRegions = calibratedRuntimeRegions()): MinimapMarkerDetection[] {
-  const region = frameRegions.find((item) => item.key === "minimap");
+function detectMinimapMarkers(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  sampledAt: number,
+  frameRegions = calibratedRuntimeRegions(),
+  minimapRectOverride?: [number, number, number, number],
+): MinimapMarkerDetection[] {
+  const region = minimapRectOverride
+    ? { key: "minimap" as const, label: "Minimap", rect: minimapRectOverride }
+    : frameRegions.find((item) => item.key === "minimap");
   if (!region) return [];
   const { x, y, w, h } = pixelRegion(width, height, region);
   let image: ImageData;

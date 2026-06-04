@@ -6,6 +6,7 @@ import {
   getHeroRecognitionManifest,
   getScreenOcrStatus,
   getTimerOcrStatus,
+  getCvDatasetQuality,
   getUltralyticsStatus,
   inferScreenOcrFrame,
   inferTimerCrop,
@@ -15,10 +16,10 @@ import {
   installUltralyticsRuntime,
   saveCvAnnotation,
   syncCvAnnotations,
-  trainUltralyticsModel,
 } from "../api/client";
 import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingUnavailable } from "../utils/cvTraining";
+import { useUltralyticsTrainingJob } from "../utils/useUltralyticsTrainingJob";
 
 type LabelClass = { id: number; name: string; group: string };
 type HeroOption = { id: number; name: string };
@@ -99,6 +100,7 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
   const [heroes, setHeroes] = useState<HeroOption[]>([]);
   const [samples, setSamples] = useState<AnnotationSample[]>([]);
   const [model, setModel] = useState<any>(null);
+  const [datasetQuality, setDatasetQuality] = useState<any>(null);
   const [timerOcr, setTimerOcr] = useState<any>(null);
   const [screenOcr, setScreenOcr] = useState<any>(null);
   const [videoUrl, setVideoUrl] = useState("");
@@ -127,6 +129,11 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
   const [visibleLayers, setVisibleLayers] = useState(defaultVisibleLayers);
   const [message, setMessage] = useState("Import a gameplay video to check detections frame by frame.");
   const [busy, setBusy] = useState("");
+  const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
+  const { trainingBusy, startTraining } = useUltralyticsTrainingJob({
+    onMessage: setMessage,
+    onCompleted: refresh,
+  });
 
   useEffect(() => {
     void refresh();
@@ -175,10 +182,11 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
   ] : null;
 
   async function refresh() {
-    const [classResult, sampleResult, modelResult, heroResult, timerResult, screenOcrResult] = await Promise.allSettled([
+    const [classResult, sampleResult, modelResult, qualityResult, heroResult, timerResult, screenOcrResult] = await Promise.allSettled([
       getCvAnnotationClasses(),
       getCvAnnotations(),
       getUltralyticsStatus(),
+      getCvDatasetQuality(),
       getHeroRecognitionManifest(),
       getTimerOcrStatus(),
       getScreenOcrStatus(),
@@ -186,6 +194,7 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
     if (classResult.status === "fulfilled") setClasses(classResult.value.data ?? []);
     if (sampleResult.status === "fulfilled") setSamples(sampleResult.value.data ?? []);
     if (modelResult.status === "fulfilled") setModel(modelResult.value.data ?? modelResult.value);
+    if (qualityResult.status === "fulfilled") setDatasetQuality(qualityResult.value.data ?? qualityResult.value);
     if (heroResult.status === "fulfilled") {
       const nextHeroes = (heroResult.value.data?.heroes ?? [])
         .map((hero: any) => ({ id: Number(hero.id), name: String(hero.name ?? "").trim() }))
@@ -705,25 +714,21 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
       setMessage(cpuTrainingDisabledMessage);
       return;
     }
+    if (trainingBusy) {
+      setMessage("A training job is already running.");
+      return;
+    }
     const quick = scope === "correction";
-    setBusy(quick ? "quick-train" : "train");
     setMessage(quick
-      ? "Synchronizing saved corrections and quick fine-tuning recent manual frames."
-      : "Synchronizing all saved frames and running a full 960px detector rebuild.");
+      ? "Synchronizing saved corrections and starting quick fine-tune."
+      : "Synchronizing all saved frames and starting full 960px detector training.");
     try {
       await syncCvAnnotations();
-      const result = await trainUltralyticsModel(quick
+      await startTraining(quick
         ? { trainingScope: "correction", epochs: 8, imageSize: 640, batch: 4, recentLimit: 32, repeatManual: 8 }
         : { trainingScope: "full", epochs: 30, imageSize: 960, batch: 4 });
-      setModel(result.data ?? result);
-      await refresh();
-      setMessage(quick
-        ? "Quick correction fine-tune complete. Updated detector weights are ready for checks."
-        : "Full training complete. Updated detector weights are ready for checks.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : quick ? "Quick correction fine-tune failed." : "Training failed.");
-    } finally {
-      setBusy("");
+      setMessage(error instanceof Error ? error.message : quick ? "Quick fine-tune failed to start." : "Training failed to start.");
     }
   }
 
@@ -910,7 +915,16 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
   const frameNumber = frameKeyForTime(currentTime);
   const modelLabel = modelReady ? "HeroDetector v3" : model?.packageAvailable ? "No weights" : "YOLOv8n";
   const deviceLabel = model?.device?.name ?? model?.device ?? "Local GPU";
-  const trainingBlocked = cpuTrainingBlocked(model) || trainingUnavailable(model);
+  const valMap = datasetQuality?.lastTraining?.validation?.mAP50;
+  const mapLabel = typeof valMap === "number" && Number.isFinite(valMap)
+    ? valMap.toFixed(3)
+    : datasetQuality?.analysisPath
+      ? "Run train"
+      : "cv:analyze";
+  const draftIoU = datasetQuality?.draftMeanSlotIoU;
+  const datasetDetail = typeof draftIoU === "number"
+    ? `Draft slot IoU ${draftIoU.toFixed(3)}`
+    : (datasetQuality?.hints?.[0] ?? `${candidateLabelCount} candidate labels`);
   const selectedBox = reviewBoxes.find((box) => box.id === selectedId);
   const selectedName = selectedBox ? boxName(selectedBox) : "";
   const selectedIsHeroMarker = isHeroMarkerClass(selectedName);
@@ -939,8 +953,8 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
     <button className="cv-ghost-button inline-flex items-center gap-2" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
       <Upload size={16} />Import Video
     </button>
-    <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("correction")}>
-      <Play size={16} />{busy === "quick-train" ? "Fine-tuning..." : "Quick Fine-Tune"}
+    <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked || trainingBusy} onClick={() => void train("correction")}>
+      <Play size={16} />{trainingBusy ? "Fine-tuning..." : "Quick Fine-Tune"}
     </button>
     <input
       ref={fileRef}
@@ -983,7 +997,7 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
       <MetricCard icon={<Wand2 size={28} />} label="Model" value={modelLabel} detail={model?.weights?.split(/[\\/]/).pop() ?? "YOLO vision runtime"} />
       <MetricCard icon={<CheckCircle2 size={24} />} label="Status" value={modelReady ? "Ready" : model?.packageAvailable ? "No weights" : "Offline"} detail={busy ? `Busy: ${busy}` : "Detector bench"} dot />
       <MetricCard icon={<Layers size={26} />} label="Dataset" value={`${model?.training?.images ?? 0} train / ${model?.validation?.images ?? 0} val`} detail={`${sampleCount} saved frames`} />
-      <MetricCard icon={<Gauge size={24} />} label="mAP (val)" value={modelReady ? "0.892" : "--"} detail={`${candidateLabelCount} candidate labels`} meter={modelReady ? 89 : 0} />
+      <MetricCard icon={<Gauge size={24} />} label="mAP50 (last train)" value={mapLabel} detail={datasetDetail} meter={typeof valMap === "number" ? Math.round(valMap * 100) : 0} />
       <MetricCard icon={<Monitor size={24} />} label="FPS (infer)" value={modelReady ? "87.6" : "--"} detail={`${Math.round(confidence * 100)}% threshold`} meter={modelReady ? 88 : 0} />
       <MetricCard icon={<Cpu size={24} />} label="Device" value={String(deviceLabel)} detail="runtime target" />
     </section>
@@ -1361,7 +1375,7 @@ export function CvVideoTool({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         </label>
       </div>
-      <button className="cv-validation-button" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked} onClick={() => void train("full")}>
+      <button className="cv-validation-button" disabled={Boolean(busy) || !model?.packageAvailable || trainingBlocked || trainingBusy} onClick={() => void train("full")}>
         <Play size={16} />Full Train
       </button>
     </section>

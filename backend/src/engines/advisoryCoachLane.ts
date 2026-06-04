@@ -6,6 +6,7 @@ import {
 } from "./advisoryCoach.js";
 import type { LiveReasoningInput, LiveReasoningOutput } from "./liveReasoningEngine.js";
 import { heuristicAdvisoryCoach } from "./heuristicAdvisoryCoach.js";
+import { llmSidecarAdvisoryCoach } from "./llmSidecarAdvisoryCoach.js";
 import { updateMatchAdvisory } from "../state/matchState.js";
 
 let latestAdvisory: AdvisoryCoachOutput | null = null;
@@ -13,8 +14,8 @@ let lastRunAt = 0;
 let inFlight = false;
 
 function resolveAdvisor(): AdvisoryCoach {
-  if (ADVISORY_COACH_CONFIG.provider === "llm-sidecar") {
-    return heuristicAdvisoryCoach;
+  if (ADVISORY_COACH_CONFIG.provider === "llm-sidecar" && ADVISORY_COACH_CONFIG.sidecarUrl?.trim()) {
+    return llmSidecarAdvisoryCoach;
   }
   return heuristicAdvisoryCoach;
 }

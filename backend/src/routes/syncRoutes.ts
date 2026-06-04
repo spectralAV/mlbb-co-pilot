@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { syncOfficialData } from "../providers/mlbb/syncOfficialData.js";
 import { getMlbbAdbAssetStatus, readMlbbAdbTexture, syncMlbbAdbAssets } from "../services/mlbbAdbAssets.js";
+import { getUiLayoutGraphSummary, readUiLayoutGraphBundle } from "../services/uiLayoutGraph.js";
 import { compileSkinPortraitSignatures, getSkinPortraitManifest } from "../vision/skinPortraitRecognition.js";
 
 const SyncSchema = z.object({
@@ -16,7 +17,10 @@ const AdbAssetSyncSchema = z.object({
 
 function safeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Sync failed";
-  return message.replace(/authorization[^\s"]+/gi, "authorization [redacted]");
+  return message
+    .replace(/authorization[^\s"]+/gi, "authorization [redacted]")
+    .replace(/ROBOFLOW_API_KEY[=:\s][^\s"]+/gi, "ROBOFLOW_API_KEY [redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]");
 }
 
 export async function syncRoutes(app: FastifyInstance) {
@@ -53,6 +57,15 @@ export async function syncRoutes(app: FastifyInstance) {
     } catch (error) {
       return reply.code(400).send({ success: false, error: safeError(error) });
     }
+  });
+
+  app.get("/api/sync/adb-assets/layout", async () => ({ success: true, data: await getUiLayoutGraphSummary() }));
+
+  app.get("/api/sync/adb-assets/layout/:bundle", async (req, reply) => {
+    const bundle = decodeURIComponent(String((req.params as { bundle?: string }).bundle ?? ""));
+    const entry = await readUiLayoutGraphBundle(bundle);
+    if (!entry) return reply.code(404).send({ success: false, error: "Layout bundle not found in ui-layout-graph.json" });
+    return { success: true, data: entry };
   });
 
   app.get("/api/sync/adb-assets/texture/*", async (req, reply) => {

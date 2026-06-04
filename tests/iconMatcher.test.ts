@@ -8,7 +8,7 @@ import { configuredDraftContextRegions, detectDraftVisualContextFromRgba } from 
 import { configuredDraftAuxiliarySlots, hasVisibleLaneGlyph, hasVisibleSpellBadge } from "../frontend/src/vision/draftAuxDetector.ts";
 import { configuredEquipmentSlots } from "../frontend/src/vision/equipmentDetector.ts";
 import { resetActiveCalibrationRegions, setActiveCalibrationRegions } from "../frontend/src/vision/calibrationRegions.ts";
-import { acceptIconMatch, mirrorIconSignature, rankIconCandidates } from "../frontend/src/vision/iconMatcher.ts";
+import { acceptBanIconMatch, acceptIconMatch, mirrorIconSignature, rankIconCandidates } from "../frontend/src/vision/iconMatcher.ts";
 import { acceptPortraitMatch, mirrorDraftBannerSignature, mirrorPortraitSignature, rankDraftBannerCandidates, rankPortraitCandidates } from "../frontend/src/vision/portraitMatcher.ts";
 
 const sharp = createRequire(new URL("../backend/package.json", import.meta.url))("sharp");
@@ -22,6 +22,14 @@ for (const fixture of fixtures) {
     assert.equal(accepted?.heroId ?? null, fixture.expectedHeroId);
   });
 }
+
+test("ban icon matcher accepts high-margin borderline scores", () => {
+  const ranking = [
+    { heroId: 116, heroName: "Gloo", variant: "normal" as const, confidence: 0.719 },
+    { heroId: 99, heroName: "Terizla", variant: "normal" as const, confidence: 0.683 },
+  ];
+  assert.equal(acceptBanIconMatch(ranking)?.heroName, "Gloo");
+});
 
 test("icon matcher mirrors signature columns", () => {
   assert.deepEqual(
@@ -44,9 +52,9 @@ test("draft portrait detector exposes both confirmed pick rails", () => {
   assert.equal(slots.enemyPicks.length, 5);
 });
 
-test("draft pick reference model uses base heroes until the tenth pick is confirmed", () => {
-  assert.equal(pickReferenceModelForVisibleSlots([true, true, true, true, true, true, true, true, true, false]), "base-icon");
-  assert.equal(pickReferenceModelForVisibleSlots(Array.from({ length: 10 }, () => true)), "skin-icon");
+test("draft pick reference model uses portrait banners not head icons", () => {
+  assert.equal(pickReferenceModelForVisibleSlots([true, true, true, true, true, true, true, true, true, false]), "portrait-banner");
+  assert.equal(pickReferenceModelForVisibleSlots(Array.from({ length: 10 }, () => true)), "portrait-banner");
 });
 
 test("draft pick surface arbitration keeps the strongest accepted identity", () => {

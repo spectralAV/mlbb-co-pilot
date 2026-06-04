@@ -12,11 +12,11 @@ import {
   inferUltralyticsFrame,
   saveCvAnnotation,
   syncCvAnnotations,
-  trainUltralyticsModel,
   updateCvAnnotation,
 } from "../api/client";
 import { normalizeReviewRect, type NormalizedRect } from "../utils/cvGeometry";
 import { cpuTrainingBlocked, cpuTrainingDisabledMessage, trainingDeviceDetail, trainingDeviceLabel, trainingUnavailable } from "../utils/cvTraining";
+import { useUltralyticsTrainingJob } from "../utils/useUltralyticsTrainingJob";
 
 type LabelClass = { id: number; name: string; group: string };
 type HeroOption = { id: number; name: string };
@@ -174,6 +174,11 @@ export function CvModelEditor() {
       setMessage("CV model editor status is unavailable.");
     }
   }
+
+  const { trainingBusy, startTraining } = useUltralyticsTrainingJob({
+    onMessage: setMessage,
+    onCompleted: () => refresh({ includeModel: true }),
+  });
 
   async function openSample(sample: AnnotationSample, announce = true) {
     await loadSample(sample, announce);
@@ -429,18 +434,16 @@ export function CvModelEditor() {
       setMessage(cpuTrainingDisabledMessage);
       return;
     }
-    setBusy("train");
-    setMessage("Saving dataset sync and quick fine-tuning recent corrections.");
+    if (trainingBusy) {
+      setMessage("A training job is already running.");
+      return;
+    }
+    setMessage("Saving dataset sync and starting quick fine-tune for recent corrections.");
     try {
       await syncCvAnnotations();
-      const result = await trainUltralyticsModel({ trainingScope: "correction", epochs: 8, imageSize: 640, batch: 4, recentLimit: 32, repeatManual: 8 });
-      setModel(result.data ?? result);
-      await refresh();
-      setMessage("Quick fine-tune complete.");
+      await startTraining({ trainingScope: "correction", epochs: 8, imageSize: 640, batch: 4, recentLimit: 32, repeatManual: 8 });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Quick fine-tune failed.");
-    } finally {
-      setBusy("");
+      setMessage(error instanceof Error ? error.message : "Quick fine-tune failed to start.");
     }
   }
 
@@ -453,7 +456,7 @@ export function CvModelEditor() {
       <div className="cv-tool-actions">
         <button className="cv-ghost-button inline-flex items-center gap-2" disabled={Boolean(busy)} onClick={() => fileRef.current?.click()}><ImagePlus size={16} />Import Frame</button>
         <button className="btn inline-flex items-center gap-2" disabled={!imageBlob || Boolean(busy)} onClick={() => void saveCurrent()}><Save size={16} />Save</button>
-        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || trainingBlocked} onClick={() => void quickFineTune()}><Play size={16} />{busy === "train" ? "Fine-tuning..." : "Quick Fine-Tune"}</button>
+        <button className="btn inline-flex items-center gap-2" disabled={Boolean(busy) || trainingBlocked || trainingBusy} onClick={() => void quickFineTune()}><Play size={16} />{trainingBusy ? "Fine-tuning..." : "Quick Fine-Tune"}</button>
         <input ref={fileRef} className="hidden" type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFrame(file); event.currentTarget.value = ""; }} />
       </div>
     </section>

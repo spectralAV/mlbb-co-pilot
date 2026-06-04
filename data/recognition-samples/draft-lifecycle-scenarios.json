@@ -1,0 +1,166 @@
+{
+  "version": "0.1",
+  "purpose": "Offline replay of draft roster changes without a live 10-player lobby. Each scenario is a short frame sequence posted to ingestDraftRecognition.",
+  "scenarios": [
+    {
+      "id": "missed_ally_ban_slot",
+      "description": "Player skips a ban; slot 3 was seen once then stays empty on later frames.",
+      "frames": [
+        {
+          "phase": "ban",
+          "allyBans": [{ "slot": 3, "heroId": 116, "heroName": "Gloo", "confidence": 0.9, "source": "draft-ban-icon" }]
+        },
+        { "phase": "ban", "allyBans": [] },
+        { "phase": "ban", "allyBans": [] }
+      ],
+      "expect": {
+        "allyBanSlots": [],
+        "allyBanHeroNames": []
+      }
+    },
+    {
+      "id": "pre_lock_ally_pick_swap",
+      "description": "Vexana and Lesley trade ally pick rows before lock (finalize swap UI).",
+      "frames": [
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 2, "heroId": 38, "heroName": "Vexana", "confidence": 0.9, "source": "draft-pick-portrait" },
+            { "slot": 4, "heroId": 53, "heroName": "Lesley", "confidence": 0.9, "source": "draft-pick-portrait" }
+          ]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 2, "heroId": 53, "heroName": "Lesley", "confidence": 0.88, "source": "draft-pick-portrait" }
+          ]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 2, "heroId": 53, "heroName": "Lesley", "confidence": 0.88, "source": "draft-pick-portrait" }
+          ]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 4, "heroId": 38, "heroName": "Vexana", "confidence": 0.88, "source": "draft-pick-portrait" }
+          ]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 4, "heroId": 38, "heroName": "Vexana", "confidence": 0.88, "source": "draft-pick-portrait" }
+          ]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 2, "heroId": 53, "heroName": "Lesley", "confidence": 0.88, "source": "draft-pick-portrait" },
+            { "slot": 4, "heroId": 38, "heroName": "Vexana", "confidence": 0.87, "source": "draft-pick-portrait" }
+          ]
+        }
+      ],
+      "expect": {
+        "allyPickBySlot": { "2": "Lesley", "4": "Vexana" }
+      }
+    },
+    {
+      "id": "ally_lane_switch",
+      "description": "Highlighted row keeps the same slot but lane badge changes (e.g. gold to exp).",
+      "frames": [
+        {
+          "phase": "pick",
+          "allyLanes": [{ "slot": 3, "lane": "gold", "confidence": 0.82, "source": "draft-lane-icon" }],
+          "selfSlot": { "value": 3, "confidence": 0.9, "source": "draft-self-highlight" }
+        },
+        {
+          "phase": "pick",
+          "allyLanes": [{ "slot": 3, "lane": "exp", "confidence": 0.84, "source": "draft-lane-icon" }],
+          "selfSlot": { "value": 3, "confidence": 0.9, "source": "draft-self-highlight" }
+        }
+      ],
+      "expect": {
+        "selectedLane": "exp",
+        "allyLaneBySlot": { "3": "exp" }
+      }
+    },
+    {
+      "id": "ban_to_first_ally_pick",
+      "description": "Ban phase clears, first ally pick appears on slot 1.",
+      "frames": [
+        {
+          "phase": "ban",
+          "allyBans": [{ "slot": 1, "heroId": 86, "heroName": "Freya", "confidence": 0.91, "source": "draft-ban-icon" }]
+        },
+        { "phase": "ban", "allyBans": [{ "slot": 1, "heroId": 86, "heroName": "Freya", "confidence": 0.9, "source": "draft-ban-icon" }] },
+        {
+          "phase": "pick",
+          "allyBans": [{ "slot": 1, "heroId": 86, "heroName": "Freya", "confidence": 0.9, "source": "draft-ban-icon" }],
+          "allyPicks": [{ "slot": 1, "heroId": 18, "heroName": "Lolita", "confidence": 0.88, "source": "draft-pick-portrait" }]
+        }
+      ],
+      "expect": {
+        "allyBanHeroNames": ["Freya"],
+        "allyPickBySlot": { "1": "Lolita" }
+      }
+    },
+    {
+      "id": "enemy_ban_fill",
+      "description": "Enemy ban slot 2 fills while ally ban list stays empty on this frame.",
+      "frames": [
+        { "phase": "ban", "allyBans": [], "enemyBans": [] },
+        {
+          "phase": "ban",
+          "enemyBans": [{ "slot": 2, "heroId": 54, "heroName": "Harley", "confidence": 0.9, "source": "draft-ban-icon" }]
+        }
+      ],
+      "expect": {
+        "enemyBanHeroNames": ["Harley"]
+      }
+    },
+    {
+      "id": "pick_lock_after_three_swaps",
+      "description": "Stabilizer accepts Lesley on slot 2 after repeated swap evidence (mirrors unit test).",
+      "frames": [
+        {
+          "phase": "pick",
+          "allyPicks": [{ "slot": 2, "heroId": 38, "heroName": "Vexana", "confidence": 0.9, "source": "draft-pick-portrait" }]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [{ "slot": 2, "heroId": 53, "heroName": "Lesley", "confidence": 0.88, "source": "draft-pick-portrait" }]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [{ "slot": 2, "heroId": 53, "heroName": "Lesley", "confidence": 0.89, "source": "draft-pick-portrait" }]
+        },
+        {
+          "phase": "pick",
+          "allyPicks": [
+            { "slot": 2, "heroId": 53, "heroName": "Lesley", "confidence": 0.88, "source": "draft-pick-portrait" },
+            { "slot": 4, "heroId": 38, "heroName": "Vexana", "confidence": 0.87, "source": "draft-pick-portrait" }
+          ]
+        }
+      ],
+      "expect": {
+        "allyPickBySlot": { "2": "Lesley", "4": "Vexana" }
+      }
+    },
+    {
+      "id": "duplicate_ban_across_teams",
+      "description": "Same hero banned on both teams (valid in MLBB).",
+      "frames": [
+        {
+          "phase": "ban",
+          "allyBans": [{ "slot": 5, "heroId": 86, "heroName": "Freya", "confidence": 0.91, "source": "draft-ban-icon" }],
+          "enemyBans": [{ "slot": 2, "heroId": 86, "heroName": "Freya", "confidence": 0.9, "source": "draft-ban-icon" }]
+        }
+      ],
+      "expect": {
+        "allyBanHeroNames": ["Freya"],
+        "enemyBanHeroNames": ["Freya"]
+      }
+    }
+  ]
+}
