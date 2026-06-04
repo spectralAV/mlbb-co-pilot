@@ -65,6 +65,8 @@ import { appendAgentDebugLog, isAgentDebugEnabled } from "./services/agentDebugL
 
 const app = Fastify({ logger: true });
 const frontendDist = path.resolve(process.cwd(), "..", "frontend", "dist");
+const frontendAssets = path.join(frontendDist, "assets");
+const frontendIndex = path.join(frontendDist, "index.html");
 
 process.on("unhandledRejection", (reason) => {
   app.log.error({ reason }, "Unhandled promise rejection");
@@ -134,8 +136,8 @@ async function fileExists(file: string) {
 }
 
 async function registerFrontendStatic() {
-  if (!await fileExists(path.join(frontendDist, "index.html"))) return;
-  await app.register(staticPlugin, { root: frontendDist, prefix: "/", wildcard: false });
+  if (!await fileExists(frontendIndex)) return;
+  await app.register(staticPlugin, { root: frontendAssets, prefix: "/assets/" });
 
   app.get("/*", async (req, reply) => {
     const pathname = (req.raw.url ?? "").split("?")[0] ?? "";
@@ -143,7 +145,7 @@ async function registerFrontendStatic() {
       return reply.code(404).send({ ok: false, error: "Route not found." });
     }
     if (path.extname(pathname)) return reply.code(404).send({ ok: false, error: "Asset not found." });
-    return reply.sendFile("index.html");
+    return reply.type("text/html; charset=utf-8").send(await readFile(frontendIndex, "utf8"));
   });
 }
 
