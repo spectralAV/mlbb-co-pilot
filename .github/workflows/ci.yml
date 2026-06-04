@@ -46,6 +46,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Draft offline verify (geometry-only)
+        run: npm run cv:verify:draft-offline:ci
+
+      - name: Release gate (debug ingest grep)
+        run: node tools/release-gate.mjs --grep-only
+
   e2e-smoke:
     name: Playwright smoke
     runs-on: ubuntu-latest
