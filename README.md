@@ -96,8 +96,8 @@ Container tags:
 
 ```text
 ghcr.io/spectralav/mlbb-co-pilot:latest
-ghcr.io/spectralav/mlbb-co-pilot:0.4.1-live-cockpit
-ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.4.1-live-cockpit
+ghcr.io/spectralav/mlbb-co-pilot:0.5.0-desktop-alpha
+ghcr.io/spectralav/mlbb-co-pilot:mobile-legends-v0.5.0-desktop-alpha
 ```
 
 ## Capabilities
