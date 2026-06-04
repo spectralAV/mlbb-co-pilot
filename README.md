@@ -12,7 +12,7 @@
   <a href="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/publish-container.yml"><img alt="Container package" src="https://github.com/spectralAV/mlbb-co-pilot/actions/workflows/publish-container.yml/badge.svg"></a>
   <a href="https://github.com/spectralAV/mlbb-co-pilot/releases"><img alt="Release" src="https://img.shields.io/github/v/release/spectralAV/mlbb-co-pilot?include_prereleases&label=release"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/spectralAV/mlbb-co-pilot"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <a href="https://streamelements.com/martianost/tip"><img alt="Tip on StreamElements" src="https://img.shields.io/badge/tip-StreamElements-9146FF"></a>
   <img alt="Node.js" src="https://img.shields.io/badge/node-22%20LTS-339933?logo=node.js&logoColor=white">
   <img alt="Electron" src="https://img.shields.io/badge/electron-desktop-47848F?logo=electron&logoColor=white">
