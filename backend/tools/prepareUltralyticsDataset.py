@@ -6,7 +6,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+try:
+    from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+except ImportError:
+    Image = ImageDraw = ImageEnhance = ImageOps = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -123,6 +126,11 @@ MINIMAP_SPRITE_FILES = {
         "Atlas_BattleGround/sprites/Map_Lord04.png",
     ],
 }
+
+
+def require_pillow():
+    if Image is None or ImageDraw is None or ImageEnhance is None or ImageOps is None:
+        raise RuntimeError("Pillow is required. Use data/cv/.venv or pip install pillow.")
 
 
 def yolo_line(class_id, rect):
@@ -265,6 +273,7 @@ def labels_for_sample(recording_id, label, finalized=False, width=2856, height=1
 
 
 def frame_size_for_source(source: Path):
+    require_pillow()
     try:
         with Image.open(source) as image:
             return image.size
@@ -319,6 +328,7 @@ def extract_frame(ffmpeg, source_video, seconds, target):
 
 
 def paste_asset(image, source, rect):
+    require_pillow()
     width, height = image.size
     x = round(rect[0] * width)
     y = round(rect[1] * height)
@@ -332,6 +342,7 @@ def paste_asset(image, source, rect):
 
 
 def draw_timer_box(image, rect, text, fill):
+    require_pillow()
     draw = ImageDraw.Draw(image, "RGBA")
     box = rect_pixels(image.size, rect)
     radius = max(2, round((box[3] - box[1]) * 0.35))
@@ -345,6 +356,7 @@ def draw_timer_box(image, rect, text, fill):
 
 
 def draw_synthetic_battle_background(rng):
+    require_pillow()
     image = Image.new("RGBA", SYNTHETIC_FRAME_SIZE, (18, 22, 24, 255))
     draw = ImageDraw.Draw(image, "RGBA")
     width, height = SYNTHETIC_FRAME_SIZE
@@ -456,6 +468,7 @@ def build_synthetic_minimap_sample(rng, background_sprite, sprite_sets, variant_
 
 def add_resolution_synthetic_draft_samples(project_root, cv_root, prepared):
     """Stretch reference 20:9 draft keyframes onto 16:9 canvases with profile-correct slot labels."""
+    require_pillow()
     synthetic_dir = cv_root / "runtime" / "resolution-synthetic-draft"
     synthetic_dir.mkdir(parents=True, exist_ok=True)
     target_profile = PROFILE_BY_ID["video_16_9"]
@@ -487,6 +500,7 @@ def add_resolution_synthetic_draft_samples(project_root, cv_root, prepared):
 
 
 def add_asset_augmented_draft_samples(project_root, cv_root, prepared):
+    require_pillow()
     rng = random.Random(20260526)
     asset_root = project_root / "data" / "adb-assets" / "textures"
     lane_sprites = [asset_root / "Atlas_ChooseLane02_add" / "sprites" / f"LaneIcon{index:02d}.png" for index in range(1, 6)]
@@ -517,6 +531,7 @@ def add_asset_augmented_draft_samples(project_root, cv_root, prepared):
 
 
 def add_asset_synthetic_minimap_samples(project_root, cv_root, prepared):
+    require_pillow()
     rng = random.Random(20260527)
     asset_root = project_root / "data" / "adb-assets" / "textures"
     background_sprite = asset_root / "Atlas_minimap_add" / "sprites" / "minimapbg.png"
@@ -555,6 +570,7 @@ def add_asset_synthetic_minimap_samples(project_root, cv_root, prepared):
 
 
 def add_scoreboard_samples(project_root, cv_root, prepared):
+    require_pillow()
     synthetic_dir = cv_root / "runtime" / "scoreboard-augmented"
     synthetic_dir.mkdir(parents=True, exist_ok=True)
     for fixture, split, label in SCOREBOARD_FIXTURES:
@@ -722,6 +738,7 @@ def add_roboflow_training_samples(project_root, cv_root, prepared):
 
 
 def main():
+    require_pillow()
     project_root = Path(__file__).resolve().parents[2]
     manifest_file = project_root / "data" / "recognition-samples" / "screen-state-training-set.json"
     frames_dir = project_root / "data" / "recognition-samples" / "raw" / "screen-state-training"
